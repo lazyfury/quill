@@ -32,6 +32,7 @@ only at the backend/WASM edge and never enters core business logic.
 ## Implementation stages
 
 - Stage 0 — workspace skeleton
+- Stage 1 — core types / math (`Vec2`, `Rect`, `Transform2D`, `Color`, `NodeId`) [done]
 - Stage 1 — core types / math (`Vec2`, `Rect`, `Transform2D`, `Color`, `NodeId`)
 - Stage 2 — `SceneTree` / `Node` / `CanvasItem` / `Node2D`
 - Stage 3 — `DrawList` / render IR

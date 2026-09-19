@@ -40,7 +40,7 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 ## Stages
 
 - [x] Stage 0 — workspace skeleton
-- [ ] Stage 1 — core types / math
+- [x] Stage 1 — core types / math
 - [ ] Stage 2 — SceneTree / Node / CanvasItem
 - [ ] Stage 3 — DrawList / render IR
 - [ ] Stage 4 — RecordingBackend / headless tests
@@ -60,3 +60,11 @@ cargo test --workspace
 Then emit the fixed report format and stop for approval.
 
 ## API priority: API -> test -> implementation -> integration.
+
+## Core types (Stage 1, `draw_core`)
+
+`Vec2`, `Size`, `Edges`, `Rect`, `Transform2D`, `Color`, `NodeId` +
+`NodeIdAllocator`, `Viewport`.
+Conventions: origin top-left, +X right, +Y down, logical pixels, radians,
+positive rotation +X -> +Y. Rect membership is half-open `[min, max)`.
+DPR never enters core: `Viewport::device_size(scale)` is a pure helper.
