@@ -27,13 +27,16 @@ Only steps 4-5 cross the core/backend boundary, and they cross via `DrawList`.
 
 Logical pixels are the core unit. Browser device pixel ratio (DPR) is handled
 only at the backend/WASM edge and never enters core business logic.
-(Detailed conventions are finalized in Stage 1.)
+
+Finalized conventions (Stage 1): origin top-left, `+X` right, `+Y` down,
+rotations in radians (positive from `+X` toward `+Y`), rectangles axis-aligned
+with half-open membership `[min, max)`. `Viewport` stores logical size only;
+`Viewport::device_size(scale)` derives device pixels without storing DPR.
 
 ## Implementation stages
 
 - Stage 0 — workspace skeleton
 - Stage 1 — core types / math (`Vec2`, `Rect`, `Transform2D`, `Color`, `NodeId`) [done]
-- Stage 1 — core types / math (`Vec2`, `Rect`, `Transform2D`, `Color`, `NodeId`)
 - Stage 2 — `SceneTree` / `Node` / `CanvasItem` / `Node2D`
 - Stage 3 — `DrawList` / render IR
 - Stage 4 — `RecordingBackend` / headless pipeline
