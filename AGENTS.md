@@ -66,6 +66,17 @@ wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, demo_app,
                  draw_backend_wgpu, draw_profile, draw_debug_ui, winit
 ```
 
+Planned (Stage 25, see `docs/godot-migration.md`):
+
+```
+draw_game -> draw_scene (+ optional draw_ui)      # Phase 6
+quill     -> feature-gated re-exports of the above # Phase 9 facade
+```
+
+The core crates stay fine-grained on purpose; applications use the `quill`
+facade with opt-in features (`ui`, `game`, `wgpu`, `canvas`, `wasm`, `profile`,
+`debug`, `recording`, `bench`). A UI-only app must not compile `draw_game`.
+
 `draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
 IR (no backend/browser deps), and the Paint step (Scene -> DrawList) lives in the
 scene. This does not weaken backend replaceability.

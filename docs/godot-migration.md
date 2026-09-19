@@ -159,11 +159,27 @@ Additive, outside the frozen core where possible.
 - Update `architecture.md`, `backend.md`, `components.md`, `plan.md`,
   `AGENTS.md`.
 
+### Phase 9 — packaging facade (`quill`)
+
+Status: **planned, execute later** (can start once Phase 1 lands; finalized once
+`draw_game` exists in Phase 6).
+
+Purpose: keep the fine-grained core crates (they enforce the dependency rules)
+but give applications one dependency with opt-in features, so a UI app never
+compiles game logic and a game never compiles UI unless it asks.
+
+- Add a facade crate `quill` that only re-exports; optional deps forwarded per
+  feature (see the Packaging section).
+- UI-only apps depend on `quill` with `ui` + one backend; they never enable
+  `game` and therefore never build `draw_game`.
+- Fine-grained crates stay separate; the facade does not merge them.
+
 ## Dependency order
 
 ```
 Phase1 -> Phase2 -> Phase3 -> Phase4 -> Phase5 -> Phase6 -> Phase7
                                               \-> Phase8 (continuous)
+Phase9 (facade) starts after Phase1, finalizes after Phase6
 ```
 
 MVP = Phase 1 -> 2 -> 3 -> 4 (world + camera + CanvasLayer UI running).
@@ -180,6 +196,72 @@ Phase 5-6 are the second batch.
    `Rc<RefCell<SceneTree>>`.
 3. **Migration strategy.** Keep a `Ui::new()` compatibility layer (owns a tree)
    while adding the borrowed API; migrate demos afterwards.
+4. **Packaging.** Core crates stay fine-grained (they enforce the boundaries);
+   applications use a single facade crate `quill` with opt-in features.
+   Game logic lives only in `draw_game`, never in the core, so a UI-only app
+   cannot compile it. See the Packaging section. Implementation is deferred to
+   Phase 9.
+
+## Packaging — facade crate `quill`
+
+The core is intentionally many small crates: the boundaries are what enforce
+AGENTS rule 1 (no backend/DOM in the core) and the dependency direction. Do not
+merge them. Instead, add a **facade** so a new project sees one dependency.
+
+Dependency layering:
+
+```
+draw_core ──┬─ draw_render ──┬─ draw_scene ── draw_ui ──┬─ draw_components
+            │                │                          └─ draw_debug_ui
+            ├─ draw_theme ───┘
+            ├─ draw_profile
+            └─ draw_backend_{canvas,recording,wgpu}
+
+draw_game -> draw_scene (+ optional draw_ui)   [Phase 6]
+quill     -> re-exports, feature-gated                    [Phase 9]
+```
+
+Minimum for a **UI-only app**: `draw_core`, `draw_render`, `draw_scene`,
+`draw_theme`, `draw_ui`, `draw_components` + one backend. It never pulls
+`draw_game`, `draw_profile`, `draw_debug_ui` or the benches unless asked.
+
+The `quill` facade feature matrix:
+
+| feature | forwards to | notes |
+|---|---|---|
+| `ui` | `draw_core`, `draw_render`, `draw_scene`, `draw_theme`, `draw_ui`, `draw_components` | base for any app |
+| `game` | `draw_game` | 2D world / sprites / collision; **does not imply `ui`** |
+| `wgpu` | `draw_backend_wgpu` | native rendering |
+| `canvas` | `draw_backend_canvas` | web rendering |
+| `wasm` | `draw_wasm` | browser glue (implies `canvas`) |
+| `profile` | `draw_profile` | optional |
+| `debug` | `draw_debug_ui` | optional |
+| `recording` | `draw_backend_recording` | tests |
+| `bench` | `draw_bench`, `draw_bench_suite` | benchmarks |
+
+Applications enable only what they need:
+
+```toml
+# desktop UI app
+quill = { path = ".../quill", default-features = false, features = ["ui", "wgpu"] }
+
+# web UI app
+quill = { path = ".../quill", default-features = false, features = ["ui", "canvas", "wasm"] }
+
+# 2D game (add "ui" only if it wants a HUD)
+quill = { path = ".../quill", default-features = false, features = ["game", "wgpu"] }
+
+# headless core (tests / tooling)
+quill = { path = ".../quill", default-features = false, features = ["ui", "recording"] }
+```
+
+Rules:
+
+- The facade is backend-neutral by default; never force a backend.
+- Optional dependencies use `optional = true` + `feature = ["dep:..."]` so
+  disabled crates are not compiled at all.
+- The facade only re-exports; no logic lives there.
+- `game` and `ui` stay independently selectable.
 
 ## Open questions for Godot source review
 
