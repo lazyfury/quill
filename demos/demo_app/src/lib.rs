@@ -618,6 +618,12 @@ impl DemoApp {
     pub fn control_count(&self) -> usize {
         self.ui.control_count()
     }
+
+    /// Whether the pointer is over anything clickable (kit component or a
+    /// core button). Hosts use this for cursor feedback.
+    pub fn pointer_over_clickable(&self) -> bool {
+        self.kit.hovered().is_some() || self.ui.hovered_is_button()
+    }
 }
 
 /// Adds a compact rounded-square icon/thumbnail placeholder.
@@ -803,6 +809,22 @@ mod tests {
             position,
             button: PointerButton::Left,
         });
+    }
+
+    #[test]
+    fn pointer_over_clickable_tracks_hover() {
+        let mut app = laid_out(1100.0, 720.0);
+        assert!(!app.pointer_over_clickable());
+
+        let center = app.button_center().expect("button rect");
+        app.event(&InputEvent::PointerMove { position: center });
+        assert!(app.pointer_over_clickable());
+
+        // A blank spot in the detail background is not clickable.
+        app.event(&InputEvent::PointerMove {
+            position: Vec2::new(1000.0, 300.0),
+        });
+        assert!(!app.pointer_over_clickable());
     }
 
     #[test]

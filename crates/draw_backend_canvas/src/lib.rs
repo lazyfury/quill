@@ -14,7 +14,7 @@ pub const CRATE: &str = "draw_backend_canvas";
 mod canvas;
 
 #[cfg(target_arch = "wasm32")]
-pub use canvas::{Canvas2dBackend, CanvasError};
+pub use canvas::{font_spec, Canvas2dBackend, CanvasError};
 
 #[cfg(test)]
 mod tests {

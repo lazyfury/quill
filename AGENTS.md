@@ -50,7 +50,7 @@ draw_render   -> draw_core
 draw_profile  -> draw_core, draw_render
 draw_debug_ui -> draw_core, draw_render, draw_ui, draw_profile
 draw_backend_* -> draw_render, draw_core
-draw_wasm     -> draw_render, draw_backend_canvas, draw_core
+draw_wasm     -> draw_render, draw_backend_canvas, draw_core, draw_ui
 draw_bench    (std only, no draw_* deps)
 draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui
 demo_app      -> draw_core, draw_render, draw_scene, draw_ui   (no backend)
@@ -63,7 +63,8 @@ wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, demo_app,
 IR (no backend/browser deps), and the Paint step (Scene -> DrawList) lives in the
 scene. This does not weaken backend replaceability.
 
-Browser APIs only in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo`.
+Browser APIs only in `draw_backend_canvas`, `draw_wasm`, and the WASM demos
+(`demos/web_demo`, `demos/component_demo`).
 `winit` only in `demos/wgpu_demo`. `wgpu` only in `draw_backend_wgpu` (plus its
 tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`) and system-font
 discovery live only in `draw_backend_wgpu`; the core stays text-free.
@@ -113,9 +114,9 @@ discovery live only in `draw_backend_wgpu`; the core stays text-free.
       macOS-style notes app (icons/images are monochrome placeholder squares).
 
 Deferred by request (do not start without an explicit ask):
-- Stage 21 — a Canvas/WASM text measurer (`measureText`) and complex-script
-  shaping (ligatures, bidi). The Canvas demo keeps the proportional default
-  estimate; only the wgpu backend measures with the real font.
+- Stage 21 — complex-script shaping (ligatures, bidi). The Canvas/WASM demos now
+  inject a real `measureText`-based `draw_wasm::CanvasTextMeasurer`; only wgpu
+  does full shaping.
 
 ## Per-stage gate (must run)
 

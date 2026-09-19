@@ -10,11 +10,14 @@
 
 #[cfg(target_arch = "wasm32")]
 mod demo {
+    use std::rc::Rc;
+
     use wasm_bindgen::prelude::*;
+    use web_sys::CanvasRenderingContext2d;
 
     use draw_core::{EventResult, InputEvent, Viewport};
     use draw_render::PaintContext;
-    use draw_wasm::App;
+    use draw_wasm::{App, CanvasTextMeasurer};
 
     use demo_app::DemoApp;
 
@@ -45,6 +48,16 @@ mod demo {
     }
 
     impl App for WebDemo {
+        fn attach_context(&mut self, ctx: &CanvasRenderingContext2d) {
+            self.0
+                .ui_mut()
+                .set_text_measurer(Rc::new(CanvasTextMeasurer::new(ctx.clone())));
+        }
+
+        fn pointer_cursor(&self) -> bool {
+            self.0.pointer_over_clickable()
+        }
+
         fn update(&mut self, viewport: Viewport) {
             self.0.update(viewport, 0.016);
             self.0.layout(viewport);

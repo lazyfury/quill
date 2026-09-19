@@ -16,6 +16,21 @@ use draw_render::{PaintContext, RenderBackend};
 /// The runner handles canvas sizing, DPR, the `requestAnimationFrame` loop and
 /// DOM input translation.
 pub trait App {
+    /// Called once with the canvas 2D context before the first frame.
+    ///
+    /// Override this to install a real text measurer (see
+    /// [`CanvasTextMeasurer`](crate::CanvasTextMeasurer)) so layout baselines
+    /// match what the backend draws.
+    fn attach_context(&mut self, _ctx: &CanvasRenderingContext2d) {}
+
+    /// Whether the pointer is currently over a clickable control.
+    ///
+    /// While this is `true` the runner sets the canvas CSS cursor to
+    /// `pointer`; otherwise it resets to `default`. Evaluated every frame.
+    fn pointer_cursor(&self) -> bool {
+        false
+    }
+
     fn update(&mut self, viewport: Viewport);
     fn paint(&mut self, ctx: &mut PaintContext);
     fn event(&mut self, _event: &InputEvent) -> EventResult {
@@ -45,6 +60,8 @@ where
 
     attach_pointer_listeners(&canvas, &app);
     attach_keyboard_listeners(&window, &app);
+
+    app.borrow_mut().attach_context(&ctx);
 
     let mut backend = Canvas2dBackend::new(ctx);
     // Render one frame synchronously so the first pixels (and any probe data)
@@ -86,6 +103,8 @@ fn render_frame<A: App>(
     let scale_factor = device_pixel_ratio(window) as f32;
     backend.set_scale_factor(scale_factor);
 
+    apply_cursor(app, canvas);
+
     let viewport = Viewport::new(logical_size(canvas, window));
     let mut app = app.borrow_mut();
     app.update(viewport);
@@ -98,6 +117,15 @@ fn render_frame<A: App>(
     let _ = backend.begin_frame(viewport);
     let _ = backend.submit(&list);
     let _ = backend.end_frame();
+}
+
+fn apply_cursor<A: App>(app: &Rc<RefCell<A>>, canvas: &HtmlCanvasElement) {
+    let cursor = if app.borrow().pointer_cursor() {
+        "pointer"
+    } else {
+        "default"
+    };
+    let _ = canvas.style().set_property("cursor", cursor);
 }
 
 fn attach_pointer_listeners<A: App + 'static>(canvas: &HtmlCanvasElement, app: &Rc<RefCell<A>>) {

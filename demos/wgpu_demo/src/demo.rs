@@ -93,4 +93,9 @@ impl Demo {
     pub fn control_count(&self) -> usize {
         self.app.control_count()
     }
+
+    /// Whether the pointer is over anything clickable (drives the cursor icon).
+    pub fn pointer_over_clickable(&self) -> bool {
+        self.app.pointer_over_clickable()
+    }
 }

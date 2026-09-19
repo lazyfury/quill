@@ -13,7 +13,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::cli::Options;
 use crate::demo::Demo;
@@ -219,7 +219,21 @@ impl App {
         self.demo.event(event);
     }
 
+    fn apply_cursor(&self) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        let cursor = if self.demo.pointer_over_clickable() {
+            CursorIcon::Pointer
+        } else {
+            CursorIcon::Default
+        };
+        window.set_cursor(cursor);
+    }
+
     fn render(&mut self) {
+        self.apply_cursor();
+
         let (Some(surface), Some(backend), Some(config)) = (
             self.surface.as_ref(),
             self.backend.as_mut(),

@@ -121,6 +121,24 @@ mod tests {
     }
 
     #[test]
+    fn hovered_is_button_only_for_buttons() {
+        let (mut ui, _panel, label, button) = build();
+
+        ui.handle_input(&InputEvent::PointerMove {
+            position: rect(&ui, label).center(),
+        });
+        assert!(!ui.hovered_is_button());
+
+        ui.handle_input(&InputEvent::PointerMove {
+            position: rect(&ui, button).center(),
+        });
+        assert!(ui.hovered_is_button());
+
+        ui.handle_input(&InputEvent::PointerLeave);
+        assert!(!ui.hovered_is_button());
+    }
+
+    #[test]
     fn mouse_filter_ignore_is_transparent() {
         let (mut ui, _panel, label, _button) = build();
         let center = rect(&ui, label).center();
@@ -264,6 +282,68 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn painted_text_baselines(ui: &Ui) -> Vec<(f32, f32)> {
+        let mut ctx = draw_render::PaintContext::new();
+        ui.paint(&mut ctx);
+        let list = ctx.into_draw_list();
+        list.commands()
+            .iter()
+            .filter_map(|command| match command {
+                draw_render::DrawCommand::DrawText {
+                    position,
+                    font_size,
+                    ..
+                } => Some((position.y, *font_size)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Measurer with realistic (non-`0.8em`) ascent, as a real backend font has.
+    struct RealMetrics;
+
+    impl TextMeasurer for RealMetrics {
+        fn advance(&self, _ch: char, font_size: f32) -> f32 {
+            font_size * 0.5
+        }
+
+        fn line_height(&self, font_size: f32) -> f32 {
+            font_size * 1.2
+        }
+
+        fn ascent(&self, font_size: f32) -> f32 {
+            font_size * 0.9
+        }
+    }
+
+    #[test]
+    fn label_baseline_follows_measurer_ascent() {
+        // A host that injects real font metrics must get baselines computed from
+        // them; a hard-coded ascent leaves text vertically off-centre.
+        let mut ui = Ui::new();
+        ui.set_text_measurer(Rc::new(RealMetrics));
+        let row = ui.add_flex(
+            ui.root(),
+            FlexStyle::row()
+                .align(Align::Center)
+                .gap(0.0)
+                .padding(draw_core::Edges::ZERO),
+        );
+        ui.set_min_size(row, Size::new(0.0, 30.0));
+        let label = ui.add_label(row, "Ag");
+        ui.layout(Viewport::new(Size::new(200.0, 30.0)));
+
+        let (baseline, font_size) = painted_text_baselines(&ui)[0];
+        let ascent = RealMetrics.ascent(font_size);
+        let descent = RealMetrics.line_height(font_size) - ascent;
+
+        assert!((baseline - (rect(&ui, label).top() + ascent)).abs() < 1e-3);
+        // The glyph box centre (ascent..descent around the baseline) coincides
+        // with the label box centre, so a centered flex row stays centered.
+        let visual_center = baseline - (ascent - descent) / 2.0;
+        assert!((visual_center - rect(&ui, label).center().y).abs() < 1e-3);
     }
 
     #[test]

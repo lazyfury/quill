@@ -11,9 +11,13 @@ pub const CRATE: &str = "draw_wasm";
 
 #[cfg(target_arch = "wasm32")]
 mod runner;
+#[cfg(target_arch = "wasm32")]
+mod text;
 
 #[cfg(target_arch = "wasm32")]
 pub use runner::{start, App};
+#[cfg(target_arch = "wasm32")]
+pub use text::CanvasTextMeasurer;
 
 #[cfg(test)]
 mod tests {

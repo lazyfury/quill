@@ -39,6 +39,15 @@ begin_frame(Viewport) -> submit(&DrawList) (0..n) -> end_frame()
 `TextureId` is resolved through `Canvas2dBackend::register_image`. No backend
 object ever appears in `draw_core` / `draw_scene` / `draw_ui` / `draw_render`.
 
+`DrawText` positions are baselines. `draw_backend_canvas::font_spec` is the
+single font spec the backend draws with; `draw_wasm::CanvasTextMeasurer` measures
+with the same spec (`measureText`) and is injected via `Ui::set_text_measurer`,
+so layout ascents and painted baselines agree.
+
+The runner also reflects hover feedback: `App::pointer_cursor` (usually
+`Ui::hovered_is_button` or `Kit::hovered`) drives the canvas CSS `cursor`
+property (`pointer` / `default`).
+
 ## Recording (`draw_backend_recording`)
 
 Records each frame's viewport and concatenated commands. Used for the headless

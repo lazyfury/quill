@@ -18,4 +18,4 @@ draw_wasm.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement", "CanvasRenderingContext2d"] }

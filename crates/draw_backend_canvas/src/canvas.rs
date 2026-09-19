@@ -6,6 +6,14 @@ use web_sys::{CanvasRenderingContext2d, HtmlImageElement};
 use draw_core::{Color, Transform2D, Viewport};
 use draw_render::{CornerRadii, DrawCommand, DrawList, Paint, RenderBackend, TextAlign, TextureId};
 
+/// The Canvas font spec used for `DrawText` at `font_size` logical pixels.
+///
+/// A host-side `TextMeasurer` must measure with this exact spec so layout
+/// baselines match what the backend draws.
+pub fn font_spec(font_size: f32) -> String {
+    format!("{font_size}px sans-serif")
+}
+
 /// Errors from the Canvas 2D backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CanvasError {
@@ -213,7 +221,7 @@ impl Canvas2dBackend {
                 paint,
             } => {
                 self.set_fill(paint);
-                self.ctx.set_font(&format!("{font_size}px sans-serif"));
+                self.ctx.set_font(&font_spec(*font_size));
                 self.ctx.set_text_align(match align {
                     TextAlign::Left => "left",
                     TextAlign::Center => "center",

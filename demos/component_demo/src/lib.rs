@@ -20,12 +20,13 @@ mod demo {
     use std::rc::Rc;
 
     use wasm_bindgen::prelude::*;
+    use web_sys::CanvasRenderingContext2d;
 
     use draw_core::{Color, Edges, NodeId, Rect, Size, Vec2, Viewport};
     use draw_render::{Paint, PaintContext, TextAlign};
     use draw_scene::{SceneTree, Visual};
     use draw_ui::{Button, Label, Panel, Ui, VBox};
-    use draw_wasm::App;
+    use draw_wasm::{App, CanvasTextMeasurer};
 
     const BACKGROUND: Color = Color::new(0.09, 0.10, 0.13, 1.0);
     const ACCENT: Color = Color::new(0.30, 0.62, 0.98, 1.0);
@@ -129,6 +130,15 @@ mod demo {
     }
 
     impl App for DemoApp {
+        fn attach_context(&mut self, ctx: &CanvasRenderingContext2d) {
+            self.ui
+                .set_text_measurer(Rc::new(CanvasTextMeasurer::new(ctx.clone())));
+        }
+
+        fn pointer_cursor(&self) -> bool {
+            self.ui.hovered_is_button()
+        }
+
         fn update(&mut self, viewport: Viewport) {
             self.viewport = viewport;
             self.time += 0.016;

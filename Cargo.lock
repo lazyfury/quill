@@ -495,6 +495,7 @@ dependencies = [
  "draw_backend_canvas",
  "draw_core",
  "draw_render",
+ "draw_ui",
  "js-sys",
  "wasm-bindgen",
  "web-sys",

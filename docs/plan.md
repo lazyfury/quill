@@ -69,6 +69,16 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Done
 
+- Button cursor feedback: `Ui::hovered_is_button` / `Kit::hovered` feed
+  `App::pointer_cursor`, so the Canvas runner sets a `pointer` CSS cursor while
+  the pointer is over a clickable control (and `default` otherwise);
+  `demo_app::DemoApp::pointer_over_clickable` combines both, and `wgpu_demo`
+  maps it to `CursorIcon::Pointer`.
+- Canvas/WASM text is vertically centered: `draw_wasm::CanvasTextMeasurer`
+  measures with the same `measureText` font the Canvas backend draws with
+  (shared `draw_backend_canvas::font_spec`), so layout baselines use the real
+  ascent instead of the default `0.8em` guess. The runner hands the context to
+  the app via `App::attach_context`, and the WASM demos inject the measurer.
 - Exact-fit text no longer wraps from float rounding (the wrap loop sums
   advances in a different order than the natural width); this fixes single-line
   UI text like the "All Notes" list header wrapping at its space.

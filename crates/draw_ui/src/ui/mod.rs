@@ -230,6 +230,15 @@ impl Ui {
         self.hovered
     }
 
+    /// Whether the pointer is currently over a clickable button.
+    ///
+    /// Hosts use this to give cursor feedback (e.g. the Canvas runner sets a
+    /// `pointer` CSS cursor).
+    pub fn hovered_is_button(&self) -> bool {
+        self.hovered
+            .is_some_and(|id| self.widgets.get(&id).is_some_and(Widget::is_button))
+    }
+
     pub fn focused(&self) -> Option<NodeId> {
         self.focused
     }
