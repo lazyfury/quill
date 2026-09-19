@@ -65,7 +65,8 @@ Components compose into one node tree. Attach a component with
 constructors, never stored on the tree.
 
 ```rust
-use draw_widgets::{Button, Component, Flex, Label, Panel, VBox};
+use draw_components::base::Button;
+use draw_components::{Component, Flex, Label, Panel, VBox};
 use draw_core::{Size, ViewportSize};
 use draw_scene::SceneTree;
 use draw_theme::Theme;

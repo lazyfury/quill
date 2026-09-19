@@ -30,12 +30,12 @@ mod placement;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::base::{Component, Flex, Label};
 use draw_core::{Color, Edges, EventResult, InputEvent, Key, NodeId, Size, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
 use draw_theme::{radius, space, SurfaceLevel, TextSize, Theme, Tone};
 use draw_ui::{Align, Justify, MouseFilter};
-use draw_widgets::{Component, Flex, Label};
 
 use crate::Button;
 use draw_ui::SurfaceStyle;
@@ -438,8 +438,8 @@ impl Overlays {
                 MARGIN,
             );
             if draw_ui::control(&self.tree, root).map(|control| control.rect) != Some(rect) {
-                draw_widgets::update_control(&mut self.tree, root, |d| d.anchors = Edges::ZERO);
-                draw_widgets::update_control(&mut self.tree, root, |d| {
+                crate::base::update_control(&mut self.tree, root, |d| d.anchors = Edges::ZERO);
+                crate::base::update_control(&mut self.tree, root, |d| {
                     d.offsets = Edges::new(rect.left(), rect.top(), rect.right(), rect.bottom())
                 });
                 moved = true;

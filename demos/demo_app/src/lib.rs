@@ -1,5 +1,5 @@
 //! Shared, backend-neutral demo application: a three-column, macOS-style notes
-//! app built from `draw_components` components on the `draw_widgets` runtime.
+//! app built from `draw_components` components on the `draw_components` runtime.
 //!
 //! Layout is the classic macOS split view:
 //!
@@ -30,6 +30,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use draw_components::{Badge, Button, Checkbox, Divider, Overlays, ResizeHandle, Switch, Text};
+use draw_components::{Column, Component, Flex, Label, Panel, Row};
 use draw_core::{
     Color, Cursor, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize,
 };
@@ -40,7 +41,6 @@ use draw_ui::{
     fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Justify, MouseFilter, SizeBasis,
     SurfaceStyle, TextMeasurer, TextOptions,
 };
-use draw_widgets::{Column, Component, Flex, Label, Panel, Row};
 
 /// Sidebar width in logical pixels.
 pub const SIDEBAR_WIDTH: f32 = 220.0;
@@ -274,7 +274,7 @@ impl DemoApp {
             return;
         }
         self.titlebar_inset = inset;
-        if let Some(control) = draw_widgets::control_mut(&mut self.tree, self.sidebar) {
+        if let Some(control) = draw_components::control_mut(&mut self.tree, self.sidebar) {
             if let draw_ui::Widget::Flex(flex) = &mut control.widget {
                 flex.padding.top = SIDEBAR_PADDING_TOP + inset;
             }
@@ -385,10 +385,10 @@ impl DemoApp {
 
         let index = self.selected.get().min(NOTES.len() - 1);
         let note = &NOTES[index];
-        draw_widgets::set_text(&mut self.tree, self.detail_title, note.title);
-        draw_widgets::set_text(&mut self.tree, self.detail_body, note.body);
-        draw_widgets::set_text(&mut self.tree, self.detail_tag, note.tag);
-        draw_widgets::set_text(
+        draw_components::set_text(&mut self.tree, self.detail_title, note.title);
+        draw_components::set_text(&mut self.tree, self.detail_body, note.body);
+        draw_components::set_text(&mut self.tree, self.detail_tag, note.tag);
+        draw_components::set_text(
             &mut self.tree,
             self.detail_meta,
             format!("Edited {} · {}", note.modified, note.tag),

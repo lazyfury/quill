@@ -11,7 +11,6 @@ draw_core.workspace = true
 draw_render.workspace = true
 draw_scene.workspace = true
 draw_ui.workspace = true
-draw_widgets.workspace = true
 draw_theme.workspace = true
 draw_components.workspace = true
 

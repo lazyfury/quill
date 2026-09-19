@@ -5,7 +5,7 @@
 //! extension slot ([`Control`]); the text measurer, GUI interaction state and
 //! layout cache live in the root node's [`UiRootState`]. The theme is not
 //! stored here: it is a value passed to component constructors. Application
-//! concerns (construction, backend submission) live in `draw_widgets`.
+//! concerns (construction, backend submission) live in `draw_components`.
 //!
 //! The logic is split so each file stays small:
 //!

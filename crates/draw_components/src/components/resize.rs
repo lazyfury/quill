@@ -3,10 +3,10 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::base::{update_control, Component, Spec};
 use draw_core::{Color, Cursor, Edges, NodeId, Size, Vec2};
 use draw_theme::Theme;
 use draw_ui::{DragPhase, MouseFilter, SizeBasis, Widget};
-use draw_widgets::{update_control, Component, Spec};
 
 /// A divider that resizes the pane before it while dragged.
 ///
@@ -185,4 +185,4 @@ impl Component for ResizeHandle {
     }
 }
 
-draw_widgets::impl_scene_child!(ResizeHandle);
+crate::impl_scene_child!(ResizeHandle);

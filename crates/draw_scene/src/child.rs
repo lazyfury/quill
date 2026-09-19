@@ -1,7 +1,7 @@
 //! Attaching front-end values to the tree as children.
 //!
 //! `draw_scene` knows only the tree and node ids, so [`SceneChild`] stays
-//! backend- and UI-neutral; `draw_widgets` implements it for every UI component.
+//! backend- and UI-neutral; `draw_components` implements it for every UI component.
 //! Composition is expressed with [`SceneTree::add_child`].
 
 use draw_core::NodeId;

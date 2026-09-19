@@ -10,18 +10,19 @@ functions over `&SceneTree` / `&mut SceneTree` — there is no `Ui` object. The
 theme is a plain value passed to component constructors; it is never stored on
 the tree.
 
-`draw_widgets` owns the host-facing `Component` trait and the layout primitives
-(`Flex`, `Panel`, `Label`, `Button`, `Grid`, `VBox`, `HBox`, `Column`, `Row`).
-`draw_components` adds the themed library (`Text`, `Card`, `Button`, `Checkbox`,
-`Switch`, `ResizeHandle`, …). Input routing lives in `draw_ui` alongside layout
-and paint.
+`draw_components` is the widget API. Its `base` module owns the host-facing
+`Component` trait and the unstyled primitives (`Flex`, `Panel`, `Label`, `Grid`,
+`VBox`, `HBox`, `Column`, `Row`, plus the low-level `base::Button`); the crate
+root adds the themed library (`Text`, `Card`, `Button`, `Checkbox`, `Switch`,
+`ResizeHandle`, …). Input routing lives in `draw_ui` alongside layout and paint.
 
 ## Create & compose components
 
 Attach primitives with `add_child`; compose a subtree with `.child(..)`:
 
 ```rust
-use draw_widgets::{Button, Component, Flex, Label, Panel, VBox};
+use draw_components::base::Button;
+use draw_components::{Component, Flex, Label, Panel, VBox};
 use draw_scene::SceneTree;
 
 let mut tree = SceneTree::new();
@@ -95,7 +96,7 @@ tree.add_child(
 `Flex`:
 
 ```rust
-use draw_widgets::Flex;
+use draw_components::Flex;
 use draw_ui::{Align, Justify};
 
 let row = tree.add_child(
@@ -138,7 +139,7 @@ one child.
 ### Grid
 
 ```rust
-use draw_widgets::Grid;
+use draw_components::Grid;
 use draw_ui::{Align, AlignContent, GridPlacement, Track};
 
 let grid = tree.add_child(
@@ -152,7 +153,7 @@ let grid = tree.add_child(
 );
 
 // explicit cell placement via the released context id
-draw_widgets::update_control(&mut tree, cell, |data| {
+draw_components::update_control(&mut tree, cell, |data| {
     data.layout.grid = GridPlacement::new(1, 0).column_span(2);
 });
 ```
@@ -222,8 +223,8 @@ let result: EventResult = draw_ui::handle_input(
     },
 );
 
-draw_widgets::set_on_click(&mut tree, button, || { /* ... */ }); // or Button::on_click builder
-let count = draw_widgets::click_count(&tree, button);
+draw_components::set_on_click(&mut tree, button, || { /* ... */ }); // or Button::on_click builder
+let count = draw_components::click_count(&tree, button);
 ```
 
 Hit testing returns the topmost control under a point, honoring `MouseFilter`
@@ -233,7 +234,7 @@ focused button. MVP does target dispatch; capture/bubble is a future extension.
 ### Drag / resize
 
 A node can own a pointer drag with `Component::on_drag` (or
-`draw_widgets::set_on_drag`). While held, the node captures the pointer: every
+`draw_components::set_on_drag`). While held, the node captures the pointer: every
 `PointerMove` is routed to it (even outside its rect) as a delta in logical
 pixels, and `PointerUp` releases it. The callback receives a `DragPhase`
 (`Start`/`Move`/`End`) plus the delta, so a component can react to the start and
@@ -284,11 +285,11 @@ let list = ctx.into_draw_list();
 
 ## Extend with a custom component
 
-Implement `draw_widgets::Component` for your own builder and attach it with
+Implement `draw_components::Component` for your own builder and attach it with
 `add_child`:
 
 ```rust
-use draw_widgets::{Component, Flex, Spec};
+use draw_components::{Component, Flex, Spec};
 use draw_core::{Color, NodeId};
 use draw_scene::SceneTree;
 use draw_ui::Widget;
@@ -318,7 +319,7 @@ impl Component for Badge {
     }
 }
 
-draw_widgets::impl_scene_child!(Badge);
+draw_components::impl_scene_child!(Badge);
 ```
 
 The default `build` creates the control, installs `widget()`, and applies the

@@ -11,7 +11,7 @@
 //! Control data ([`ControlData`], [`Widget`], [`NodeDecor`]) lives on the
 //! [`SceneTree`] node's extension slot, and the text measurer / GUI interaction
 //! state / layout cache live on the root node. The theme is a value passed to
-//! component constructors. Building components lives in `draw_widgets`;
+//! component constructors. Building components lives in `draw_components`;
 //! submitting the resulting `DrawList` to a backend is the host's job.
 //!
 //! ```ignore
@@ -91,7 +91,7 @@ pub fn last_arranged_nodes(tree: &SceneTree) -> usize {
 
 /// Marks `id` (and its ancestors) as needing layout.
 ///
-/// The construction layer (`draw_widgets`) calls this after mutating a control's
+/// The construction layer (`draw_components`) calls this after mutating a control's
 /// layout inputs directly through [`SceneTree::data_mut`].
 pub fn mark_dirty(tree: &mut SceneTree, id: NodeId) {
     Ui.mark_dirty(tree, id)

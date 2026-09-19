@@ -1,9 +1,9 @@
 //! Text components.
 
+use crate::base::{Component, Spec};
 use draw_core::Color;
 use draw_theme::{TextSize, Theme, Tone};
 use draw_ui::{TextOptions, Widget};
-use draw_widgets::{Component, Spec};
 
 /// A single block of text with a semantic size and color.
 ///
@@ -129,4 +129,4 @@ impl Component for Text {
     }
 }
 
-draw_widgets::impl_scene_child!(Text);
+crate::impl_scene_child!(Text);

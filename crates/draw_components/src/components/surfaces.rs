@@ -1,10 +1,10 @@
 //! Structural, presentational components.
 
+use crate::base::{Component, Flex, Label, Spec};
 use draw_core::{Color, Edges, Size, Vec2};
 use draw_render::PaintContext;
 use draw_theme::{radius, space, SurfaceTone, TextSize, Theme, Tone};
 use draw_ui::{Align, Justify, SurfaceStyle, TextOptions, Widget};
-use draw_widgets::{Component, Flex, Label, Spec};
 
 use crate::Text;
 
@@ -572,4 +572,4 @@ impl Component for EmptyState {
     }
 }
 
-draw_widgets::impl_scene_child!(Card, Divider, Badge, CodeBlock, Terminal, EmptyState);
+crate::impl_scene_child!(Card, Divider, Badge, CodeBlock, Terminal, EmptyState);

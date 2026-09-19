@@ -59,16 +59,16 @@ audited by `draw_profile`'s inspector, or it is not "done".
 - Font weights are not modeled (no weight axis yet) — add `FontWeight` tokens
   when the backends can render them.
 
-## Component layer (`draw_widgets` / `draw_components`)
+## Component layer (`draw_components`)
 
 Components are the public construction API: attach with `SceneTree::add_child`,
 compose with `.child(..)`, and mutate nodes with `Component` modifiers
-(`grow`, `min_size`, `background`, `foreground`, `on_click`, …). `draw_widgets` owns
-`Component` + `Spec` and the layout primitives; `draw_components` owns the
+(`grow`, `min_size`, `background`, `foreground`, `on_click`, …). `draw_components`
+owns `Component` + `Spec`, the base primitives (`draw_components::base`) and the
 themed library. Remaining polish, in priority order:
 
 1. **Reactive text bindings** — add `Text::dynamic(|| …)` (a text source on
-   labels) so `update()` stops calling `draw_widgets::set_text`; the runtime
+   labels) so `update()` stops calling `draw_components::set_text`; the runtime
    re-evaluates the closure at layout/paint.
 2. **Explicit rect anchors** — allow a popover/menu to anchor to a raw `Rect` or
    pointer position (context menus), not only a laid-out `NodeId`.
@@ -102,7 +102,7 @@ The layout cache, GUI interaction state and text measurer live on the root; the
 ## Core hardening (design-review follow-ups)
 
 Findings from a design review of `draw_core` / `draw_render` / `draw_scene` /
-`draw_ui` / `draw_widgets`. All fixes keep the core backend-neutral; land them in
+`draw_ui` / `draw_components`. All fixes keep the core backend-neutral; land them in
 priority order and add native tests.
 
 | # | Item | Severity | Where |
@@ -134,14 +134,14 @@ priority order and add native tests.
 
 ## Done
 
-- Split the old `draw_app` crate into a clean consumer-facing API: the
-  **construction layer** is now `draw_widgets` (`Component`/`Spec`/`Flex`/
-  `Panel`/`Label`/`Button`/`Grid`, `impl_scene_child!`, mutation helpers), and
-  **input routing** moved into `draw_ui` (`hit_test` / `handle_input` /
-  `route_input` / `hovered` / `hovered_cursor` / `focused` / `is_interactive`),
-  next to the `ControlData` it operates on. `draw_widgets` dropped the unused
-  `draw_theme` dependency; hosts now build with `draw_widgets` and route input
-  through `draw_ui`.
+- Split the old `draw_app` crate: **input routing** moved into `draw_ui`
+  (`hit_test` / `handle_input` / `route_input` / `hovered` / `hovered_cursor` /
+  `focused` / `is_interactive`), next to the `ControlData` it operates on, and the
+  **construction layer** folded into `draw_components::base`
+  (`Component`/`Spec`/`Flex`/`Panel`/`Label`/`base::Button`/`Grid`,
+  `impl_scene_child!`, mutation helpers). Result: `draw_ui` (layout/paint/input
+  engine) + `draw_components` (base + themed widgets) — no separate
+  `draw_widgets` crate.
 - Removed the unused `draw_app::App` runtime: it duplicated the host's frame
   loop and its `render` never painted world (`Node2D`) visuals. Frame submission
   now lives with the host (`draw_ui::layout`/`paint` + `draw_scene` paint ->
@@ -153,13 +153,13 @@ priority order and add native tests.
   wgpu (thin quad) and recording. `Divider`/column separators now draw a real
   line instead of a filled rect; the profiler audits line geometry.
 - Component-native composition (Stage 25): `SceneTree::add_child` is the single
-  attachment point and every `draw_widgets::Component` supports `.child()` and the
+  attachment point and every `draw_components::Component` supports `.child()` and the
   other modifiers directly. The `View`/`ViewExt`/`BuildContext`/`Modify` layer
-  was deleted; `draw_widgets` no longer exposes `add_*`/`mount` free functions.
+  was deleted; `draw_components` no longer exposes `add_*`/`mount` free functions.
   `demo_app`, `Overlays` popover content and the debug overlay use the new API.
 - Decorator-based chrome, no `Kit` (Stage 23): components attach
   `draw_ui::NodeDecor` (surface / foreground) and register clicks with
-  `draw_widgets::set_on_click`. A single `draw_ui::paint` / `draw_ui::handle_input`
+  `draw_components::set_on_click`. A single `draw_ui::paint` / `draw_ui::handle_input`
   runs everything. The theme is a value passed to constructors.
 - Overlay layer (`draw_components::Overlays`): a generic floating layer with `confirm`,
   `popover`, `tips` and `message` built on a pure placement module (flip + clamp),

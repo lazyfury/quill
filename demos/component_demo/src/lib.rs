@@ -22,11 +22,12 @@ mod demo {
     use wasm_bindgen::prelude::*;
     use web_sys::CanvasRenderingContext2d;
 
+    use draw_components::base::Button;
+    use draw_components::{Component, Label, Panel, VBox};
     use draw_core::{Color, Edges, NodeId, Rect, Size, Vec2, ViewportSize};
     use draw_render::{Paint, PaintContext, TextAlign};
     use draw_scene::{SceneTree, Visual};
     use draw_wasm::{App, CanvasTextMeasurer};
-    use draw_widgets::{Button, Component, Label, Panel, VBox};
 
     const BACKGROUND: Color = Color::new(0.09, 0.10, 0.13, 1.0);
     const ACCENT: Color = Color::new(0.30, 0.62, 0.98, 1.0);
@@ -157,7 +158,7 @@ mod demo {
             self.tree.update();
 
             // Reflect state -> UI, then lay out (resize-aware).
-            draw_widgets::set_text(
+            draw_components::set_text(
                 &mut self.tree,
                 self.status,
                 format!("Status: Clicked {} times", self.clicks.get()),

@@ -3,10 +3,10 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::base::{Component, Flex, Label, Spec};
 use draw_core::{Edges, Size, Vec2};
 use draw_theme::{control, radius, space, TextSize, Theme};
 use draw_ui::{Align, SurfaceStyle, TextOptions, Widget};
-use draw_widgets::{Component, Flex, Label, Spec};
 
 /// A compact checkbox with a label.
 ///
@@ -283,4 +283,4 @@ impl Component for Switch {
     }
 }
 
-draw_widgets::impl_scene_child!(Checkbox, Switch);
+crate::impl_scene_child!(Checkbox, Switch);
