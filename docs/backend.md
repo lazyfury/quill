@@ -68,8 +68,21 @@ the GPU pass is a single textured-triangle pipeline (`src/shader.wgsl`):
   triangles and sample a 1x1 white texture.
 - `DrawImage` samples a texture registered with `WgpuBackend::register_texture`
   (destination and optional source sub-rect map to UVs).
-- `DrawText` samples a built-in `8x8` ASCII bitmap-font atlas generated at
-  startup from the public-domain `font8x8` glyphs.
+- `DrawText` uses a real font loaded at startup with `ab_glyph`: `QUILL_FONT`
+  if set, otherwise a per-OS candidate list (macOS `Arial Unicode`, Linux
+  `DejaVuSans`/Noto CJK, Windows Arial/MSYH). Glyphs are rasterized on demand at
+  the requested size into a `1024x1024` shelf-packed atlas, which is uploaded to
+  the GPU after each `submit`; UVs, per-glyph advances and baselines come from
+  the font. `WgpuBackend::text_metrics()` exposes the same metrics as a
+  `FontMetrics` so hosts can build a matching `draw_ui::TextMeasurer`.
+- `FontConfig` chooses the look: `FontMode::System` (default) or
+  `FontMode::Pixel` (the built-in bitmap), plus
+  `device_pixel_rasterization` (default `true`) which rasterizes system glyphs
+  at `font_size * scale` for crisp HiDPI text while keeping logical metrics.
+  `WgpuBackend::set_font_config` rebuilds the atlas at runtime.
+- If no font file loads, `System` mode falls back to the built-in `8x8` ASCII
+  bitmap atlas (from the public-domain `font8x8`); unsupported characters then
+  sample a box-shaped "missing glyph" cell.
 
 `set_scale_factor` scales the offscreen target to `logical * scale` and scales
 vertex positions, so DPR never enters core or the IR — exactly like the Canvas
@@ -78,11 +91,13 @@ logical pixels before feeding `InputEvent`s to the UI.
 
 ### Demo
 
-`demos/wgpu_demo` is a `winit` runner: it installs the same `SceneTree` + `Ui`
-composition as `demos/component_demo`, maps window events to `draw_core`
-`InputEvent`s, renders with `WgpuBackend::begin_frame_with_view`, and presents
-the surface. The backend stays the only `wgpu` renderer; the demo only drives
-the window and the surface lifecycle.
+`demos/wgpu_demo` is a `winit` runner around the shared backend-neutral
+`demos/demo_app` app: it maps window events to `draw_core` `InputEvent`s, calls
+`DemoApp::update/layout`, renders with `WgpuBackend::begin_frame_with_view`, and
+presents the surface. It injects a `FixedWidthTextMeasurer` matching the bitmap
+font. The backend stays the only `wgpu` renderer; the demo only drives the window
+and the surface lifecycle. The same `DemoApp` runs under `demos/web_demo` on the
+Canvas backend.
 
 ### Scope
 

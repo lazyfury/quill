@@ -56,6 +56,49 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 - Stage 10 — performance inspection (`draw_profile`) + debug overlay
   (`draw_debug_ui`) [done]
 - Stage 11 — benchmarking (`draw_bench` harness + `draw_bench_suite`) [done]
+- Stage 12 — layout engine v2 [done]: intrinsic sizing (`ContentSize`),
+  flex (grow/shrink/basis/justify/align/wrap), grid (`Track`, placement,
+  spans), and deterministic text wrapping. `VBox`/`HBox` are now thin
+  aliases over a column/row `FlexStyle`; `add_flex`/`add_grid` add
+  configurable containers.
+- Stage 13 — layout v2 polish [done]: flex `align-content` and separate
+  cross-axis gap; grid `align-items`/`justify-items`/`align-content`,
+  span-aware auto tracks; per-control `LayoutStyle::order`.
+- Stage 14 — text measurement [done]: pluggable `TextMeasurer`
+  (`ApproxTextMeasurer`, `FixedWidthTextMeasurer`), `TextOptions`
+  (`wrap`/`max_lines`/`ellipsis`). A host injects metrics via
+  `Ui::set_text_measurer`; layout stays deterministic without font shaping.
+- Stage 15 — incremental layout [done]: `Ui` caches the resolved viewport and
+  skips measure/arrange unless a dirty flag is set (structure/property/text
+  changes, `tree_mut`, measurer swap, or a different viewport).
+- Stage 16 — layout/text polish [done]: `TextMeasurer::ascent` for honest
+  baselines; a paint-side per-control text-layout cache (invalidated when
+  `TextOptions`/measurer/text/width change); per-pass memoization of
+  `measure_node`; optional button text wrapping; a visible "missing glyph" box
+  in the wgpu font atlas.
+- Stage 17 — partial relayout [done]: dirty marks propagate from a changed node
+  to its ancestors; a clean subtree whose resolved rect is unchanged is skipped
+  entirely, so an isolated text change only re-arranges its own branch. Child
+  ordering is cached per container (`order_cache`). `Ui::last_arranged_nodes()`
+  reports the work done, and `Ui::invalidate_layout()` forces a full pass.
+- Stage 18 — shared demo app [done]: `demos/demo_app` owns the backend-neutral
+  `DemoApp` (scene + UI + update/layout/paint/event); `demos/wgpu_demo` and the
+  WASM demos only add host glue and (for wgpu) a matching `TextMeasurer`. Its
+  native tests verify layout and the full pipeline through
+  `draw_backend_recording`.
+- Stage 19 — real font stack in the wgpu backend [done]: a font is located from
+  `QUILL_FONT` or a per-OS candidate list, parsed with `ab_glyph`, and rasterized
+  on demand into a dynamic, shelf-packed atlas (uploaded after each `submit`).
+  `FontConfig` selects `FontMode::System` (device-pixel rasterization for crisp
+  HiDPI, while metrics stay logical) or `FontMode::Pixel` (built-in bitmap), and
+  `WgpuBackend::set_font_config` switches at runtime. Advance/line/ascent metrics
+  are exposed as `FontMetrics` so hosts can build a matching
+  `draw_ui::TextMeasurer`. The core stays text-free.
+
+Deferred by request (Stage 20, do not start without an explicit ask): a
+Canvas/WASM `measureText` measurer and complex-script shaping. The Canvas demo
+keeps the proportional default estimate; only the wgpu backend measures with the
+real font.
 
 ## Debugging & performance inspection (Stage 10)
 
@@ -128,3 +171,7 @@ Reused unchanged by both: `draw_core`, `draw_scene`, `draw_ui`, and the
 `DrawList` / `RenderBackend` contract in `draw_render`.
 Backend-specific: command-to-API mapping, resource registration, and the
 platform loop/window (`draw_wasm`, the demos).
+
+The native `wgpu_demo` and the WASM demos additionally share `demos/demo_app`:
+the same backend-neutral `DemoApp` drives both, and only the host glue (window
+loop / WASM `App` impl) and the injected `TextMeasurer` differ.

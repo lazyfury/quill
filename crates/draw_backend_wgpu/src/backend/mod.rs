@@ -39,6 +39,7 @@ mod tessellate;
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::mpsc;
 
 use bytemuck::{Pod, Zeroable};
@@ -46,6 +47,7 @@ use bytemuck::{Pod, Zeroable};
 use draw_core::{Color, Rect, Transform2D, Vec2, Viewport};
 use draw_render::{DrawList, Paint, RenderBackend, TextureId};
 
+use crate::font::{Font, FontConfig, FontMetrics};
 use pipeline::{bind_group, upload_texture};
 
 /// Formats the offscreen render target uses.
@@ -212,7 +214,11 @@ pub struct WgpuBackend {
     pub(super) pipelines: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
 
     pub(super) white_bind_group: wgpu::BindGroup,
+    pub(super) font: Rc<Font>,
+    pub(super) font_config: FontConfig,
+    pub(super) font_texture: wgpu::Texture,
     pub(super) font_bind_group: wgpu::BindGroup,
+    pub(super) font_sampler: wgpu::Sampler,
     pub(super) image_sampler: wgpu::Sampler,
     pub(super) textures: HashMap<TextureId, wgpu::BindGroup>,
     pub(super) texture_sizes: HashMap<TextureId, (u32, u32)>,
@@ -236,7 +242,57 @@ pub struct WgpuBackend {
 impl WgpuBackend {
     /// Sets the logical-to-device scale factor (DPR). Core/IR stay logical.
     pub fn set_scale_factor(&mut self, scale_factor: f32) {
-        self.scale_factor = scale_factor.max(0.0);
+        let scale = scale_factor.max(0.0);
+        self.scale_factor = scale;
+        self.font.set_scale(scale);
+    }
+
+    /// Returns the loaded font's metrics.
+    ///
+    /// Hosts wrap this in a `draw_ui::TextMeasurer` so layout measures text
+    /// with the same advances the backend renders with.
+    pub fn text_metrics(&self) -> FontMetrics {
+        FontMetrics::new(self.font.clone())
+    }
+
+    /// Returns the current font configuration.
+    pub fn font_config(&self) -> FontConfig {
+        self.font_config
+    }
+
+    /// Switches the font mode / HiDPI rasterization and rebuilds the atlas.
+    ///
+    /// Call this before the first frame (or between frames). After switching,
+    /// fetch [`WgpuBackend::text_metrics`] again for the new metrics.
+    pub fn set_font_config(&mut self, config: FontConfig) -> Result<(), WgpuError> {
+        self.font_config = config;
+        self.rebuild_font()
+    }
+
+    fn rebuild_font(&mut self) -> Result<(), WgpuError> {
+        let font = Rc::new(Font::load_with(self.font_config));
+        font.set_scale(self.scale_factor);
+        let (width, height) = font.atlas_size();
+        let texture = upload_texture(
+            &self.device,
+            &self.queue,
+            "draw_backend_wgpu.font_atlas",
+            &font.initial_atlas(),
+            width,
+            height,
+        );
+        let view = texture.create_view(&Default::default());
+        let group = bind_group(
+            &self.device,
+            &self.bind_group_layout,
+            &view,
+            &self.font_sampler,
+            "font_atlas",
+        );
+        self.font = font;
+        self.font_texture = texture;
+        self.font_bind_group = group;
+        Ok(())
     }
 
     /// Returns the [`wgpu::Instance`] the backend uses.
@@ -312,6 +368,33 @@ impl WgpuBackend {
         self.textures.insert(id, group);
         self.texture_sizes.insert(id, (width, height));
         Ok(())
+    }
+
+    /// Uploads any glyphs rasterized while processing the last `submit`.
+    fn upload_pending_font_glyphs(&mut self) {
+        let Some(pixels) = self.font.take_dirty_atlas() else {
+            return;
+        };
+        let (width, height) = self.font.atlas_size();
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.font_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 
     /// Reads the current offscreen render target back into RGBA8 pixels.
@@ -432,6 +515,7 @@ impl RenderBackend for WgpuBackend {
         for command in list.commands() {
             self.execute(command);
         }
+        self.upload_pending_font_glyphs();
         Ok(())
     }
 

@@ -20,10 +20,30 @@ cargo run -p wgpu_demo --release
 ## Controls
 
 - The rectangle in the scene rotates continuously.
-- Click the **Click me** button in the right-hand panel; the status label
-  updates the click count.
+- The left panel is a layout showcase:
+  - a flex column with a wrapping, ellipsized paragraph,
+  - a row of two buttons that share leftover width via `flex_grow`
+    (**Click me** updates the counter; **Reset** is a plain button),
+  - a 2x2 `Grid` with `Fr` columns and auto rows.
+- Clicking **Click me** updates the status label; the click count changes text,
+  which invalidates layout (otherwise the resolved layout is cached).
 - Resize the window (the UI re-lays out) or move it between displays with
   different DPRs.
+
+The demo measures text with the backend's actual loaded font
+(`WgpuBackend::text_metrics`), so wrapping and advances stay in sync with what
+is rendered. System glyphs are rasterized at device pixels, so text stays crisp
+on HiDPI displays.
+
+### Fonts
+
+The backend font is configurable:
+
+- **System** (default): loads `QUILL_FONT` or a per-OS font (proportional Latin
+  + CJK), rasterized at device pixels for HiDPI.
+- **Pixel**: the built-in `font8x8` bitmap (the original pixel look).
+
+Switch at runtime with **f**, or start in pixel mode with `--pixel-font`.
 
 ### Debug shortcuts
 
@@ -32,6 +52,7 @@ cargo run -p wgpu_demo --release
 | **F3** / `` ` `` / **d** | Component debug bounds — a yellow border + `Name #id` on every control |
 | **F4** / **p** | Performance panel |
 | **F5** / **o** | Profiler (record on/off) |
+| **f** | Pixel / system font |
 
 > On macOS the top-row F-keys are often system keys (Mission Control, Spotlight,
 > ...). Hold **Fn** or use the `` ` `` / **d** / **p** / **o** fallbacks.
@@ -46,6 +67,8 @@ cargo run -p wgpu_demo --release
 | `--no-performance` / `--no-perf` | on | Hide the performance panel |
 | `--profiler` / `--profile` | on | Collect frame stats into the profiler |
 | `--no-profiler` / `--no-profile` | | Disable the profiler (the panel shows placeholders) |
+| `--pixel-font` / `--pixel` | | Use the built-in pixel font instead of a system font |
+| `--system-font` / `--smooth-font` | on | Use a system font (falls back to pixel if none loads) |
 | `-h`, `--help` | | Print help and exit |
 | `-V`, `--version` | | Print the version and exit |
 
@@ -96,6 +119,9 @@ over the panel; everything else is forwarded to the demo.
 
 ## Notes
 
+- The scene/UI/layout code lives in the shared, backend-neutral
+  `demos/demo_app` crate and is also used by the WASM (`web_demo`) demo; this
+  binary only adds the `winit`/`wgpu` host and a fixed-advance text measurer.
 - Rendering is animated with `winit`'s `ControlFlow::Poll` and
   `Window::request_redraw`; no timer thread is used.
 - The surface format prefers a non-sRGB format so shader output matches the

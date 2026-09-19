@@ -16,8 +16,11 @@
 use draw_core::{Color, Edges, NodeId};
 
 use crate::control::ControlData;
+use crate::layout::{
+    Align, AlignContent, FlexDirection, FlexStyle, GridStyle, Justify, TextOptions, Track,
+};
 use crate::ui::Ui;
-use crate::widget::{BoxLayout, ButtonData, Widget};
+use crate::widget::{ButtonData, Widget};
 
 /// An owned handle to a mounted control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,6 +106,7 @@ pub struct Label {
     text: String,
     font_size: f32,
     color: Color,
+    options: TextOptions,
 }
 
 impl Label {
@@ -111,6 +115,7 @@ impl Label {
             text: text.into(),
             font_size: 20.0,
             color: Color::new(0.92, 0.94, 0.98, 1.0),
+            options: TextOptions::default(),
         }
     }
 
@@ -121,6 +126,29 @@ impl Label {
 
     pub fn color(mut self, color: Color) -> Self {
         self.color = color;
+        self
+    }
+
+    /// Enables/disables soft wrapping (default on).
+    pub fn wrap(mut self, wrap: bool) -> Self {
+        self.options.wrap = wrap;
+        self
+    }
+
+    /// Caps the number of painted lines.
+    pub fn max_lines(mut self, max_lines: usize) -> Self {
+        self.options = self.options.max_lines(max_lines);
+        self
+    }
+
+    /// Appends `…` when `max_lines` clips the text.
+    pub fn ellipsis(mut self, ellipsis: bool) -> Self {
+        self.options = self.options.ellipsis(ellipsis);
+        self
+    }
+
+    pub fn text_options(mut self, options: TextOptions) -> Self {
+        self.options = options;
         self
     }
 }
@@ -135,6 +163,7 @@ impl Component for Label {
                 text: self.text,
                 font_size: self.font_size,
                 color: self.color,
+                options: self.options,
             },
         ))
     }
@@ -144,6 +173,7 @@ impl Component for Label {
 pub struct Button {
     text: String,
     on_click: Option<Box<dyn FnMut()>>,
+    options: TextOptions,
 }
 
 impl Button {
@@ -151,6 +181,7 @@ impl Button {
         Self {
             text: text.into(),
             on_click: None,
+            options: TextOptions::no_wrap(),
         }
     }
 
@@ -160,15 +191,40 @@ impl Button {
         self.on_click = Some(Box::new(callback));
         self
     }
+
+    /// Enables soft wrapping of the button label (default off).
+    pub fn wrap(mut self, wrap: bool) -> Self {
+        self.options.wrap = wrap;
+        self
+    }
+
+    /// Caps the number of label lines.
+    pub fn max_lines(mut self, max_lines: usize) -> Self {
+        self.options = self.options.max_lines(max_lines);
+        self
+    }
+
+    /// Appends `…` when `max_lines` clips the label.
+    pub fn ellipsis(mut self, ellipsis: bool) -> Self {
+        self.options = self.options.ellipsis(ellipsis);
+        self
+    }
+
+    pub fn text_options(mut self, options: TextOptions) -> Self {
+        self.options = options;
+        self
+    }
 }
 
 impl Component for Button {
     fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let mut data = ButtonData::new(self.text);
+        data.options = self.options;
         let id = ui.insert(
             parent,
             "Button",
             ControlData::default(),
-            Widget::Button(ButtonData::new(self.text)),
+            Widget::Button(data),
         );
         if let Some(callback) = self.on_click {
             ui.set_on_click(id, callback);
@@ -177,7 +233,7 @@ impl Component for Button {
     }
 }
 
-/// A vertical stacking container.
+/// A vertical stacking container (a column [`Flex`] with a separation).
 #[derive(Debug, Clone, Copy)]
 pub struct VBox {
     separation: f32,
@@ -211,19 +267,19 @@ impl VBox {
 
 impl Component for VBox {
     fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let style = FlexStyle::column()
+            .gap(self.separation)
+            .padding(self.padding);
         ControlRef::new(ui.insert(
             parent,
             "VBox",
             ControlData::fill_parent(),
-            Widget::VBox(BoxLayout {
-                separation: self.separation,
-                padding: self.padding,
-            }),
+            Widget::Flex(style),
         ))
     }
 }
 
-/// A horizontal stacking container.
+/// A horizontal stacking container (a row [`Flex`] with a separation).
 #[derive(Debug, Clone, Copy)]
 pub struct HBox {
     separation: f32,
@@ -257,14 +313,168 @@ impl HBox {
 
 impl Component for HBox {
     fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let style = FlexStyle::row().gap(self.separation).padding(self.padding);
         ControlRef::new(ui.insert(
             parent,
             "HBox",
             ControlData::fill_parent(),
-            Widget::HBox(BoxLayout {
-                separation: self.separation,
-                padding: self.padding,
-            }),
+            Widget::Flex(style),
+        ))
+    }
+}
+
+/// A configurable flex container.
+#[derive(Debug, Clone, Copy)]
+pub struct Flex {
+    style: FlexStyle,
+}
+
+impl Default for Flex {
+    fn default() -> Self {
+        Self {
+            style: FlexStyle::default(),
+        }
+    }
+}
+
+impl Flex {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn row() -> Self {
+        Self {
+            style: FlexStyle::row(),
+        }
+    }
+
+    pub fn column() -> Self {
+        Self {
+            style: FlexStyle::column(),
+        }
+    }
+
+    pub fn direction(mut self, direction: FlexDirection) -> Self {
+        self.style.direction = direction;
+        self
+    }
+
+    pub fn justify(mut self, justify: Justify) -> Self {
+        self.style.justify = justify;
+        self
+    }
+
+    pub fn align(mut self, align: Align) -> Self {
+        self.style.align = align;
+        self
+    }
+
+    pub fn align_content(mut self, align_content: AlignContent) -> Self {
+        self.style.align_content = align_content;
+        self
+    }
+
+    pub fn wrap(mut self, wrap: bool) -> Self {
+        self.style.wrap = wrap;
+        self
+    }
+
+    /// Gap between items along the main axis (also called separation).
+    pub fn gap(mut self, gap: f32) -> Self {
+        self.style.gap = gap;
+        self.style.cross_gap = gap;
+        self
+    }
+
+    /// Gap between wrapped lines along the cross axis.
+    pub fn cross_gap(mut self, gap: f32) -> Self {
+        self.style.cross_gap = gap;
+        self
+    }
+
+    pub fn separation(self, separation: f32) -> Self {
+        self.gap(separation)
+    }
+
+    pub fn padding(mut self, padding: Edges) -> Self {
+        self.style.padding = padding;
+        self
+    }
+}
+
+impl Component for Flex {
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        ControlRef::new(ui.insert(
+            parent,
+            "Flex",
+            ControlData::fill_parent(),
+            Widget::Flex(self.style),
+        ))
+    }
+}
+
+/// A grid container with fixed / `fr` / auto tracks.
+#[derive(Debug, Clone)]
+pub struct Grid {
+    style: GridStyle,
+}
+
+impl Grid {
+    pub fn new(columns: Vec<Track>) -> Self {
+        Self {
+            style: GridStyle::new(columns),
+        }
+    }
+
+    pub fn rows(mut self, rows: Vec<Track>) -> Self {
+        self.style.rows = rows;
+        self
+    }
+
+    pub fn align_items(mut self, align: Align) -> Self {
+        self.style.align_items = align;
+        self
+    }
+
+    pub fn justify_items(mut self, align: Align) -> Self {
+        self.style.justify_items = align;
+        self
+    }
+
+    pub fn align_content(mut self, align: AlignContent) -> Self {
+        self.style.align_content = align;
+        self
+    }
+
+    pub fn gap(mut self, gap: f32) -> Self {
+        self.style.column_gap = gap;
+        self.style.row_gap = gap;
+        self
+    }
+
+    pub fn column_gap(mut self, gap: f32) -> Self {
+        self.style.column_gap = gap;
+        self
+    }
+
+    pub fn row_gap(mut self, gap: f32) -> Self {
+        self.style.row_gap = gap;
+        self
+    }
+
+    pub fn padding(mut self, padding: Edges) -> Self {
+        self.style.padding = padding;
+        self
+    }
+}
+
+impl Component for Grid {
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        ControlRef::new(ui.insert(
+            parent,
+            "Grid",
+            ControlData::fill_parent(),
+            Widget::Grid(self.style),
         ))
     }
 }

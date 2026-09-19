@@ -5,6 +5,7 @@
 //! here.
 
 use super::*;
+use std::rc::Rc;
 
 impl WgpuBackend {
     /// Creates a headless backend using the high-performance adapter.
@@ -110,17 +111,20 @@ impl WgpuBackend {
             bind_group(&device, &bind_group_layout, &view, &image_sampler, "white")
         };
 
-        let font_bind_group = {
-            let atlas = crate::font::build_atlas();
-            let texture = upload_texture(
+        let font = Rc::new(Font::load_with(FontConfig::default()));
+        let font_texture = {
+            let (width, height) = font.atlas_size();
+            upload_texture(
                 &device,
                 &queue,
                 "draw_backend_wgpu.font_atlas",
-                &atlas,
-                crate::font::ATLAS_WIDTH,
-                crate::font::ATLAS_HEIGHT,
-            );
-            let view = texture.create_view(&Default::default());
+                &font.initial_atlas(),
+                width,
+                height,
+            )
+        };
+        let font_bind_group = {
+            let view = font_texture.create_view(&Default::default());
             bind_group(
                 &device,
                 &bind_group_layout,
@@ -139,7 +143,11 @@ impl WgpuBackend {
             bind_group_layout,
             pipelines: HashMap::new(),
             white_bind_group,
+            font,
+            font_config: FontConfig::default(),
+            font_texture,
             font_bind_group,
+            font_sampler,
             image_sampler,
             textures: HashMap::new(),
             texture_sizes: HashMap::new(),

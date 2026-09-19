@@ -1,15 +1,12 @@
-//! A compact built-in bitmap-font atlas for [`DrawCommand::DrawText`].
+//! Built-in fixed ASCII bitmap-font fallback.
 //!
-//! WGPU has no text stack, so the backend rasterizes ASCII with the public
-//! domain `font8x8` glyphs into an `Rgba8Unorm` atlas at startup. Each glyph
-//! cell is `8x8`; set pixels are white (RGB 1,1,1) with alpha 1, unset pixels
-//! are fully transparent, so the fragment shader (`texel * color`) tints text
-//! with the command's paint color.
+//! Used when no system/`QUILL_FONT` font can be loaded. `wgpu` has no text
+//! stack, so ASCII is rasterized from the public-domain `font8x8` glyphs into
+//! an `Rgba8Unorm` atlas. Each glyph cell is `8x8`; set pixels are white with
+//! alpha 1, unset pixels fully transparent, so `texel * color` tints text.
 //!
-//! This is deliberately simple (fixed-width ASCII); real font shaping belongs
-//! in a font-rendering layer, not in a backend.
-//!
-//! [`DrawCommand::DrawText`]: draw_render::DrawCommand::DrawText
+//! Characters outside printable ASCII (including CJK) sample a box-shaped
+//! "missing glyph" cell and still advance by one `font_size`.
 
 use font8x8::UnicodeFonts;
 
@@ -29,8 +26,12 @@ pub const FIRST_CHAR: u32 = 0x20;
 /// Last character covered by the atlas (`'~'`).
 pub const LAST_CHAR: u32 = 0x7e;
 
-// The grid must have a cell for every printable ASCII glyph.
-const _: () = assert!(ATLAS_COLUMNS * ATLAS_ROWS > LAST_CHAR - FIRST_CHAR);
+/// Atlas cell index of the "missing glyph" box (the spare cell after ASCII).
+pub const MISSING_GLYPH_INDEX: u32 = LAST_CHAR - FIRST_CHAR + 1;
+
+// The grid must have a cell for every printable ASCII glyph, plus one spare
+// cell for the missing-glyph box.
+const _: () = assert!(ATLAS_COLUMNS * ATLAS_ROWS > LAST_CHAR - FIRST_CHAR + 1);
 
 /// Rasterizes the printable ASCII range into a tightly packed RGBA8 atlas.
 pub fn build_atlas() -> Vec<u8> {
@@ -43,7 +44,6 @@ pub fn build_atlas() -> Vec<u8> {
         let (cell_x, cell_y) = cell_origin(ch);
         for (row, bits) in glyph.iter().enumerate() {
             for col in 0..GLYPH_SIZE as usize {
-                // font8x8 stores each row with the leftmost pixel in bit 0.
                 if (bits >> col) & 1 == 0 {
                     continue;
                 }
@@ -57,22 +57,31 @@ pub fn build_atlas() -> Vec<u8> {
             }
         }
     }
+
+    // A box in the spare cell for characters the atlas cannot render.
+    let (cell_x, cell_y) = cell_origin_for_index(MISSING_GLYPH_INDEX);
+    for step in 1..GLYPH_SIZE - 1 {
+        for (x, y) in [
+            (cell_x + step, cell_y + 1),
+            (cell_x + step, cell_y + GLYPH_SIZE - 2),
+            (cell_x + 1, cell_y + step),
+            (cell_x + GLYPH_SIZE - 2, cell_y + step),
+        ] {
+            let offset = ((y * ATLAS_WIDTH + x) * 4) as usize;
+            data[offset] = 255;
+            data[offset + 1] = 255;
+            data[offset + 2] = 255;
+            data[offset + 3] = 255;
+        }
+    }
     data
 }
 
-/// Texture coordinates (`u0, v0, u1, v1`) for `ch`, or `'?'` for characters
-/// outside the atlas.
+/// Texture coordinates (`u0, v0, u1, v1`) for `ch`.
 ///
-/// UVs are inset by half a texel so nearest-neighbour sampling never bleeds
-/// into a neighbouring glyph cell.
+/// Characters outside printable ASCII map to the missing-glyph box.
 pub fn glyph_uv(ch: char) -> [f32; 4] {
-    let code = ch as u32;
-    let ch = if (FIRST_CHAR..=LAST_CHAR).contains(&code) {
-        ch
-    } else {
-        '?'
-    };
-    let (cell_x, cell_y) = cell_origin(ch);
+    let (cell_x, cell_y) = cell_origin_for_index(index_for(ch));
     let u0 = (cell_x as f32 + 0.5) / ATLAS_WIDTH as f32;
     let v0 = (cell_y as f32 + 0.5) / ATLAS_HEIGHT as f32;
     let u1 = (cell_x as f32 + GLYPH_SIZE as f32 - 0.5) / ATLAS_WIDTH as f32;
@@ -80,8 +89,20 @@ pub fn glyph_uv(ch: char) -> [f32; 4] {
     [u0, v0, u1, v1]
 }
 
+fn index_for(ch: char) -> u32 {
+    let code = ch as u32;
+    if (FIRST_CHAR..=LAST_CHAR).contains(&code) {
+        code - FIRST_CHAR
+    } else {
+        MISSING_GLYPH_INDEX
+    }
+}
+
 fn cell_origin(ch: char) -> (u32, u32) {
-    let index = ch as u32 - FIRST_CHAR;
+    cell_origin_for_index(ch as u32 - FIRST_CHAR)
+}
+
+fn cell_origin_for_index(index: u32) -> (u32, u32) {
     (
         (index % ATLAS_COLUMNS) * GLYPH_SIZE,
         (index / ATLAS_COLUMNS) * GLYPH_SIZE,
@@ -109,7 +130,17 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_char_falls_back_to_question_mark() {
-        assert_eq!(glyph_uv('中'), glyph_uv('?'));
+    fn unsupported_char_falls_back_to_missing_glyph_box() {
+        let missing = glyph_uv(char::from_u32(0xFFFF).unwrap());
+        assert_eq!(glyph_uv('中'), missing);
+        assert_ne!(glyph_uv('?'), missing);
+    }
+
+    #[test]
+    fn missing_glyph_cell_has_ink() {
+        let atlas = build_atlas();
+        let (cell_x, cell_y) = cell_origin_for_index(MISSING_GLYPH_INDEX);
+        let offset = (((cell_y + 1) * ATLAS_WIDTH + cell_x + 1) * 4) as usize;
+        assert_eq!(atlas[offset + 3], 255, "missing-glyph box should be opaque");
     }
 }

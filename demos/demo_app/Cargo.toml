@@ -1,0 +1,16 @@
+[package]
+name = "demo_app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+draw_core.workspace = true
+draw_render.workspace = true
+draw_scene.workspace = true
+draw_ui.workspace = true
+
+[dev-dependencies]
+draw_backend_recording.workspace = true

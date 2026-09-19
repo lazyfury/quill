@@ -1,5 +1,9 @@
 use draw_core::{Color, Edges, Size};
 
+use crate::layout::{
+    self, layout_text, measure_with, ContentSize, FlexStyle, GridStyle, TextMeasurer, TextOptions,
+};
+
 /// Runtime state of a button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ButtonState {
@@ -9,6 +13,9 @@ pub struct ButtonState {
 }
 
 /// Layout parameters shared by vertical and horizontal box containers.
+///
+/// Deprecated in favor of [`FlexStyle`]; kept so existing code that constructs
+/// `BoxLayout` continues to compile and maps onto a flex container.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxLayout {
     pub separation: f32,
@@ -31,12 +38,15 @@ pub enum Widget {
         color: Color,
         border: Option<Color>,
     },
-    VBox(BoxLayout),
-    HBox(BoxLayout),
+    /// A flex container (row/column) with justify/align/grow support.
+    Flex(FlexStyle),
+    /// A grid container with fixed/`fr`/auto tracks.
+    Grid(GridStyle),
     Label {
         text: String,
         font_size: f32,
         color: Color,
+        options: TextOptions,
     },
     Button(ButtonData),
 }
@@ -50,6 +60,7 @@ pub struct ButtonData {
     pub hover_color: Color,
     pub pressed_color: Color,
     pub text_color: Color,
+    pub options: TextOptions,
 }
 
 impl ButtonData {
@@ -62,6 +73,8 @@ impl ButtonData {
             hover_color: Color::new(0.32, 0.38, 0.50, 1.0),
             pressed_color: Color::new(0.20, 0.45, 0.78, 1.0),
             text_color: Color::new(0.95, 0.97, 1.0, 1.0),
+            // Buttons default to a single line to preserve compact sizing.
+            options: TextOptions::no_wrap(),
         }
     }
 
@@ -78,25 +91,89 @@ impl ButtonData {
 
 impl Widget {
     pub fn is_container(&self) -> bool {
-        matches!(self, Self::VBox(_) | Self::HBox(_))
+        matches!(self, Self::Flex(_) | Self::Grid(_))
     }
 
     pub fn is_button(&self) -> bool {
         matches!(self, Self::Button(_))
     }
 
-    /// Intrinsic minimum size derived from content (text or padding).
-    pub fn content_min_size(&self) -> Size {
+    /// Intrinsic size using the default [`TextMeasurer`].
+    pub fn measure(&self, available: Size) -> ContentSize {
+        self.measure_with(available, &layout::ApproxTextMeasurer)
+    }
+
+    /// Intrinsic size given the space the parent can offer and a text measurer.
+    ///
+    /// Text controls return a `preferred` size that already accounts for soft
+    /// wrapping within `available.width`, so a stretched label reports the
+    /// taller height it needs for its wrapped (and possibly clipped) lines.
+    pub fn measure_with(&self, available: Size, measurer: &dyn TextMeasurer) -> ContentSize {
         match self {
-            Self::Panel { .. } | Self::VBox(_) | Self::HBox(_) => Size::ZERO,
+            Self::Panel { .. } | Self::Flex(_) | Self::Grid(_) => ContentSize::ZERO,
             Self::Label {
-                text, font_size, ..
-            } => estimate_text_size(text, *font_size),
+                text,
+                font_size,
+                options,
+                ..
+            } => {
+                let line_h = measurer.line_height(*font_size);
+                let natural = measure_with(measurer, text, *font_size);
+                let min = Size::new(
+                    layout::longest_unit_width_with(measurer, text, *font_size),
+                    line_h,
+                );
+
+                let preferred = if options.wrap
+                    && available.width > 0.0
+                    && available.width + 1e-3 < natural.width
+                {
+                    let lines = layout_text(measurer, text, *font_size, available.width, *options);
+                    Size::new(available.width, lines.len() as f32 * line_h)
+                } else {
+                    let mut height = natural.height;
+                    if let Some(max_lines) = options.max_lines {
+                        height = height.min(max_lines as f32 * line_h);
+                    }
+                    Size::new(natural.width, height)
+                };
+                ContentSize::new(min, preferred.max(min))
+            }
             Self::Button(button) => {
-                let text = estimate_text_size(&button.text, button.font_size);
-                Size::new(text.width + 32.0, text.height.max(36.0) + 12.0)
+                let line_h = measurer.line_height(button.font_size);
+                let natural = measure_with(measurer, &button.text, button.font_size);
+                let text_min =
+                    layout::longest_unit_width_with(measurer, &button.text, button.font_size);
+                let min = Size::new(text_min + 32.0, line_h.max(36.0) + 12.0);
+
+                let preferred = if button.options.wrap
+                    && available.width > 0.0
+                    && available.width + 1e-3 < natural.width + 32.0
+                {
+                    let inner = (available.width - 32.0).max(0.0);
+                    let lines = layout_text(
+                        measurer,
+                        &button.text,
+                        button.font_size,
+                        inner,
+                        button.options,
+                    );
+                    Size::new(available.width, lines.len() as f32 * line_h + 12.0)
+                } else {
+                    let mut height = natural.height;
+                    if let Some(max_lines) = button.options.max_lines {
+                        height = height.min(max_lines as f32 * line_h);
+                    }
+                    Size::new(natural.width + 32.0, height.max(36.0) + 12.0)
+                };
+                ContentSize::new(min, preferred.max(min))
             }
         }
+    }
+
+    /// Minimum intrinsic size (content can never shrink below this).
+    pub fn content_min_size(&self) -> Size {
+        self.measure(Size::ZERO).min
     }
 
     pub fn text(&self) -> Option<&str> {
@@ -107,41 +184,88 @@ impl Widget {
         }
     }
 
-    pub fn set_text(&mut self, new_text: impl Into<String>) {
+    /// Replaces the text, returning whether it actually changed.
+    pub fn set_text(&mut self, new_text: impl Into<String>) -> bool {
         match self {
-            Self::Label { text, .. } => *text = new_text.into(),
-            Self::Button(button) => button.text = new_text.into(),
-            _ => {}
+            Self::Label { text, .. } => {
+                let new_text = new_text.into();
+                if *text == new_text {
+                    false
+                } else {
+                    *text = new_text;
+                    true
+                }
+            }
+            Self::Button(button) => {
+                let new_text = new_text.into();
+                if button.text == new_text {
+                    false
+                } else {
+                    button.text = new_text;
+                    true
+                }
+            }
+            _ => false,
         }
     }
 }
 
 /// Rough text size estimate (no font shaping in MVP).
 ///
-/// Width assumes an average glyph advance of `0.6 * font_size`.
+/// Width assumes an average glyph advance; wide (CJK) characters count double.
 pub fn estimate_text_size(text: &str, font_size: f32) -> Size {
-    let glyphs = text.chars().count() as f32;
-    Size::new(glyphs * font_size * 0.6, font_size * 1.2)
+    layout::measure(text, font_size)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn label(text: &str, font_size: f32) -> Widget {
+        Widget::Label {
+            text: text.into(),
+            font_size,
+            color: Color::WHITE,
+            options: TextOptions::default(),
+        }
+    }
+
     #[test]
     fn label_and_button_min_sizes() {
-        let label = Widget::Label {
-            text: "Hello".into(),
-            font_size: 20.0,
-            color: Color::WHITE,
-        };
-        let size = label.content_min_size();
+        let button = Widget::Button(ButtonData::new("Click"));
+        let size = label("Hello", 20.0).content_min_size();
         assert!(size.width > 0.0 && size.height > 0.0);
 
-        let button = Widget::Button(ButtonData::new("Click"));
         let button_size = button.content_min_size();
         assert!(button_size.width > size.width * 0.0);
         assert!(button_size.height >= 36.0);
+    }
+
+    #[test]
+    fn wrapped_label_reports_taller_preferred_size() {
+        let label = label("hello world hello world", 20.0);
+        let full = label.measure(Size::ZERO).preferred;
+        let wrapped = label.measure(Size::new(80.0, 1000.0)).preferred;
+        assert!(wrapped.width <= 80.0 + 1e-3);
+        assert!(wrapped.height > full.height);
+    }
+
+    #[test]
+    fn max_lines_caps_preferred_height() {
+        let mut label = label("hello world hello world", 20.0);
+        if let Widget::Label { options, .. } = &mut label {
+            *options = TextOptions::default().max_lines(1);
+        }
+        let capped = label.measure(Size::new(80.0, 1000.0)).preferred;
+        let full = label.measure(Size::ZERO).preferred;
+        assert!((capped.height - full.height).abs() < 1e-3);
+    }
+
+    #[test]
+    fn set_text_reports_change() {
+        let mut label = label("a", 10.0);
+        assert!(!label.set_text("a"));
+        assert!(label.set_text("b"));
     }
 
     #[test]

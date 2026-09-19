@@ -6,7 +6,6 @@
 //! resulting textured quads.
 
 use super::*;
-use crate::font;
 use draw_core::Size;
 use draw_render::{DrawCommand, TextAlign};
 
@@ -280,24 +279,27 @@ impl WgpuBackend {
         if font_size <= 0.0 || text.is_empty() {
             return;
         }
-        let advance = font_size;
-        let count = text.chars().count() as f32;
-        let total = advance * count;
-        let start_x = match align {
+        // Total advance drives horizontal alignment.
+        let total: f32 = text
+            .chars()
+            .map(|ch| self.font.advance(ch, font_size))
+            .sum();
+        let mut pen = match align {
             TextAlign::Left => position.x,
             TextAlign::Center => position.x - total * 0.5,
             TextAlign::Right => position.x - total,
         };
-        // The glyph cell is `font_size` tall; place it so `position.y` is the
-        // baseline (bottom of the cell), matching Canvas `fillText`.
-        let top = position.y - font_size;
-        for (index, ch) in text.chars().enumerate() {
-            let uv = font::glyph_uv(ch);
-            let rect = Rect::from_min_size(
-                Vec2::new(start_x + advance * index as f32, top),
-                Size::new(advance, advance),
-            );
-            self.quad(rect, uv, color, Surface::Font);
+
+        for ch in text.chars() {
+            let slot = self.font.glyph(ch, font_size);
+            if slot.size[0] > 0.0 && slot.size[1] > 0.0 {
+                // `position` is the baseline; `offset` is relative to the pen
+                // with y down, so it already accounts for the font's ascent.
+                let min = Vec2::new(pen + slot.offset[0], position.y + slot.offset[1]);
+                let rect = Rect::from_min_size(min, Size::new(slot.size[0], slot.size[1]));
+                self.quad(rect, slot.uv, color, Surface::Font);
+            }
+            pen += slot.advance;
         }
     }
 }

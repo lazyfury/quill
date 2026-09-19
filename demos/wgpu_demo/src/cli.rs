@@ -13,6 +13,8 @@ pub struct Options {
     pub performance: bool,
     /// Collect frame stats in the profiler.
     pub profiler: bool,
+    /// Start with the built-in pixel font instead of a system font.
+    pub pixel_font: bool,
 }
 
 impl Default for Options {
@@ -21,6 +23,7 @@ impl Default for Options {
             debug_ui: false,
             performance: false,
             profiler: true,
+            pixel_font: false,
         }
     }
 }
@@ -50,6 +53,8 @@ OPTIONS:
         --no-performance  Start without the performance panel (default)
         --profiler        Collect frame stats (default)
         --no-profiler     Disable the profiler (the panel shows placeholders)
+        --pixel-font      Use the built-in pixel font instead of a system font
+        --system-font     Use a system font (default; falls back to pixel)
     -h, --help            Print this help
     -V, --version         Print the version
 
@@ -57,6 +62,7 @@ SHORTCUTS:
     F3 / ` / d            Toggle component debug bounds (yellow name#id boxes)
     F4 / p                Toggle the performance panel
     F5 / o                Toggle the profiler
+    f                     Toggle pixel / system font
 ";
 
 /// Parses arguments (the program name must already be stripped).
@@ -76,6 +82,8 @@ where
             "--no-performance" | "--no-perf" => options.performance = false,
             "--profiler" | "--profile" => options.profiler = true,
             "--no-profiler" | "--no-profile" => options.profiler = false,
+            "--pixel-font" | "--pixel" => options.pixel_font = true,
+            "--system-font" | "--smooth-font" => options.pixel_font = false,
             "-h" | "--help" => return Ok(Command::Help),
             "-V" | "--version" => return Ok(Command::Version),
             other => return Err(format!("unrecognized argument '{other}'")),
@@ -107,6 +115,7 @@ mod tests {
                 debug_ui: false,
                 performance: false,
                 profiler: true,
+                pixel_font: false,
             }
         );
     }
@@ -132,6 +141,8 @@ mod tests {
         assert!(!options(&["--no-debug"]).debug_ui);
         assert!(options(&["--perf"]).performance);
         assert!(!options(&["--no-profile"]).profiler);
+        assert!(options(&["--pixel-font"]).pixel_font);
+        assert!(!options(&["--pixel-font", "--system-font"]).pixel_font);
     }
 
     #[test]

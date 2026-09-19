@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use draw_backend_wgpu::{wgpu, WgpuBackend};
+use draw_backend_wgpu::{wgpu, FontConfig, FontMode, WgpuBackend};
 use draw_core::{InputEvent, Key, PointerButton, Size, Vec2, Viewport};
 use draw_debug_ui::{DebugOverlay, PerformanceOverlay};
 use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Profiler, StageTimes};
@@ -36,6 +36,8 @@ struct App {
     scale_factor: f64,
     cursor: Vec2,
     demo: Demo,
+    /// Current text font mode (toggle with `f`).
+    font_mode: FontMode,
     last_frame: Instant,
     /// Frame timings / counters for the debug overlay.
     profiler: Profiler,
@@ -67,6 +69,11 @@ impl App {
             scale_factor: 1.0,
             cursor: Vec2::ZERO,
             demo: Demo::new(),
+            font_mode: if options.pixel_font {
+                FontMode::Pixel
+            } else {
+                FontMode::System
+            },
             last_frame: Instant::now(),
             profiler,
             report: InspectionReport::new(),
@@ -124,6 +131,16 @@ impl App {
         backend.set_scale_factor(self.scale_factor as f32);
         backend.set_clear_color(draw_core::Color::new(0.09, 0.10, 0.13, 1.0));
 
+        // Measure UI text with the backend's actual font.
+        let font_config = FontConfig {
+            mode: self.font_mode,
+            device_pixel_rasterization: true,
+        };
+        if let Err(error) = backend.set_font_config(font_config) {
+            eprintln!("font setup failed, using fallback: {error}");
+        }
+        self.demo.set_text_metrics(backend.text_metrics());
+
         self.window = Some(window);
         self.surface = Some(surface);
         self.backend = Some(backend);
@@ -147,11 +164,26 @@ impl App {
         surface.configure(backend.device(), config);
     }
 
+    /// Switches between the system font and the built-in pixel font.
+    fn toggle_font(&mut self) {
+        self.font_mode = match self.font_mode {
+            FontMode::System => FontMode::Pixel,
+            FontMode::Pixel => FontMode::System,
+        };
+        let config = FontConfig {
+            mode: self.font_mode,
+            device_pixel_rasterization: true,
+        };
+        if let Some(backend) = self.backend.as_mut() {
+            if let Err(error) = backend.set_font_config(config) {
+                eprintln!("font switch failed: {error}");
+            }
+            let metrics = backend.text_metrics();
+            self.demo.set_text_metrics(metrics);
+        }
+    }
+
     fn feed(&mut self, event: &InputEvent) {
-        // Debug shortcuts (never routed further):
-        //   F3 / ` / d -> toggle component debug drawing (yellow bounds + name#id)
-        //   F4 / p     -> toggle the performance panel
-        //   F5 / o     -> toggle the profiler
         if let InputEvent::KeyDown { key } = event {
             match key {
                 Key::F3 | Key::Character('`') | Key::Character('d') => {
@@ -164,6 +196,10 @@ impl App {
                 }
                 Key::F5 | Key::Character('o') => {
                     self.profiler.toggle();
+                    return;
+                }
+                Key::Character('f') => {
+                    self.toggle_font();
                     return;
                 }
                 _ => {}

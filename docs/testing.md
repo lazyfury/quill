@@ -9,7 +9,18 @@
   `tests/pipeline.rs`).
 - wgpu pixel readback — `draw_backend_wgpu` renders to an offscreen texture and
   asserts on returned RGBA8 pixels (`tests/render.rs`); no window is created.
-- Layout / hit-test / input tests — `draw_ui` unit tests.
+- Layout / hit-test / input tests — `draw_ui` unit tests (includes flex/grid
+  arrangement, align/justify/order, span-aware tracks, whole-viewport layout
+  caching, partial relayout via `last_arranged_nodes`, order-cache
+  invalidation, and the injected-measurer wrapping path).
+- Text measurement tests — `draw_ui` asserts per-character measurement, soft
+  wrapping (spaces, CJK, hard breaks), `TextOptions` (`max_lines`/`ellipsis`),
+  button wrapping, that paint emits one `DrawText` per laid-out line, and that
+  swapping the measurer recomputes the cached text layout.
+- Font tests — `draw_backend_wgpu` asserts bitmap-fallback dimensions/missing
+  glyph, and (when a system font is present) proportional advances (`i` < `W`),
+  `ascent`/`line_height`, and that ASCII + CJK glyphs rasterize. Render tests
+  assert `DrawText` ink and CJK ink headlessly.
 - Profiler / inspector tests — `draw_profile` (ring buffer, summary math, every
   `FindingCode`, budget escalation). Pure data, no clock.
 - Component debug tests — `draw_ui` asserts `paint_debug` emits one yellow
@@ -25,6 +36,11 @@
 - Benchmark scenario tests — `draw_bench_suite` asserts fixtures are
   deterministic (identical `DrawList`s), start clean, and hit-test to the
   expected control. They never assert on measured time.
+- Shared demo app tests — `demo_app` drives the backend-neutral `DemoApp`
+  natively and asserts layout rects (panel bounds, wrapped-label clipping, flex
+  fill, grid tiling/no overlap, resize) plus a full recorded frame via
+  `draw_backend_recording`. This is how the wgpu/WASM demos' layout is verified
+  without a window or screenshot.
 
 Core behavior must be testable with native `cargo test`, without a browser.
 Only the Canvas backend and WASM glue need a browser.

@@ -1,5 +1,7 @@
 use draw_core::{Edges, Rect, Size, Vec2};
 
+use crate::layout::LayoutStyle;
+
 /// How a control reacts to pointer events during hit testing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum MouseFilter {
@@ -31,6 +33,8 @@ pub struct ControlData {
     /// Absolute rectangle in logical viewport coordinates, valid after layout.
     pub rect: Rect,
     pub mouse_filter: MouseFilter,
+    /// How this control participates in its parent container's layout.
+    pub layout: LayoutStyle,
 }
 
 impl Default for ControlData {
@@ -41,6 +45,7 @@ impl Default for ControlData {
             min_size: Size::ZERO,
             rect: Rect::ZERO,
             mouse_filter: MouseFilter::Stop,
+            layout: LayoutStyle::default(),
         }
     }
 }

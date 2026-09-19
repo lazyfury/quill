@@ -3,8 +3,8 @@
 //! Built on the `draw_scene` tree: a [`Ui`] owns a [`SceneTree`] of `Control`
 //! nodes plus per-control layout ([`ControlData`]) and behavior ([`Widget`]).
 //!
-//! - **Layout** resolves absolute rectangles from anchors/offsets; containers
-//!   (VBox/HBox) position their children.
+//! - **Layout** resolves absolute rectangles from anchors/offsets; flex and
+//!   grid containers size and arrange their children (see [`layout`]).
 //! - **Painting** emits a backend-neutral [`draw_render::DrawList`].
 //! - **Input** hit-tests topmost `Control`s and routes pointer/keyboard events
 //!   (target dispatch in MVP; capture/bubble is a future extension).
@@ -18,12 +18,18 @@ pub const CRATE: &str = "draw_ui";
 mod component;
 mod control;
 mod debug;
+pub mod layout;
 mod ui;
 mod widget;
 
-pub use component::{Button, Component, ControlRef, HBox, Label, Panel, VBox};
+pub use component::{Button, Component, ControlRef, Flex, Grid, HBox, Label, Panel, VBox};
 pub use control::{ControlData, MouseFilter};
 pub use debug::DebugDrawOptions;
+pub use layout::{
+    Align, AlignContent, ApproxTextMeasurer, ContentSize, FixedWidthTextMeasurer, FlexDirection,
+    FlexStyle, GridPlacement, GridStyle, Justify, LayoutStyle, SizeBasis, TextMeasurer,
+    TextOptions, Track,
+};
 pub use ui::{ClickCallback, Ui};
 pub use widget::{estimate_text_size, BoxLayout, ButtonData, ButtonState, Widget};
 
@@ -200,5 +206,92 @@ mod tests {
         assert_eq!(labels.len(), 5);
         assert!(labels.iter().any(|text| text.starts_with("Button #")));
         assert!(labels.iter().any(|text| text.starts_with("Panel #")));
+    }
+
+    #[test]
+    fn wrapped_label_paints_one_command_per_line() {
+        let mut ui = Ui::new();
+        let column = ui.add_flex(ui.root(), FlexStyle::column().gap(0.0));
+        let _label = ui.add_label(column, "hello world hello world");
+        ui.layout(Viewport::new(Size::new(120.0, 400.0)));
+
+        let mut ctx = draw_render::PaintContext::new();
+        ui.paint(&mut ctx);
+        let list = ctx.into_draw_list();
+        let lines = list
+            .commands()
+            .iter()
+            .filter(|command| matches!(command, draw_render::DrawCommand::DrawText { .. }))
+            .count();
+        assert!(lines > 1, "expected wrapped label to emit multiple lines");
+    }
+
+    #[test]
+    fn ellipsis_clips_label_to_one_line() {
+        let mut ui = Ui::new();
+        let column = ui.add_flex(ui.root(), FlexStyle::column().gap(0.0));
+        let _label = ui.add(
+            column,
+            Label::new("hello world hello world")
+                .max_lines(1)
+                .ellipsis(true),
+        );
+        ui.layout(Viewport::new(Size::new(100.0, 400.0)));
+
+        let mut ctx = draw_render::PaintContext::new();
+        ui.paint(&mut ctx);
+        let list = ctx.into_draw_list();
+        let texts: Vec<&str> = list
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                draw_render::DrawCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts.len(), 1);
+        assert!(texts[0].ends_with('\u{2026}'));
+    }
+
+    fn painted_texts(ui: &Ui) -> Vec<String> {
+        let mut ctx = draw_render::PaintContext::new();
+        ui.paint(&mut ctx);
+        let list = ctx.into_draw_list();
+        list.commands()
+            .iter()
+            .filter_map(|command| match command {
+                draw_render::DrawCommand::DrawText { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn swapping_measurer_recomputes_text_layout() {
+        let mut ui = Ui::new();
+        let column = ui.add_flex(
+            ui.root(),
+            FlexStyle::column().gap(0.0).padding(draw_core::Edges::ZERO),
+        );
+        ui.add(column, Label::new("hello world hello world"));
+        let vp = Viewport::new(Size::new(120.0, 400.0));
+
+        ui.layout(vp);
+        let approx_lines = painted_texts(&ui).len();
+
+        ui.set_text_measurer(Rc::new(FixedWidthTextMeasurer::default()));
+        ui.layout(vp);
+        let fixed_lines = painted_texts(&ui).len();
+
+        assert!(fixed_lines > approx_lines);
+    }
+
+    #[test]
+    fn wrapped_button_paints_multiple_lines() {
+        let mut ui = Ui::new();
+        let column = ui.add_flex(ui.root(), FlexStyle::column().gap(0.0));
+        ui.add(column, Button::new("hello world hello world").wrap(true));
+        ui.layout(Viewport::new(Size::new(100.0, 400.0)));
+        assert!(painted_texts(&ui).len() > 1);
     }
 }

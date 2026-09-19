@@ -15,6 +15,7 @@ members = [
     "crates/draw_wasm",
     "demos/web_demo",
     "demos/component_demo",
+    "demos/demo_app",
     "demos/wgpu_demo",
 ]
 
@@ -38,6 +39,7 @@ draw_backend_canvas = { path = "crates/draw_backend_canvas" }
 draw_backend_recording = { path = "crates/draw_backend_recording" }
 draw_backend_wgpu = { path = "crates/draw_backend_wgpu" }
 draw_wasm = { path = "crates/draw_wasm" }
+demo_app = { path = "demos/demo_app" }
 
 [profile.release]
 opt-level = "s"

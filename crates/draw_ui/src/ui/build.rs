@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::component::{Component, ControlRef};
-use crate::widget::{BoxLayout, ButtonData};
+use crate::layout::{FlexStyle, GridStyle, LayoutStyle, SizeBasis, TextOptions};
+use crate::widget::ButtonData;
 use draw_core::{Color, Size};
 
 impl Ui {
@@ -27,6 +28,7 @@ impl Ui {
                 text: text.into(),
                 font_size: 20.0,
                 color: Color::new(0.92, 0.94, 0.98, 1.0),
+                options: TextOptions::default(),
             },
         )
     }
@@ -40,21 +42,41 @@ impl Ui {
         )
     }
 
+    /// Adds a vertical flex container (`Flex` with a column direction).
     pub fn add_vbox(&mut self, parent: NodeId) -> NodeId {
         self.insert(
             parent,
             "VBox",
             ControlData::fill_parent(),
-            Widget::VBox(BoxLayout::default()),
+            Widget::Flex(FlexStyle::column()),
         )
     }
 
+    /// Adds a horizontal flex container (`Flex` with a row direction).
     pub fn add_hbox(&mut self, parent: NodeId) -> NodeId {
         self.insert(
             parent,
             "HBox",
             ControlData::fill_parent(),
-            Widget::HBox(BoxLayout::default()),
+            Widget::Flex(FlexStyle::row()),
+        )
+    }
+
+    pub fn add_flex(&mut self, parent: NodeId, style: FlexStyle) -> NodeId {
+        self.insert(
+            parent,
+            "Flex",
+            ControlData::fill_parent(),
+            Widget::Flex(style),
+        )
+    }
+
+    pub fn add_grid(&mut self, parent: NodeId, style: GridStyle) -> NodeId {
+        self.insert(
+            parent,
+            "Grid",
+            ControlData::fill_parent(),
+            Widget::Grid(style),
         )
     }
 
@@ -62,13 +84,13 @@ impl Ui {
         &mut self,
         parent: NodeId,
         name: &str,
-        mut control: ControlData,
+        control: ControlData,
         widget: Widget,
     ) -> NodeId {
         let id = self.tree.add_control(parent, name);
-        control.min_size = control.min_size.max(widget.content_min_size());
         self.controls.insert(id, control);
         self.widgets.insert(id, widget);
+        self.mark_dirty(id);
         id
     }
 
@@ -88,14 +110,29 @@ impl Ui {
         self.with_control(id, |control| control.mouse_filter = filter)
     }
 
+    /// Replaces a control's layout participation (grow/shrink/basis/align/grid).
+    pub fn set_layout_style(&mut self, id: NodeId, style: LayoutStyle) -> bool {
+        self.with_control(id, |control| control.layout = style)
+    }
+
+    pub fn set_flex_grow(&mut self, id: NodeId, grow: f32) -> bool {
+        self.with_control(id, |control| control.layout.grow = grow)
+    }
+
+    pub fn set_flex_shrink(&mut self, id: NodeId, shrink: f32) -> bool {
+        self.with_control(id, |control| control.layout.shrink = shrink)
+    }
+
+    pub fn set_flex_basis(&mut self, id: NodeId, basis: SizeBasis) -> bool {
+        self.with_control(id, |control| control.layout.basis = basis)
+    }
+
     pub fn set_text(&mut self, id: NodeId, text: impl Into<String>) -> bool {
         let Some(widget) = self.widgets.get_mut(&id) else {
             return false;
         };
-        widget.set_text(text);
-        let min_size = widget.content_min_size();
-        if let Some(control) = self.controls.get_mut(&id) {
-            control.min_size = control.min_size.max(min_size);
+        if widget.set_text(text) {
+            self.mark_dirty(id);
         }
         true
     }
@@ -127,6 +164,7 @@ impl Ui {
         match self.controls.get_mut(&id) {
             Some(control) => {
                 f(control);
+                self.mark_dirty(id);
                 true
             }
             None => false,

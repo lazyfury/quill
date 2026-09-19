@@ -22,12 +22,20 @@ let button = ui.add(
 );
 ```
 
-Available components: `Panel`, `VBox`, `HBox`, `Label`, `Button`. `ControlRef`
-is an owned, `Copy` handle; `ref.id()` gives the underlying `NodeId`.
+Available components: `Panel`, `Flex`, `VBox`, `HBox`, `Grid`, `Label`,
+`Button`. `ControlRef` is an owned, `Copy` handle; `ref.id()` gives the
+underlying `NodeId`.
 
 ## Layout
 
-Controls use the Godot-style anchor model:
+Layout is a two-pass traversal. First **measure** computes each control's
+intrinsic size (`ContentSize { min, preferred }`, with text already wrapped to
+the offered width); then **arrange** assigns absolute rectangles top-down.
+Containers own their children's rectangles.
+
+### Anchors (default)
+
+Non-container children use the Godot-style anchor model:
 
 ```
 left = parent.left + parent.width  * anchor.left  + offset.left
@@ -44,12 +52,124 @@ ui.set_offsets(panel.id(), Edges::ZERO);
 // pin to the top-right, 320x300
 ui.set_anchors(panel.id(), Edges::new(1.0, 0.0, 1.0, 0.0));
 ui.set_offsets(panel.id(), Edges::new(-360.0, 40.0, -40.0, 340.0));
-
-ui.set_min_size(button.id(), draw_core::Size::new(140.0, 44.0));
 ```
 
-`VBox`/`HBox` arrange their direct children with a separation and padding from
-`BoxLayout`. Call `ui.layout(viewport)` after changes and on resize.
+### Flex
+
+`VBox`/`HBox` are convenience column/row flex containers. For full control use
+`Flex` (or `ui.add_flex`):
+
+```rust
+use draw_ui::{Align, Flex, Justify};
+
+let row = ui.add(
+    panel.id(),
+    Flex::row()
+        .justify(Justify::SpaceBetween)
+        .align(Align::Center)
+        .gap(12.0),
+);
+```
+
+- `justify`: main-axis distribution (`Start`/`Center`/`End`/`SpaceBetween`/
+  `SpaceAround`/`SpaceEvenly`).
+- `align`: cross-axis alignment of items (`Start`/`Center`/`End`/`Stretch`,
+  default `Stretch`).
+- `align_content`: distribution of wrapped lines along the cross axis
+  (`Start`/`Center`/`End`/`SpaceBetween`/`SpaceAround`/`SpaceEvenly`/`Stretch`).
+- `gap` (a.k.a. `separation`), `cross_gap` (wrapped-line gap), `padding`,
+  `wrap` for multi-line rows.
+
+Per-child sizing is set on the control and read by its parent:
+
+```rust
+use draw_ui::{LayoutStyle, SizeBasis};
+
+// grow to fill leftover main-axis space ("拉伸/撑开")
+ui.set_flex_grow(button.id(), 1.0);
+// or replace the whole participation record
+ui.set_layout_style(button.id(), LayoutStyle::new().grow(1.0).basis(SizeBasis::Px(120.0)));
+// paint/placement order within the parent (lower first)
+ui.set_layout_style(button.id(), LayoutStyle::new().order(-1));
+```
+
+`grow` absorbs leftover space, `shrink` resists overflow (weighted by basis),
+`basis` chooses `Auto`/`Px`/`Percent`, and `LayoutStyle::align_self` overrides
+the container's cross-axis alignment for one child.
+
+### Grid
+
+```rust
+use draw_ui::{Align, AlignContent, Grid, GridPlacement, Track};
+
+let grid = ui.add(
+    panel.id(),
+    Grid::new(vec![Track::Px(120.0), Track::Fr(1.0), Track::Fr(2.0)])
+        .rows(vec![Track::Auto, Track::Px(40.0)])
+        .align_items(Align::Center)    // vertical within the cell
+        .justify_items(Align::Stretch) // horizontal within the cell
+        .align_content(AlignContent::Stretch) // distribute rows
+        .gap(8.0),
+);
+
+// explicit cell placement (optional; otherwise auto-flow row-major)
+ui.set_layout_style(cell.id(), LayoutStyle::new().grid(GridPlacement::new(1, 0).column_span(2)));
+```
+
+Auto tracks grow to fit items that span multiple tracks. Explicit placement
+skips occupied cells; auto-flow then fills the remaining cells row-major.
+`LayoutStyle::order` also controls auto-placement order.
+
+### Text wrapping
+
+Labels wrap automatically to their resolved width. Wrapping breaks on explicit
+newlines and spaces, and between East-Asian wide characters; overlong words are
+hard-broken. A stretched label reports the taller `preferred` height it needs
+for its wrapped lines.
+
+`Label` exposes overflow options:
+
+```rust
+ui.add(
+    panel.id(),
+    Label::new("A long paragraph ...")
+        .max_lines(2)
+        .ellipsis(true),   // clip to 2 lines with “…”; `wrap(false)` disables soft wrap
+);
+```
+
+`Button` accepts the same `.wrap(bool)` / `.max_lines(n)` / `.ellipsis(bool)`
+builders (wrapping is off by default); a wrapped button grows its height and
+centers each line.
+
+Measurement is pluggable via `TextMeasurer`, so layout stays deterministic and
+backend-neutral while the host supplies real metrics:
+
+```rust
+use std::rc::Rc;
+use draw_ui::{FixedWidthTextMeasurer, TextMeasurer};
+
+// e.g. match a fixed-width bitmap-font backend
+ui.set_text_measurer(Rc::new(FixedWidthTextMeasurer::default()));
+```
+
+The default is `ApproxTextMeasurer` (proportional estimate). Injecting a
+measurer invalidates layout.
+
+### Redraw / layout caching
+
+`Ui` caches the last resolved `Viewport` and skips measure/arrange unless it is
+invalidated. Inserting controls, changing anchors/offsets/layout style, changing
+text, `tree_mut()`, swapping the measurer, or a new viewport size all mark it
+dirty. A change only dirties that node and its ancestors, so clean sibling
+subtrees whose resolved rects are unchanged are skipped (partial relayout). Call
+`ui.layout(viewport)` after changes; `Ui::layout_count()` and
+`Ui::last_arranged_nodes()` report the work done, and `Ui::invalidate_layout()`
+forces a full pass.
+
+Within a pass, repeated measurements of the same control are memoized, and
+paint reuses a per-control cache of wrapped/clipped lines until its text, font,
+width, `TextOptions`, or the measurer changes.
 
 ## Respond to input
 

@@ -25,24 +25,51 @@ impl Ui {
                     text,
                     font_size,
                     color,
+                    options,
                 } => {
-                    let position = Vec2::new(rect.left(), rect.center().y + font_size * 0.4);
-                    ctx.draw_text(text.clone(), position, *font_size, TextAlign::Left, *color);
+                    let lines =
+                        self.layout_text_cached(id, text, *font_size, rect.size.width, *options);
+                    let step = self.text_measurer.line_height(*font_size);
+                    let mut baseline = rect.top() + self.text_measurer.ascent(*font_size);
+                    for line in lines.iter() {
+                        ctx.draw_text(
+                            line.clone(),
+                            Vec2::new(rect.left(), baseline),
+                            *font_size,
+                            TextAlign::Left,
+                            *color,
+                        );
+                        baseline += step;
+                    }
                 }
                 Widget::Button(button) => {
                     ctx.fill_rect(rect, button.fill());
                     ctx.stroke_rect(rect, 1.0, button.text_color.with_alpha(0.35));
-                    let position =
-                        Vec2::new(rect.center().x, rect.center().y + button.font_size * 0.4);
-                    ctx.draw_text(
-                        button.text.clone(),
-                        position,
+
+                    let inner = (rect.size.width - 32.0).max(0.0);
+                    let lines = self.layout_text_cached(
+                        id,
+                        &button.text,
                         button.font_size,
-                        TextAlign::Center,
-                        button.text_color,
+                        inner,
+                        button.options,
                     );
+                    let step = self.text_measurer.line_height(button.font_size);
+                    let block = lines.len() as f32 * step;
+                    let mut baseline =
+                        rect.center().y - block / 2.0 + self.text_measurer.ascent(button.font_size);
+                    for line in lines.iter() {
+                        ctx.draw_text(
+                            line.clone(),
+                            Vec2::new(rect.center().x, baseline),
+                            button.font_size,
+                            TextAlign::Center,
+                            button.text_color,
+                        );
+                        baseline += step;
+                    }
                 }
-                Widget::VBox(_) | Widget::HBox(_) => {}
+                Widget::Flex(_) | Widget::Grid(_) => {}
             }
         }
     }

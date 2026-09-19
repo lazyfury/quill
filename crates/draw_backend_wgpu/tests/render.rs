@@ -7,7 +7,7 @@
 //! If no adapter is available (e.g. a GPU-less CI box) the tests skip rather
 //! than fail, so the rest of the workspace still builds and tests.
 
-use draw_backend_wgpu::{wgpu, PixelBuffer, WgpuBackend};
+use draw_backend_wgpu::{wgpu, FontConfig, FontMode, PixelBuffer, WgpuBackend};
 use draw_core::{Color, Rect, Size, Vec2, Viewport};
 use draw_render::{Paint, PaintContext, RenderBackend, TextAlign, TextureId};
 
@@ -288,6 +288,89 @@ fn draw_text_rasterizes_visible_glyphs() {
         inked,
         "expected the glyph to draw at least one bright pixel"
     );
+}
+
+#[test]
+fn font_config_switches_to_pixel_mode() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend
+        .set_font_config(FontConfig {
+            mode: FontMode::Pixel,
+            device_pixel_rasterization: true,
+        })
+        .unwrap();
+    assert_eq!(backend.font_config().mode, FontMode::Pixel);
+
+    let metrics = backend.text_metrics();
+    assert!(!metrics.is_system());
+    assert_eq!(metrics.advance('i', 16.0), 16.0);
+    assert_eq!(metrics.advance('W', 16.0), 16.0);
+
+    // Pixel mode still renders ink (CJK -> missing-glyph box).
+    backend.set_clear_color(Color::BLACK);
+    let mut ctx = PaintContext::new();
+    ctx.draw_text(
+        "中",
+        Vec2::new(2.0, 24.0),
+        20.0,
+        TextAlign::Left,
+        Paint::new(Color::WHITE),
+    );
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert!(pixels.data.chunks(4).any(|pixel| pixel[0] > 128));
+}
+
+#[test]
+fn device_pixel_rasterization_inks_text_at_high_dpi() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    if !backend.text_metrics().is_system() {
+        return;
+    }
+    backend.set_scale_factor(2.0);
+    backend.set_clear_color(Color::BLACK);
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_text(
+        "M",
+        Vec2::new(4.0, 24.0),
+        16.0,
+        TextAlign::Left,
+        Paint::new(Color::WHITE),
+    );
+    // Logical 32x32 -> device 64x64; the glyph is rasterized at 32px.
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_eq!(pixels.width, 64);
+    assert!(pixels.data.chunks(4).any(|pixel| pixel[0] > 128));
+}
+
+#[test]
+fn draw_text_renders_cjk_with_a_system_font() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    // Only meaningful when a real (non-bitmap) font with CJK coverage loaded.
+    if !backend.text_metrics().is_system() {
+        eprintln!("skipping CJK test: no system font loaded");
+        return;
+    }
+    backend.set_clear_color(Color::BLACK);
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_text(
+        "中",
+        Vec2::new(2.0, 24.0),
+        20.0,
+        TextAlign::Left,
+        Paint::new(Color::WHITE),
+    );
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+
+    let inked = pixels.data.chunks(4).any(|pixel| pixel[0] > 128);
+    assert!(inked, "expected CJK glyph ink from the system font");
 }
 
 #[test]
