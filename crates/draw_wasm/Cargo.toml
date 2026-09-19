@@ -1,0 +1,10 @@
+[package]
+name = "draw_wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+draw_render.workspace = true
+draw_backend_canvas.workspace = true
