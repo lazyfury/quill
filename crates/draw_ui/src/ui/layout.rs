@@ -11,7 +11,9 @@
 use std::collections::{HashMap, HashSet};
 
 use super::*;
-use crate::control::{control_mut, control_of, root_state, root_state_mut, LayoutCache};
+use crate::control::{
+    control_mut, control_of, control_visible, root_state, root_state_mut, LayoutCache,
+};
 use crate::layout::{
     Align, AlignContent, ContentSize, FlexStyle, GridPlacement, GridStyle, Justify, LayoutStyle,
     SizeBasis, Track,
@@ -53,6 +55,7 @@ impl Ui {
                 .iter()
                 .filter(|id| {
                     control_of(tree, *id).is_some()
+                        && control_visible(tree, *id)
                         && tree
                             .parent(*id)
                             .map_or(true, |parent| control_of(tree, parent).is_none())
@@ -68,12 +71,19 @@ impl Ui {
         }
 
         // Write the resolved rectangles back to the node slots and clear dirty
-        // flags.
+        // flags. Controls hidden at runtime are reset to a zero rect so stale
+        // geometry cannot leak (they are skipped for measure/arrange/paint).
+        let hidden: HashSet<NodeId> = tree
+            .iter()
+            .filter(|id| control_of(tree, *id).is_some() && !control_visible(tree, *id))
+            .collect();
         for id in tree.iter().collect::<Vec<_>>() {
             let Some(control) = control_mut(tree, id) else {
                 continue;
             };
-            if let Some(rect) = rects.get(&id) {
+            if hidden.contains(&id) {
+                control.data.rect = Rect::ZERO;
+            } else if let Some(rect) = rects.get(&id) {
                 control.data.rect = *rect;
             }
             control.layout_dirty = false;
@@ -970,4 +980,96 @@ fn span_size(sizes: &[f32], start: usize, end: usize, gap: f32) -> f32 {
     }
     let sum: f32 = sizes[start..end].iter().sum();
     sum + gap * (count - 1) as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::control::Control;
+    use crate::widget::Widget;
+    use draw_core::{Color, Edges};
+
+    fn add(tree: &mut SceneTree, parent: NodeId, data: ControlData, widget: Widget) -> NodeId {
+        let id = tree.add_control(parent, "test");
+        tree.set_data(id, Control::new(data, widget));
+        id
+    }
+
+    fn panel(color: Color) -> Widget {
+        Widget::Panel {
+            color,
+            border: None,
+        }
+    }
+
+    #[test]
+    fn hidden_controls_free_their_flex_space() {
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        // A top-level panel; the flex row lives under it (the layout entry
+        // arranges a root's children by anchors, so the container is a child).
+        let root = add(
+            &mut tree,
+            tree_root,
+            ControlData::fill_parent(),
+            panel(Color::TRANSPARENT),
+        );
+        let style = FlexStyle {
+            padding: Edges::ZERO,
+            gap: 0.0,
+            ..FlexStyle::row()
+        };
+        let flex = add(
+            &mut tree,
+            root,
+            ControlData::fill_parent(),
+            Widget::Flex(style),
+        );
+        let mut a_data = ControlData::default();
+        a_data.layout.grow = 1.0;
+        let a = add(&mut tree, flex, a_data, panel(Color::RED));
+        let mut b_data = ControlData::default();
+        b_data.layout.basis = SizeBasis::Px(100.0);
+        b_data.layout.shrink = 0.0;
+        let b = add(&mut tree, flex, b_data, panel(Color::BLUE));
+
+        let viewport = ViewportSize::new(Size::new(200.0, 100.0));
+        crate::layout(&mut tree, viewport);
+        assert_eq!(crate::control(&tree, a).unwrap().rect.size.width, 100.0);
+        assert_eq!(crate::control(&tree, b).unwrap().rect.size.width, 100.0);
+
+        // Hiding `b` drops it from the flex line, so `a` grows into its space.
+        tree.set_visible(b, false);
+        crate::mark_dirty(&mut tree, b);
+        crate::layout(&mut tree, viewport);
+        assert_eq!(crate::control(&tree, a).unwrap().rect.size.width, 200.0);
+        assert_eq!(
+            crate::control(&tree, b).unwrap().rect,
+            draw_core::Rect::ZERO
+        );
+    }
+
+    #[test]
+    fn an_invisible_root_is_not_laid_out() {
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        let root = add(
+            &mut tree,
+            tree_root,
+            ControlData::fill_parent(),
+            panel(Color::RED),
+        );
+        let viewport = ViewportSize::new(Size::new(100.0, 100.0));
+        crate::layout(&mut tree, viewport);
+        assert_eq!(crate::control(&tree, root).unwrap().rect.size.width, 100.0);
+
+        tree.set_visible(root, false);
+        crate::invalidate_layout(&mut tree);
+        crate::layout(&mut tree, viewport);
+        // A hidden root receives no rect (it is skipped entirely).
+        assert_eq!(
+            crate::control(&tree, root).unwrap().rect,
+            draw_core::Rect::ZERO
+        );
+    }
 }

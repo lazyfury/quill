@@ -14,7 +14,8 @@ the tree.
 `Component` trait and the unstyled primitives (`Flex`, `Panel`, `Label`, `Grid`,
 `VBox`, `HBox`, `Column`, `Row`, plus the low-level `base::Button`); the crate
 root adds the themed library (`Text`, `Card`, `Button`, `Checkbox`, `Switch`,
-`ResizeHandle`, …). Input routing lives in `draw_ui` alongside layout and paint.
+`ResizeHandle`, …) and the `Router` view switcher. Input routing lives in
+`draw_ui` alongside layout and paint.
 
 ## Create & compose components
 
@@ -271,6 +272,42 @@ ancestor that set one, dynamic provider first), falling back to `Pointer` for
 anything with a click/drag callback. The cursor *value* is backend-neutral; only
 the final application is platform code: hosts map it onto winit `CursorIcon`
 or the CSS `cursor` property (`draw_wasm::App::cursor`).
+
+## Switch views (Router)
+
+`draw_components::Router` shows exactly one of several child views in a
+container and hides the rest. All views stay mounted (their state survives a
+switch), and `draw_ui` skips hidden controls in measure / arrange / paint /
+hit-test, so only the active view occupies the pane.
+
+```rust
+use std::cell::Cell;
+use std::rc::Rc;
+use draw_components::{Button, Panel, Router};
+use draw_core::Color;
+
+let route = Rc::new(Cell::new(0));
+let pane = tree.add_child(root, Panel::new().color(Color::TRANSPARENT).flat());
+let notes = tree.add_child(pane, /* a Column built as the note view */);
+let settings = tree.add_child(pane, /* a Column built as the settings view */);
+
+let mut router = Router::with_route(pane, route.clone());
+router.add_node(notes);
+router.add_node(settings);
+router.sync(&mut tree);            // apply route 0
+
+// Click callbacks only write the shared cell:
+Button::ghost("Settings", theme).on_click({ let r = route.clone(); move || r.set(1) });
+
+// Once per frame, apply the route (hides the old view, marks it for relayout):
+router.sync(&mut tree);
+```
+
+`Router::add` builds a component under the router; `add_node` tracks an
+already-built node (handy when the view's internals are captured as it is
+composed, as `demo_app` does). `go(tree, i)` switches and applies immediately;
+`add_named` + `go_name(tree, "settings")` route by name. The host applies the
+route once per frame (typically in its `update`).
 
 ## Request redraw
 

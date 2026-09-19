@@ -8,7 +8,7 @@
 use draw_core::{Cursor, EventResult, InputEvent, Key, NodeId, PointerButton, Vec2};
 use draw_scene::SceneTree;
 
-use crate::control::{Control, MouseFilter};
+use crate::control::{control_visible, Control, MouseFilter};
 use crate::widget::Widget;
 
 /// Controls whose parent is not itself a control (the UI roots).
@@ -16,6 +16,7 @@ fn root_controls(tree: &SceneTree) -> Vec<NodeId> {
     tree.iter()
         .filter(|id| {
             tree.data::<Control>(*id).is_some()
+                && control_visible(tree, *id)
                 && tree
                     .parent(*id)
                     .map_or(true, |parent| tree.data::<Control>(parent).is_none())
@@ -50,7 +51,7 @@ pub fn hit_test(tree: &SceneTree, position: Vec2) -> Option<NodeId> {
 fn hit_node(tree: &SceneTree, id: NodeId, position: Vec2) -> Option<NodeId> {
     // Children are drawn after the parent, so test them first (topmost first).
     for child in control_children(tree, id).iter().rev() {
-        if !tree.is_visible_in_tree(*child).unwrap_or(false) {
+        if !control_visible(tree, *child) {
             continue;
         }
         if let Some(hit) = hit_node(tree, *child, position) {

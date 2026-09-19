@@ -175,6 +175,23 @@ pub(crate) fn control_mut(tree: &mut SceneTree, id: draw_core::NodeId) -> Option
     tree.get_mut(id).and_then(|node| node.data_mut::<Control>())
 }
 
+/// Effective visibility of `id`, walking the local `visible` flags up to the
+/// root.
+///
+/// Unlike [`SceneTree::is_visible_in_tree`] this does not depend on a prior
+/// [`SceneTree::update`], so it is safe to consult during layout, paint and
+/// input (a node hidden by a router switches immediately).
+pub(crate) fn control_visible(tree: &SceneTree, id: draw_core::NodeId) -> bool {
+    let mut current = Some(id);
+    while let Some(node) = current {
+        if tree.is_visible(node) == Some(false) {
+            return false;
+        }
+        current = tree.parent(node);
+    }
+    true
+}
+
 /// Cached laid-out text for one control (paint-side).
 pub(crate) struct CachedText {
     pub(crate) text: String,

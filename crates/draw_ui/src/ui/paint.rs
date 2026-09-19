@@ -1,7 +1,7 @@
 //! Emitting control visuals and debug bounds into a `DrawList`.
 
 use super::*;
-use crate::control::control_of;
+use crate::control::{control_of, control_visible};
 use crate::debug::DebugDrawOptions;
 use draw_core::Vec2;
 use draw_render::{PaintContext, TextAlign};
@@ -24,6 +24,11 @@ impl Ui {
             let Some(control) = control_of(tree, id) else {
                 continue;
             };
+            // A node hidden at runtime (e.g. a router switch) is skipped even if
+            // `SceneTree::update` has not run since it was hidden.
+            if !control_visible(tree, id) {
+                continue;
+            }
             let rect = control.data.rect;
             let state = self.state_for(tree, id);
             for decor in &control.decorations {

@@ -22,8 +22,8 @@ use draw_core::NodeId;
 use draw_scene::SceneTree;
 
 use crate::control::{
-    control_mut, control_of, gui_state, root_state, root_state_mut, CachedText, ControlData,
-    LayoutCache,
+    control_mut, control_of, control_visible, gui_state, root_state, root_state_mut, CachedText,
+    ControlData, LayoutCache,
 };
 use crate::decor::{DecorRef, InteractState};
 use crate::layout::{layout_text, TextMeasurer, TextOptions};
@@ -201,7 +201,9 @@ impl Ui {
                 children
                     .iter()
                     .copied()
-                    .filter(|child| control_of(tree, *child).is_some())
+                    .filter(|child| {
+                        control_of(tree, *child).is_some() && control_visible(tree, *child)
+                    })
                     .collect()
             })
             .unwrap_or_default()

@@ -49,6 +49,7 @@ pub const CRATE: &str = "draw_components";
 pub mod base;
 mod components;
 mod overlay;
+mod router;
 
 pub use base::{
     apply_spec, control_mut, set_cursor_provider, set_on_click, set_on_drag, set_text,
@@ -59,6 +60,7 @@ pub use components::{
     Switch, Terminal, Text,
 };
 pub use overlay::{OverlayId, Overlays, Placement};
+pub use router::Router;
 
 pub use draw_render::CornerRadii;
 pub use draw_theme::{self as theme, SurfaceTone, Theme, Tone};

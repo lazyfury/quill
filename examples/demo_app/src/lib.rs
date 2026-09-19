@@ -29,7 +29,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use draw_components::{Badge, Button, Checkbox, Divider, Overlays, ResizeHandle, Switch, Text};
+use draw_components::{
+    Badge, Button, Checkbox, Divider, Overlays, ResizeHandle, Router, Switch, Text,
+};
 use draw_components::{Column, Component, Flex, Label, Panel, Row};
 use draw_core::{
     Color, Cursor, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize,
@@ -143,6 +145,8 @@ pub struct DemoApp {
     detail_tag: NodeId,
     detail_meta: NodeId,
     primary_button: NodeId,
+    /// Router for the right-hand pane (0 = note detail, 1 = settings).
+    detail_router: Router,
     selected: Rc<Cell<usize>>,
     selected_nav: Rc<Cell<usize>>,
     sidebar_width: Rc<Cell<f32>>,
@@ -238,6 +242,7 @@ impl DemoApp {
             detail_tag: detail.tag,
             detail_meta: detail.meta,
             primary_button: detail.primary_button,
+            detail_router: detail.router,
             selected,
             selected_nav,
             clicks,
@@ -332,6 +337,21 @@ impl DemoApp {
         self.selected_nav.get()
     }
 
+    /// Current route of the right-hand detail pane (`0` = note, `1` = settings).
+    pub fn detail_route(&self) -> usize {
+        self.detail_router.index()
+    }
+
+    /// Switches the right-hand detail pane to route `index` and applies it.
+    pub fn show_detail_route(&mut self, index: usize) {
+        self.detail_router.go(&mut self.tree, index);
+    }
+
+    /// The detail router (view `0` = note, view `1` = settings).
+    pub fn detail_router(&self) -> &Router {
+        &self.detail_router
+    }
+
     /// Current sidebar width, in logical pixels (draggable via the gutter).
     pub fn sidebar_width(&self) -> f32 {
         self.sidebar_width.get()
@@ -368,6 +388,8 @@ impl DemoApp {
     pub fn update(&mut self, viewport: ViewportSize, dt: f32) {
         self.viewport = viewport;
         self.overlays.update(dt);
+        // Apply the right-pane route (a click only writes the shared cell).
+        self.detail_router.sync(&mut self.tree);
 
         if self.delete_requested.replace(false) {
             let deleted = self.deleted.clone();
@@ -694,6 +716,7 @@ struct DetailIds {
     tag: NodeId,
     meta: NodeId,
     primary_button: NodeId,
+    router: Router,
 }
 
 fn build_detail(
@@ -704,18 +727,27 @@ fn build_detail(
     clicks: &Rc<Cell<u32>>,
     delete_requested: &Rc<Cell<bool>>,
 ) -> DetailIds {
+    // Shared route for the right-hand pane: 0 = note detail, 1 = settings.
+    let route = Rc::new(Cell::new(0));
+
+    // The router container: a transparent panel that fills the split row. Its
+    // child views use fill anchors, so exactly one (the visible one) occupies
+    // the whole pane.
     let detail = tree.add_child(
         root,
-        Column::new()
-            .gap(0.0)
-            .padding(Edges::ZERO)
-            .grow(1.0)
-            .surface(SurfaceStyle::new(theme.palette.background)),
+        Panel::new()
+            .color(theme.palette.background)
+            .flat()
+            .grow(1.0),
     );
+
+    // --- View 0: the note ------------------------------------------------
+    let note_view = tree.add_child(detail, Column::new().gap(0.0).padding(Edges::ZERO));
 
     // Toolbar.
     let back = selected.clone();
     let forward = selected.clone();
+    let to_settings = route.clone();
     let nav_group = Row::new()
         .align(Align::Center)
         .gap(space::XS)
@@ -726,11 +758,13 @@ fn build_detail(
         .child(icon_box(theme, 28.0).on_click(move || {
             let value = forward.get();
             forward.set((value + 1).min(NOTES.len() - 1));
-        }));
+        }))
+        // Gear placeholder: route to the settings view.
+        .child(icon_box(theme, 28.0).on_click(move || to_settings.set(1)));
 
     let counter = clicks.clone();
     let toolbar = tree.add_child(
-        detail,
+        note_view,
         Row::new()
             .align(Align::Center)
             .gap(space::SM)
@@ -753,11 +787,11 @@ fn build_detail(
     let actions = tree.children(toolbar).unwrap().last().copied().unwrap();
     let primary_button = tree.children(actions).unwrap().last().copied().unwrap();
 
-    tree.add_child(detail, Divider::horizontal(theme));
+    tree.add_child(note_view, Divider::horizontal(theme));
 
     // Content.
     let content = tree.add_child(
-        detail,
+        note_view,
         Column::new().gap(space::LG).padding(Edges::new(
             space::XXL,
             space::LG,
@@ -825,6 +859,39 @@ fn build_detail(
             .child(Button::ghost("Delete", theme).on_click(move || delete_flag.set(true))),
     );
 
+    // --- View 1: settings ------------------------------------------------
+    let settings = tree.add_child(
+        detail,
+        Column::new()
+            .gap(space::LG)
+            .padding(Edges::all(space::XXL))
+            .surface(SurfaceStyle::new(theme.palette.background)),
+    );
+    tree.add_child(settings, Text::heading("Settings", theme));
+    tree.add_child(
+        settings,
+        Text::new(
+            "Preferences for this workspace. A different view in the same pane.",
+            theme,
+        )
+        .tone(Tone::Muted),
+    );
+    tree.add_child(settings, Checkbox::new("Enable sync", theme));
+    tree.add_child(settings, Switch::new(theme).label("Notifications"));
+    tree.add_child(settings, Divider::horizontal(theme));
+
+    let to_note = route.clone();
+    tree.add_child(
+        settings,
+        Button::secondary("Back to note", theme).on_click(move || to_note.set(0)),
+    );
+
+    // --- Router: show one view at a time ---------------------------------
+    let mut router = Router::with_route(detail, route);
+    router.add_node(note_view);
+    router.add_node(settings);
+    router.sync(tree);
+
     DetailIds {
         root: detail,
         hero,
@@ -833,6 +900,7 @@ fn build_detail(
         tag: detail_tag,
         meta: detail_meta,
         primary_button,
+        router,
     }
 }
 
@@ -944,6 +1012,41 @@ mod tests {
             panic!("sidebar is a flex container");
         };
         assert!((flex.padding.top - space::MD).abs() < 1e-3);
+    }
+
+    #[test]
+    fn detail_router_switches_between_note_and_settings() {
+        let mut app = laid_out(1100.0, 720.0);
+        let note = app.detail_router().view(0).unwrap();
+        let settings = app.detail_router().view(1).unwrap();
+
+        assert_eq!(app.detail_route(), 0);
+        assert_eq!(app.tree().is_visible(note), Some(true));
+        assert_eq!(app.tree().is_visible(settings), Some(false));
+        // The inactive view reserves no layout space.
+        assert_eq!(rect(&app, settings), Rect::ZERO);
+
+        app.show_detail_route(1);
+        app.update(app.viewport(), 0.016);
+        app.layout(app.viewport());
+
+        assert_eq!(app.detail_route(), 1);
+        assert_eq!(app.tree().is_visible(note), Some(false));
+        assert_eq!(app.tree().is_visible(settings), Some(true));
+
+        // The active view fills the pane; the hidden one has no rect.
+        let detail = rect(&app, app.detail());
+        let settings_rect = rect(&app, settings);
+        assert!((settings_rect.size.width - detail.size.width).abs() < 1.0);
+        assert!((settings_rect.size.height - detail.size.height).abs() < 1.0);
+        assert_eq!(rect(&app, note), Rect::ZERO);
+
+        // Switching back restores the note view.
+        app.show_detail_route(0);
+        app.update(app.viewport(), 0.016);
+        app.layout(app.viewport());
+        assert_eq!(app.tree().is_visible(note), Some(true));
+        assert_eq!(rect(&app, settings), Rect::ZERO);
     }
 
     #[test]

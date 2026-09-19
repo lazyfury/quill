@@ -134,6 +134,12 @@ priority order and add native tests.
 
 ## Done
 
+- `Router` view switching: `draw_components::Router` shows exactly one child
+  view at a time by toggling scene visibility from a shared route cell. Layout,
+  paint and hit-testing now skip controls hidden at runtime (flex lines drop
+  them and hidden nodes get no rect). `demo_app`'s detail pane is a router with
+  a note view and a settings view.
+
 - Split the old `draw_app` crate: **input routing** moved into `draw_ui`
   (`hit_test` / `handle_input` / `route_input` / `hovered` / `hovered_cursor` /
   `focused` / `is_interactive`), next to the `ControlData` it operates on, and the
