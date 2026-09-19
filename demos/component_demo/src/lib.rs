@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! Ui
-//! ├── Panel (right card)          <- draw_app::add(..., Panel::new())
+//! ├── Panel (right card)          <- tree.add_child(root, Panel::new())
 //! │   └── VBox                    <- component composition
 //! │       ├── Label("Hello")      <- component
 //! │       ├── Button("Click me")  <- component with on_click
@@ -22,7 +22,7 @@ mod demo {
     use wasm_bindgen::prelude::*;
     use web_sys::CanvasRenderingContext2d;
 
-    use draw_app::{Button, Label, Panel, VBox};
+    use draw_app::{Button, Component, Label, Panel, VBox};
     use draw_core::{Color, Edges, NodeId, Rect, Size, Vec2, ViewportSize};
     use draw_render::{Paint, PaintContext, TextAlign};
     use draw_scene::{SceneTree, Visual};
@@ -50,20 +50,18 @@ mod demo {
             let tree_root = tree.root();
 
             // A right-hand card.
-            let panel = draw_app::add(&mut tree, tree_root, Panel::new());
-            draw_app::update_control(&mut tree, panel.id(), |d| {
-                d.anchors = Edges::new(1.0, 0.0, 1.0, 0.0)
-            });
-            draw_app::update_control(&mut tree, panel.id(), |d| {
-                d.offsets = Edges::new(-360.0, 40.0, -40.0, 320.0)
-            });
+            let panel = tree.add_child(
+                tree_root,
+                Panel::new()
+                    .anchors(Edges::new(1.0, 0.0, 1.0, 0.0))
+                    .offsets(Edges::new(-360.0, 40.0, -40.0, 320.0)),
+            );
 
             // Stack contents vertically.
-            let vbox = draw_app::add(&mut tree, panel.id(), VBox::new().separation(12.0));
-            draw_app::add(&mut tree, vbox.id(), Label::new("Hello"));
-            draw_app::add(
-                &mut tree,
-                vbox.id(),
+            let vbox = tree.add_child(panel, VBox::new().separation(12.0));
+            tree.add_child(vbox, Label::new("Hello"));
+            tree.add_child(
+                vbox,
                 Label::new("Drawing Core Component Demo")
                     .font_size(14.0)
                     .color(Color::new(0.70, 0.75, 0.85, 1.0)),
@@ -72,14 +70,13 @@ mod demo {
             // React to events: mutate application state in the callback.
             let clicks = Rc::new(Cell::new(0));
             let counter = clicks.clone();
-            let button = draw_app::add(
-                &mut tree,
-                vbox.id(),
+            let button = tree.add_child(
+                vbox,
                 Button::new("Click me").on_click(move || counter.set(counter.get() + 1)),
             );
 
             // State is reflected back into the UI on the next frame.
-            let status = draw_app::add(&mut tree, vbox.id(), Label::new("Status: Clicked 0 times"));
+            let status = tree.add_child(vbox, Label::new("Status: Clicked 0 times"));
 
             // --- Scene: a rotated Node2D with a child, same tree ----------
             let rotating = tree.add_node2d(tree_root, "Rotating");
@@ -103,8 +100,8 @@ mod demo {
 
             Self {
                 tree,
-                button: button.id(),
-                status: status.id(),
+                button,
+                status,
                 clicks,
                 rotating,
                 viewport: ViewportSize::new(Size::new(800.0, 600.0)),

@@ -2,8 +2,9 @@
 //!
 //! `draw_ui` owns layout and paint only. Every `Control`'s drawing/layout
 //! runtime — layout data and [`Widget`] — lives in the [`SceneTree`] node's
-//! extension slot ([`Control`]); the theme, text measurer, GUI interaction
-//! state and layout cache live in the root node's [`UiRootState`]. Application
+//! extension slot ([`Control`]); the text measurer, GUI interaction state and
+//! layout cache live in the root node's [`UiRootState`]. The theme is not
+//! stored here: it is a value passed to component constructors. Application
 //! concerns (construction, input routing, backend submission) live in
 //! `draw_app`.
 //!
@@ -19,7 +20,6 @@ use std::rc::Rc;
 
 use draw_core::NodeId;
 use draw_scene::SceneTree;
-use draw_theme::Theme;
 
 use crate::control::{
     control_mut, control_of, gui_state, root_state, root_state_mut, CachedText, ControlData,
@@ -43,17 +43,6 @@ impl Ui {
     /// Creates a UI environment handle.
     pub fn new() -> Self {
         Ui
-    }
-
-    /// The active theme, read from the tree root.
-    pub fn theme(&self, tree: &SceneTree) -> Theme {
-        root_state(tree).map_or_else(Theme::default, |state| state.theme)
-    }
-
-    /// Replaces the theme (stored on the tree root). Decorators created before
-    /// this keep their resolved theme, so set it before mounting components.
-    pub fn set_theme(&mut self, tree: &mut SceneTree, theme: Theme) {
-        root_state_mut(tree).theme = theme;
     }
 
     /// Number of times the full measure/arrange pass has run.

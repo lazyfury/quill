@@ -1,20 +1,19 @@
-//! Per-node decorations: themed chrome painted around a control and torn down
-//! with it.
+//! Per-node decorations: chrome painted around a control and torn down with it.
 //!
-//! The core `Widget` enum stays closed, so components that need a themed
-//! surface / foreground (or shared interaction state) install a [`NodeDecor`]
-//! on their root node instead. `Ui::paint` runs `paint_behind` before the
-//! control's own content and `paint_front` after it, in the same single pass —
-//! hosts no longer run separate surface/foreground passes.
+//! The core `Widget` enum stays closed, so components that need a surface /
+//! foreground (or shared interaction state) install a [`NodeDecor`] on their
+//! root node instead. `paint` runs `paint_behind` before the control's own
+//! content and `paint_front` after it, in the same single pass — hosts do not
+//! run separate surface/foreground passes.
 //!
-//! The factory functions at the bottom build the common decorators from a
-//! [`Theme`]; `draw_components` keeps only the component builders.
+//! The factory functions at the bottom build the common decorators. They take
+//! resolved colors (the closures capture what they need), so `draw_ui` never
+//! reads a theme; `draw_components` keeps only the component builders.
 
 use std::rc::Rc;
 
 use draw_core::Rect;
 use draw_render::PaintContext;
-use draw_theme::Theme;
 
 use crate::paint::{self, SurfaceStyle};
 
@@ -38,8 +37,8 @@ pub trait NodeDecor {
 /// A shared handle to a decorator, as stored by [`add_decor`](crate::add_decor).
 pub type DecorRef = Rc<dyn NodeDecor>;
 
-type SurfaceResolve = Box<dyn Fn(&Theme, InteractState) -> SurfaceStyle>;
-type ForegroundFn = Box<dyn Fn(&mut PaintContext, Rect, &Theme, InteractState)>;
+type SurfaceResolve = Box<dyn Fn(InteractState) -> SurfaceStyle>;
+type ForegroundFn = Box<dyn Fn(&mut PaintContext, Rect, InteractState)>;
 
 /// A fixed rounded surface painted behind a node.
 struct StaticSurface(SurfaceStyle);
@@ -50,28 +49,22 @@ impl NodeDecor for StaticSurface {
     }
 }
 
-/// A surface whose style is recomputed from the theme and interaction state.
-struct DynamicSurface {
-    theme: Theme,
-    resolve: SurfaceResolve,
-}
+/// A surface whose style is recomputed from the interaction state.
+struct DynamicSurface(SurfaceResolve);
 
 impl NodeDecor for DynamicSurface {
     fn paint_behind(&self, ctx: &mut PaintContext, rect: Rect, state: InteractState) {
-        let style = (self.resolve)(&self.theme, state);
+        let style = (self.0)(state);
         paint::surface(ctx, rect, &style);
     }
 }
 
 /// Chrome painted in front of a node's content.
-struct Foreground {
-    theme: Theme,
-    draw: ForegroundFn,
-}
+struct Foreground(ForegroundFn);
 
 impl NodeDecor for Foreground {
     fn paint_front(&self, ctx: &mut PaintContext, rect: Rect, state: InteractState) {
-        (self.draw)(ctx, rect, &self.theme, state);
+        (self.0)(ctx, rect, state);
     }
 }
 
@@ -80,25 +73,18 @@ pub fn surface_decor(style: SurfaceStyle) -> DecorRef {
     Rc::new(StaticSurface(style))
 }
 
-/// A dynamic-surface decorator. `theme` is snapshotted when the component
-/// mounts.
+/// A dynamic-surface decorator. The resolver receives the interaction state;
+/// it captures whatever colors it needs when the component builds.
 pub fn dynamic_surface_decor(
-    theme: Theme,
-    resolve: impl Fn(&Theme, InteractState) -> SurfaceStyle + 'static,
+    resolve: impl Fn(InteractState) -> SurfaceStyle + 'static,
 ) -> DecorRef {
-    Rc::new(DynamicSurface {
-        theme,
-        resolve: Box::new(resolve),
-    })
+    Rc::new(DynamicSurface(Box::new(resolve)))
 }
 
-/// A foreground decorator. `theme` is snapshotted when the component mounts.
+/// A foreground decorator. The closure captures whatever colors it needs when
+/// the component builds.
 pub fn foreground_decor(
-    theme: Theme,
-    draw: impl Fn(&mut PaintContext, Rect, &Theme, InteractState) + 'static,
+    draw: impl Fn(&mut PaintContext, Rect, InteractState) + 'static,
 ) -> DecorRef {
-    Rc::new(Foreground {
-        theme,
-        draw: Box::new(draw),
-    })
+    Rc::new(Foreground(Box::new(draw)))
 }

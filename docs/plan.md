@@ -51,34 +51,35 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Theme
 
-- `Theme` currently resolves at mount time; static surfaces/labels keep their
-  colors. Support a **runtime light/dark toggle** by resolving colors at paint
-  time (or remounting). `dynamic_surface` already resolves per frame.
+- `Theme` is a plain `Copy` value passed to component constructors; nothing
+  reads it from the tree. Support a **runtime light/dark toggle** by rebuilding
+  the tree with a different `Theme` (or resolving colors per frame in the
+  component's `prepare`/decorator). `dynamic_surface_decor` already resolves per
+  frame.
 - Font weights are not modeled (no weight axis yet) — add `FontWeight` tokens
   when the backends can render them.
 
-## View layer (`draw_ui`)
+## Component layer (`draw_app` / `draw_components`)
 
-Declarative views are the public construction API (`View` / `BuildContext` /
-`ViewExt` / `Ui::mount`); the retained `Ui` + `Widget` are the runtime. Remaining
-polish, in priority order:
+Components are the public construction API: attach with `SceneTree::add_child`,
+compose with `.child(..)`, and mutate nodes with `Component` modifiers
+(`grow`, `min_size`, `background`, `foreground`, `on_click`, …). `draw_app` owns
+`Component` + `Spec` and the layout primitives; `draw_components` owns the
+themed library. Remaining polish, in priority order:
 
 1. **Reactive text bindings** — add `Text::dynamic(|| …)` (a text source on
-   labels) so `update()` stops calling `ui.set_text`; the runtime re-evaluates the
-   closure at layout/paint. This removes the last `set_*` from app code.
-2. **Container-aware modifiers** — `Modify<V>` only post-processes its node, so
-   `.child(..)` must precede any `ViewExt` modifier. Make container modifiers
-   (`grow`/`padding`/`gap`) forward `child`/`children` so the two interleave
-   freely.
-3. **Explicit rect anchors** — allow a popover/menu to anchor to a raw `Rect` or
+   labels) so `update()` stops calling `draw_app::set_text`; the runtime
+   re-evaluates the closure at layout/paint.
+2. **Explicit rect anchors** — allow a popover/menu to anchor to a raw `Rect` or
    pointer position (context menus), not only a laid-out `NodeId`.
-4. **Keys + reconciliation** — if a host rebuilds the view tree per frame, add
-   `ViewExt::key` and a reconciler that diffs by type/key into `Ui`, reusing the
-   existing dirty tracking / partial relayout.
-5. **`view!` macro (optional sugar)** — a `draw_macros` proc-macro expanding to
+3. **Keys + reconciliation** — if a host rebuilds a subtree per frame, add a
+   reconciler that diffs by type/key, reusing the existing dirty tracking /
+   partial relayout.
+4. **`view!` macro (optional sugar)** — a `draw_macros` proc-macro expanding to
    the builder calls, e.g. `view! { Card(gap = 12.0) { Text("Hi") } }`.
-6. **Migrate remaining imperative hosts** — `component_demo` and any lingering
-   `ui.add` + `ui.set_*` construction; keep `Ui::set_*` runtime-internal only.
+5. **Runtime mutation helpers** — keep `update_control` / `set_text` /
+   `set_on_click` for hosts that animate one node; construction stays
+   component-only.
 
 ## UI runtime — `Ui` boundary & lifecycle (folded into Stage 25)
 
@@ -92,26 +93,11 @@ it is currently a god object and overlaps `SceneTree` on "who owns a control".
 Godot puts `Control` data on the node; here `draw_scene` stays a generic draw
 graph and UI data lives in `Ui`'s `NodeId`-keyed maps. Priority order:
 
-1. **Boundary** — public `Ui` shrinks to the runtime surface (`mount`, `layout`,
-   `paint`, `handle_input`, `theme`/`set_theme`, `set_text_measurer` + read-only
-   queries). Move `set_*` / `insert` / `add_decor` behind `BuildContext`
-   (`pub(crate)`), so construction is exclusively `View`. Merge `Component` into
-   `View` (or make it `pub(crate)`) — one construction abstraction, not three
-   (`Widget` runtime / `Component` mount / `View` build).
-2. **Ownership & lifecycle** — document that `SceneTree` is the hierarchy and
-   `Ui` is the control runtime over it, then add `Ui::remove` that synchronously
-   drops `widgets` / `decorations` / `callbacks` for the subtree. **Done
-   (Stage 25.4b):** `ControlData` now lives on the `SceneTree` node extension
-   slot (single source of truth); `Widget`/`decorations`/`callbacks` are still in
-   `Ui`. Remaining: move `Widget` onto nodes too (would make `draw_scene` know
-   about widgets) and add `Ui::remove`.
-3. **Theme** — either accept and record "`Ui` is the UI runtime and owns the
-   active theme", or introduce an explicit `Environment`/`Context` inherited
-   from the root so the core stays theme-free. Fix the mount-time snapshot so a
-   theme swap updates live surfaces.
-4. **Naming** — `Ui` -> `UiRoot`/`UiDocument` to disambiguate "the UI" from "the
-   runtime instance"; only if it grows further, split `Layout`/`Painter` out and
-   leave `Ui` as a facade.
+**Resolved (Stage 25).** The `Ui` object was removed entirely; `draw_ui` is now
+free functions over the tree, and every per-control runtime value
+(`ControlData`/`Widget`/decorators/callback) lives on the node's extension slot.
+The layout cache, GUI interaction state and text measurer live on the root; the
+**theme is not stored on the tree**. See `docs/godot-migration.md` Phase 4.
 
 ## Demo (`demos/demo_app`)
 
@@ -133,16 +119,15 @@ graph and UI data lives in `Ui`'s `NodeId`-keyed maps. Priority order:
 
 ## Done
 
-- Declarative views (Stage 24): `Ui::mount` + `View`/`ViewExt` compose UI with
-  `.child(..)` and chainable modifiers (`grow`, `min_size`, `background`,
-  `dynamic_background`, `on_click`, `capture`, …); `Column`/`Row` are the
-  standard containers and `Component` is blanket a `View`. `demo_app` and the
-  overlay popover content are built as view trees.
-- Decorator-based chrome, no `Kit` (Stage 23): `Ui` owns the `Theme`
-  (`Ui::theme`/`set_theme`); components implement `draw_ui::Component`, read
-  `ui.theme()` and attach `draw_ui::NodeDecor` (surface / foreground) while
-  registering clicks with `Ui::set_on_click`. A single `ui.paint` /
-  `ui.handle_input` runs everything.
+- Component-native composition (Stage 25): `SceneTree::add_child` is the single
+  attachment point and every `draw_app::Component` supports `.child()` and the
+  other modifiers directly. The `View`/`ViewExt`/`BuildContext`/`Modify` layer
+  was deleted; `draw_app` no longer exposes `add_*`/`mount` free functions.
+  `demo_app`, `Overlays` popover content and the debug overlay use the new API.
+- Decorator-based chrome, no `Kit` (Stage 23): components attach
+  `draw_ui::NodeDecor` (surface / foreground) and register clicks with
+  `draw_app::set_on_click`. A single `draw_ui::paint` / `draw_app::handle_input`
+  runs everything. The theme is a value passed to constructors.
 - Overlay layer (`draw_components::Overlays`): a generic floating layer with `confirm`,
   `popover`, `tips` and `message` built on a pure placement module (flip + clamp),
   scrims, modal capture, Esc/click-outside dismissal and auto-dismiss timers.

@@ -7,10 +7,11 @@
 //! - **Paint** ([`paint`]) emits a backend-neutral `draw_render::DrawList`.
 //!
 //! Control data ([`ControlData`], [`Widget`], [`NodeDecor`]) lives on the
-//! [`SceneTree`] node's extension slot, and the theme / text measurer / GUI
-//! interaction state / layout cache live on the root node. Everything else —
-//! building views, routing input, and submitting the resulting `DrawList` to a
-//! backend — lives in `draw_app`.
+//! [`SceneTree`] node's extension slot, and the text measurer / GUI interaction
+//! state / layout cache live on the root node. The theme is a value passed to
+//! component constructors. Everything else — building components, routing
+//! input, and submitting the resulting `DrawList` to a backend — lives in
+//! `draw_app`.
 //!
 //! ```ignore
 //! use draw_ui as ui;
@@ -51,22 +52,11 @@ use std::rc::Rc;
 use draw_core::{NodeId, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
-use draw_theme::Theme;
 
 use crate::control::{gui_state as read_gui_state, gui_state_mut as control_gui_state_mut};
 use crate::ui::Ui;
 
 // -- environment -------------------------------------------------------------
-
-/// The active theme (stored on the tree root).
-pub fn theme(tree: &SceneTree) -> Theme {
-    Ui.theme(tree)
-}
-
-/// Replaces the theme (stored on the tree root).
-pub fn set_theme(tree: &mut SceneTree, theme: Theme) {
-    Ui.set_theme(tree, theme)
-}
 
 /// Replaces the text measurer (stored on the tree root).
 pub fn set_text_measurer(tree: &mut SceneTree, measurer: Rc<dyn TextMeasurer>) {

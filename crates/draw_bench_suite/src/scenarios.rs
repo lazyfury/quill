@@ -5,6 +5,7 @@
 //! ids a routine needs to mutate. No randomness, no I/O: two calls to the same
 //! builder produce identical structure.
 
+use draw_app::{Component, Flex, Label, Panel, VBox};
 use draw_core::{Color, NodeId, Size, Vec2, ViewportSize};
 use draw_scene::{SceneTree, Visual};
 
@@ -75,16 +76,16 @@ impl UiFixture {
         let viewport = ViewportSize::new(VIEWPORT_SIZE);
         let mut tree = SceneTree::new();
         let tree_root = tree.root();
-        let root = draw_app::add_flex(&mut tree, tree_root, draw_ui::FlexStyle::column());
-        draw_app::update_control(&mut tree, root, |d| {
-            d.mouse_filter = draw_ui::MouseFilter::Ignore
-        });
-        let panel = draw_app::add_panel(&mut tree, root);
-        let vbox = draw_app::add_vbox(&mut tree, panel);
+        let root = tree.add_child(
+            tree_root,
+            Flex::column().mouse_filter(draw_ui::MouseFilter::Ignore),
+        );
+        let panel = tree.add_child(root, Panel::new());
+        let vbox = tree.add_child(panel, VBox::new());
 
         let mut ids = Vec::with_capacity(n);
         for i in 0..n {
-            ids.push(draw_app::add_label(&mut tree, vbox, format!("Item {i}")));
+            ids.push(tree.add_child(vbox, Label::new(format!("Item {i}"))));
         }
 
         draw_ui::layout(&mut tree, viewport);

@@ -65,29 +65,32 @@ The crate split is deliberate: `draw_ui` is the UI runtime **and** the styling
 primitives (`SurfaceStyle`, `fill_rounded_rect`/`inset`/`surface`, `Tone`,
 `SurfaceTone`, and the `surface_decor`/`dynamic_surface_decor`/
 `foreground_decor` factories), while `draw_components` contains **only component
-builders**. Components implement `draw_ui::Component`, read the active `Theme`
-from `ui.theme()`, and attach their chrome to their own node. Hosts build one
-`Ui`, set the theme once, and use a single paint/input pass:
+builders**. Components implement `draw_app::Component`, receive the `Theme` as a
+`Copy` value, and attach their chrome to their own node. Hosts build one tree
+and use a single paint/input pass:
 
 ```rust
+use draw_app::{Component, Flex};
 use draw_components::{Card, Checkbox, Text};
 use draw_scene::SceneTree;
-use draw_theme::{space, Theme};
-use draw_ui as ui;
+use draw_theme::{space, Theme, Tone};
 
+let theme = Theme::dark();
 let mut tree = SceneTree::new();
-ui::set_theme(&mut tree, Theme::dark());
 
-let root = ui::add_flex(&mut tree, tree.root(), ui::FlexStyle::column());
-ui::mount(&mut tree, root, Card::new().gap(space::MD)
-    .child(Text::heading("Settings"))
-    .child(Text::small("Changes save automatically.").tone(Tone::Muted))
-    .child(Checkbox::new("Verbose output")));
+let root = tree.add_child(tree.root(), Flex::column());
+tree.add_child(root, Card::new(theme).gap(space::MD)
+    .child(Text::heading("Settings", theme))
+    .child(Text::small("Changes save automatically.", theme).tone(Tone::Muted))
+    .child(Checkbox::new("Verbose output", theme)));
 
-ui::layout(&mut tree, viewport);
-ui::paint(&tree, &mut ctx);        // surfaces + content + marks, in tree order
-ui::route_input(&mut tree, &event); // dispatches component clicks
+draw_ui::layout(&mut tree, viewport);
+draw_ui::paint(&tree, &mut ctx);          // surfaces + content + marks, in tree order
+draw_app::route_input(&mut tree, &event); // dispatches component clicks
 ```
+
+The theme is a `Copy` value passed to constructors; nothing reads it from the
+tree, so switching light/dark is just building with a different `Theme`.
 
 ### Paint passes
 
@@ -107,15 +110,16 @@ circles into rounded surfaces without double-blending translucent fills.
 
 ### Interactions
 
-Components register clicks with `ui.set_on_click(node, ..)`; a hit on any
+Components register clicks with `draw_app::set_on_click(tree, node, ..)` or the
+`Component::on_click` builder; a hit on any
 descendant walks up to the nearest ancestor callback. Hover/pressed/focused
 state lives in the core and `Ui::state_for(node)` inherits it from ancestors,
 which is what decorators read each frame. Checkbox/Switch share their state
 through `Rc<Cell<bool>>`.
 
 Surfaces are usually static, but selection and hover need per-frame styles:
-`dynamic_surface_decor(theme, |theme, state| ...)` recomputes a `SurfaceStyle`
-from the theme and the node's `InteractState` on every frame.
+`dynamic_surface_decor(|state| ...)` recomputes a `SurfaceStyle` from the node's
+`InteractState` on every frame; the closure captures the theme/colors it needs.
 
 ### Demo
 
@@ -141,31 +145,17 @@ placeholders) and detail pane (toolbar, hero scene, body, actions).
 `draw_components` containers take children, so a screen is one expression:
 
 ```rust
-ui.mount(ui.root(), Card::new().gap(12.0)
-    .child(Text::heading("Settings"))
-    .child(Button::primary("Save").on_click(save).grow(1.0)));
+tree.add_child(tree.root(), Card::new(theme).gap(12.0)
+    .child(Text::heading("Settings", theme))
+    .child(Button::primary("Save", theme).on_click(save).grow(1.0)));
 ```
 
-`draw_ui::ViewExt` modifiers (`grow`, `min_size`, `anchors`/`offsets`,
-`background`, `dynamic_background`, `foreground`, `on_click`, `capture`, …)
-wrap any view and post-process its node.
+Every `Component` supports the same modifiers as a method: `grow`, `min_size`,
+`anchors`/`offsets`, `background`/`surface`/`dynamic_background`, `foreground`,
+`on_click`, `mouse_filter` and `child`.
 
-Extend the library by implementing `draw_ui::Component`:
-
-```rust
-use draw_core::NodeId;
-use draw_components::{Component, ControlRef};
-use draw_ui::Tone;
-use draw_ui::{Label, Ui};
-
-struct Caption(String);
-
-impl Component for Caption {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        ui.add(parent, Label::new(self.0))
-    }
-}
-```
+Extend the library by implementing `draw_app::Component` (see
+`docs/components.md` for the full `spec`/`widget` walkthrough).
 
 ## Overlays
 
@@ -227,7 +217,8 @@ backward-compatible addition and record it here.
   values from the theme. This is additive: existing `Widget`/`ControlData`
   shapes are unchanged.
 - **`draw_ui` owns the theme and styling primitives** (Stage 24): `draw_ui` now
-  depends on `draw_theme` and `Ui::theme()` / `Ui::set_theme()` expose the active
+  receives a `Theme` value; it is not stored on the tree (the old `Ui::theme()`
+  ambient theme was removed in Stage 25)
   tokens. `SurfaceStyle`, `fill_rounded_rect`/`fill_rounded_rect_corners`/`inset`/
   `surface`, `Tone`, `SurfaceTone` and the `surface_decor`/
   `dynamic_surface_decor`/`foreground_decor` factories moved from `draw_kit` into

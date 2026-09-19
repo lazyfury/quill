@@ -14,12 +14,14 @@
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_scene";
 
+mod child;
 mod input;
 mod node;
 mod paint;
 mod tree;
 mod viewport;
 
+pub use child::SceneChild;
 pub use input::GuiInput;
 pub use node::{
     AnchorMode, Camera2DData, CanvasItem, CanvasLayerData, DirtyFlags, Node, NodeKind, Visual,

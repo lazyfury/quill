@@ -1,68 +1,71 @@
 //! Text components.
 
-use draw_app::Label;
-use draw_core::{Color, NodeId};
-use draw_scene::SceneTree;
-use draw_theme::{TextSize, Tone};
-use draw_ui::TextOptions;
-
-use crate::{Component, ControlRef};
+use draw_app::{Component, Spec};
+use draw_core::Color;
+use draw_theme::{TextSize, Theme, Tone};
+use draw_ui::{TextOptions, Widget};
 
 /// A single block of text with a semantic size and color.
 ///
+/// The theme is a value passed to the constructor; the component resolves its
+/// tone with it and never reads a theme from the tree.
+///
 /// ```ignore
-/// draw_app::add(parent, Text::heading("Settings"));
-/// draw_app::add(parent, Text::body("Changes are saved automatically.").tone(Tone::Muted));
+/// tree.add_child(root, Text::heading("Settings", theme));
+/// tree.add_child(root, Text::body("Saved automatically.", theme).tone(Tone::Muted));
 /// ```
-#[derive(Debug, Clone)]
 pub struct Text {
+    spec: Spec,
     text: String,
     size: TextSize,
     tone: Tone,
     color: Option<Color>,
     options: TextOptions,
+    theme: Theme,
 }
 
 impl Text {
     /// Body text in the default foreground.
-    pub fn new(text: impl Into<String>) -> Self {
+    pub fn new(text: impl Into<String>, theme: Theme) -> Self {
         Self {
+            spec: Spec::leaf(),
             text: text.into(),
             size: TextSize::Body,
             tone: Tone::Default,
             color: None,
             options: TextOptions::default(),
+            theme,
         }
     }
 
     /// 48–64px hero text.
-    pub fn display(text: impl Into<String>) -> Self {
-        Self::new(text).size(TextSize::Display)
+    pub fn display(text: impl Into<String>, theme: Theme) -> Self {
+        Self::new(text, theme).size(TextSize::Display)
     }
 
     /// 28–40px page title.
-    pub fn title(text: impl Into<String>) -> Self {
-        Self::new(text).size(TextSize::Title)
+    pub fn title(text: impl Into<String>, theme: Theme) -> Self {
+        Self::new(text, theme).size(TextSize::Title)
     }
 
     /// 20–24px section heading.
-    pub fn heading(text: impl Into<String>) -> Self {
-        Self::new(text).size(TextSize::Heading)
+    pub fn heading(text: impl Into<String>, theme: Theme) -> Self {
+        Self::new(text, theme).size(TextSize::Heading)
     }
 
     /// 16–18px subsection heading.
-    pub fn subheading(text: impl Into<String>) -> Self {
-        Self::new(text).size(TextSize::Subheading)
+    pub fn subheading(text: impl Into<String>, theme: Theme) -> Self {
+        Self::new(text, theme).size(TextSize::Subheading)
     }
 
     /// 12–14px secondary text.
-    pub fn small(text: impl Into<String>) -> Self {
-        Self::new(text).size(TextSize::Small)
+    pub fn small(text: impl Into<String>, theme: Theme) -> Self {
+        Self::new(text, theme).size(TextSize::Small)
     }
 
     /// 11–12px metadata.
-    pub fn caption(text: impl Into<String>) -> Self {
-        Self::new(text).size(TextSize::Caption)
+    pub fn caption(text: impl Into<String>, theme: Theme) -> Self {
+        Self::new(text, theme).size(TextSize::Caption)
     }
 
     pub fn size(mut self, size: TextSize) -> Self {
@@ -108,16 +111,22 @@ impl Text {
 }
 
 impl Component for Text {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let theme = draw_ui::theme(tree);
-        let color = self.color.unwrap_or_else(|| self.tone.color(&theme));
-        draw_app::add(
-            tree,
-            parent,
-            Label::new(self.text)
-                .font_size(self.size.px())
-                .color(color)
-                .text_options(self.options),
-        )
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Text"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Label {
+            text: self.text.clone(),
+            font_size: self.size.px(),
+            color: self.color.unwrap_or_else(|| self.tone.color(&self.theme)),
+            options: self.options,
+        }
     }
 }
+
+draw_app::impl_scene_child!(Text);

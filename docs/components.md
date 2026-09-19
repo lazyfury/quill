@@ -1,35 +1,55 @@
 # Components
 
-`draw_ui` provides a reusable component API on top of the `draw_scene` tree.
-All UI state lives on the tree, so the crate is a set of free functions over
-`&SceneTree` / `&mut SceneTree` — there is no `Ui` object.
+UI is built from **components** on one `draw_scene::SceneTree`. A component is a
+value that builds exactly one primary control node; attach it with
+`SceneTree::add_child` and nest with `.child()`.
+
+All UI runtime state lives on the tree (control data, widget, decorators, click
+callback, GUI state, layout cache, text measurer). `draw_ui` is a set of free
+functions over `&SceneTree` / `&mut SceneTree` — there is no `Ui` object. The
+theme is a plain value passed to component constructors; it is never stored on
+the tree.
+
+`draw_app` owns the app-facing trait and the layout primitives (`Flex`, `Panel`,
+`Label`, `Button`, `Grid`, `VBox`, `HBox`, `Column`, `Row`). `draw_components`
+adds the themed library (`Text`, `Card`, `Button`, `Checkbox`, `Switch`, …).
 
 ## Create & compose components
 
-Mount small builder components with [`add`](crate::add):
+Attach primitives with `add_child`; compose a subtree with `.child(..)`:
 
 ```rust
+use draw_app::{Button, Component, Flex, Label, Panel, VBox};
 use draw_scene::SceneTree;
-use draw_ui as ui;
 
 let mut tree = SceneTree::new();
-let root = ui::add_flex(&mut tree, tree.root(), ui::FlexStyle::column());
-let panel = ui::add(&mut tree, root, Panel::new());
-let vbox = ui::add(&mut tree, panel.id(), VBox::new().separation(12.0));
-let label = ui::add(&mut tree, vbox.id(), Label::new("Hello"));
 
-let button = ui::add(
-    &mut tree,
-    vbox.id(),
+let root = tree.add_child(tree.root(), Flex::column().gap(8.0));
+let panel = tree.add_child(root, Panel::new());
+let vbox = tree.add_child(panel, VBox::new().separation(12.0));
+let label = tree.add_child(vbox, Label::new("Hello"));
+
+let button = tree.add_child(
+    vbox,
     Button::new("Click me").on_click(|| { /* mutate app state */ }),
 );
-ui::layout(&mut tree, viewport);
-ui::paint(&tree, &mut ctx);
+
+// Equivalent, but the whole subtree is one value:
+tree.add_child(
+    root,
+    Panel::new()
+        .child(Label::new("Settings"))
+        .child(Button::new("Save")),
+);
+
+draw_ui::layout(&mut tree, viewport);
+draw_ui::paint(&tree, &mut ctx);
 ```
 
-Available components: `Panel`, `Flex`, `VBox`, `HBox`, `Grid`, `Label`,
-`Button`. `ControlRef` is an owned, `Copy` handle; `ref.id()` gives the
-underlying `NodeId`.
+`add_child` returns the created `NodeId`. Every node-mutating setter is a
+`Component` method (`grow`, `min_size`, `anchors`, `offsets`, `order`,
+`background`, `surface`, `foreground`, `on_click`, `mouse_filter`, `child`), so
+they chain after any component.
 
 ## Layout
 
@@ -51,24 +71,33 @@ right = parent.left + parent.width * anchor.right + offset.right
 use draw_core::Edges;
 
 // fill the parent
-ui.set_anchors(panel.id(), Edges::new(0.0, 0.0, 1.0, 1.0));
-ui.set_offsets(panel.id(), Edges::ZERO);
+tree.add_child(
+    root,
+    Panel::new()
+        .anchors(Edges::new(0.0, 0.0, 1.0, 1.0))
+        .offsets(Edges::ZERO),
+);
 
 // pin to the top-right, 320x300
-ui.set_anchors(panel.id(), Edges::new(1.0, 0.0, 1.0, 0.0));
-ui.set_offsets(panel.id(), Edges::new(-360.0, 40.0, -40.0, 340.0));
+tree.add_child(
+    root,
+    Panel::new()
+        .anchors(Edges::new(1.0, 0.0, 1.0, 0.0))
+        .offsets(Edges::new(-360.0, 40.0, -40.0, 340.0)),
+);
 ```
 
 ### Flex
 
 `VBox`/`HBox` are convenience column/row flex containers. For full control use
-`Flex` (or `ui.add_flex`):
+`Flex`:
 
 ```rust
-use draw_ui::{Align, Flex, Justify};
+use draw_app::Flex;
+use draw_ui::{Align, Justify};
 
-let row = ui.add(
-    panel.id(),
+let row = tree.add_child(
+    panel,
     Flex::row()
         .justify(Justify::SpaceBetween)
         .align(Align::Center)
@@ -85,40 +114,45 @@ let row = ui.add(
 - `gap` (a.k.a. `separation`), `cross_gap` (wrapped-line gap), `padding`,
   `wrap` for multi-line rows.
 
-Per-child sizing is set on the control and read by its parent:
+Per-child sizing is a `Component` modifier:
 
 ```rust
-use draw_ui::{LayoutStyle, SizeBasis};
+use draw_ui::SizeBasis;
 
-// grow to fill leftover main-axis space ("拉伸/撑开")
-ui.set_flex_grow(button.id(), 1.0);
-// or replace the whole participation record
-ui.set_layout_style(button.id(), LayoutStyle::new().grow(1.0).basis(SizeBasis::Px(120.0)));
-// paint/placement order within the parent (lower first)
-ui.set_layout_style(button.id(), LayoutStyle::new().order(-1));
+tree.add_child(
+    row,
+    Panel::new()
+        .grow(1.0)                       // absorb leftover main-axis space
+        .basis(SizeBasis::Px(120.0))     // Auto / Px / Percent
+        .shrink(0.0)                     // resist overflow
+        .order(-1),                      // paint/placement order within the parent
+);
 ```
 
 `grow` absorbs leftover space, `shrink` resists overflow (weighted by basis),
-`basis` chooses `Auto`/`Px`/`Percent`, and `LayoutStyle::align_self` overrides
-the container's cross-axis alignment for one child.
+and `LayoutStyle::align_self` overrides the container's cross-axis alignment for
+one child.
 
 ### Grid
 
 ```rust
-use draw_ui::{Align, AlignContent, Grid, GridPlacement, Track};
+use draw_app::Grid;
+use draw_ui::{Align, AlignContent, GridPlacement, Track};
 
-let grid = ui.add(
-    panel.id(),
+let grid = tree.add_child(
+    panel,
     Grid::new(vec![Track::Px(120.0), Track::Fr(1.0), Track::Fr(2.0)])
         .rows(vec![Track::Auto, Track::Px(40.0)])
         .align_items(Align::Center)    // vertical within the cell
         .justify_items(Align::Stretch) // horizontal within the cell
-        .align_content(AlignContent::Stretch) // distribute rows
+        .align_content(AlignContent::Stretch)
         .gap(8.0),
 );
 
-// explicit cell placement (optional; otherwise auto-flow row-major)
-ui.set_layout_style(cell.id(), LayoutStyle::new().grid(GridPlacement::new(1, 0).column_span(2)));
+// explicit cell placement via the released context id
+draw_app::update_control(&mut tree, cell, |data| {
+    data.layout.grid = GridPlacement::new(1, 0).column_span(2);
+});
 ```
 
 Auto tracks grow to fit items that span multiple tracks. Explicit placement
@@ -132,63 +166,62 @@ newlines and spaces, and between East-Asian wide characters; overlong words are
 hard-broken. A stretched label reports the taller `preferred` height it needs
 for its wrapped lines.
 
-`Label` exposes overflow options:
+`Label` (and themed `Text`) expose overflow options:
 
 ```rust
-ui.add(
-    panel.id(),
+tree.add_child(
+    panel,
     Label::new("A long paragraph ...")
         .max_lines(2)
-        .ellipsis(true),   // clip to 2 lines with “…”; `wrap(false)` disables soft wrap
+        .ellipsis(true),   // clip to 2 lines with “…”; `.wrap(false)` disables soft wrap
 );
 ```
-
-`Button` accepts the same `.wrap(bool)` / `.max_lines(n)` / `.ellipsis(bool)`
-builders (wrapping is off by default); a wrapped button grows its height and
-centers each line.
 
 Measurement is pluggable via `TextMeasurer`, so layout stays deterministic and
 backend-neutral while the host supplies real metrics:
 
 ```rust
 use std::rc::Rc;
-use draw_ui::{FixedWidthTextMeasurer, TextMeasurer};
+use draw_ui::FixedWidthTextMeasurer;
 
-// e.g. match a fixed-width bitmap-font backend
-ui.set_text_measurer(Rc::new(FixedWidthTextMeasurer::default()));
+draw_ui::set_text_measurer(&mut tree, Rc::new(FixedWidthTextMeasurer::default()));
 ```
 
 The default is `ApproxTextMeasurer` (proportional estimate). Injecting a
-measurer invalidates layout.
+measurer invalidates layout. The measurer lives on the tree root; the theme does
+not.
 
 ### Redraw / layout caching
 
-`Ui` (through the layout cache stored on the tree's root node) caches the last
-resolved `ViewportSize` and skips measure/arrange unless it is invalidated.
-Inserting controls, changing anchors/offsets/layout style, changing text,
-`tree_mut()`, swapping the measurer, or a new viewport size all mark it dirty. A
-change only dirties that node and its ancestors, so clean sibling subtrees whose
-resolved rects are unchanged are skipped (partial relayout). Call
-`ui.layout(viewport)` after changes; `ui.layout_count(&tree)` and
-`ui.last_arranged_nodes(&tree)` report the work done, and
-`ui.invalidate_layout(&mut tree)` forces a full pass.
+The layout cache stored on the tree root caches the last resolved `ViewportSize`
+and skips measure/arrange unless invalidated. Inserting controls, changing
+anchors/offsets/layout style, changing text, swapping the measurer, or a new
+viewport size all mark it dirty. A change only dirties that node and its
+ancestors, so clean sibling subtrees whose resolved rects are unchanged are
+skipped (partial relayout). Call `draw_ui::layout(&mut tree, viewport)` after
+changes; `draw_ui::layout_count(&tree)` and `draw_ui::last_arranged_nodes(&tree)`
+report the work done, and `draw_ui::invalidate_layout(&mut tree)` forces a full
+pass.
 
-Within a pass, repeated measurements of the same control are memoized, and
-paint reuses a per-control cache of wrapped/clipped lines until its text, font,
-width, `TextOptions`, or the measurer changes.
+Within a pass, repeated measurements of the same control are memoized, and paint
+reuses a per-control cache of wrapped/clipped lines until its text, font, width,
+`TextOptions`, or the measurer changes.
 
 ## Respond to input
 
 ```rust
 use draw_core::{EventResult, InputEvent, PointerButton};
 
-let result: EventResult = ui.handle_input(&InputEvent::PointerDown {
-    position: draw_core::Vec2::new(100.0, 100.0),
-    button: PointerButton::Left,
-});
+let result: EventResult = draw_app::handle_input(
+    &mut tree,
+    &InputEvent::PointerDown {
+        position: draw_core::Vec2::new(100.0, 100.0),
+        button: PointerButton::Left,
+    },
+);
 
-ui.set_on_click(button.id(), || { /* ... */ });  // or Button::on_click builder
-let count = ui.click_count(button.id());
+draw_app::set_on_click(&mut tree, button, || { /* ... */ }); // or Button::on_click builder
+let count = draw_app::click_count(&tree, button);
 ```
 
 Hit testing returns the topmost control under a point, honoring `MouseFilter`
@@ -198,36 +231,62 @@ focused button. MVP does target dispatch; capture/bubble is a future extension.
 ## Request redraw
 
 The UI is immediate-mode over a persistent tree. Mutate state, call
-`ui.layout(viewport)`, then paint a fresh `DrawList` each frame:
+`draw_ui::layout(&mut tree, viewport)`, then paint a fresh `DrawList` each frame:
 
 ```rust
 let mut ctx = draw_render::PaintContext::new();
-ui.paint(&mut ctx);
+draw_ui::paint(&tree, &mut ctx);
 let list = ctx.into_draw_list();
 ```
 
 ## Extend with a custom component
 
-Implement `Component` for your own builder and mount it with `Ui::add`:
+Implement `draw_app::Component` for your own builder and attach it with
+`add_child`:
 
 ```rust
-use draw_ui::{Component, ControlRef};
-use draw_core::NodeId;
+use draw_app::{Component, Flex, Spec};
+use draw_core::{Color, NodeId};
+use draw_scene::SceneTree;
+use draw_ui::Widget;
 
-struct Badge { text: String }
+struct Badge {
+    spec: Spec,
+    text: String,
+    color: Color,
+}
 
 impl Component for Badge {
-    fn mount(self, ui: &mut draw_ui::Ui, parent: NodeId) -> ControlRef {
-        let panel = ui.add(parent, draw_ui::Panel::new());
-        ui.add(panel.id(), draw_ui::Label::new(self.text));
-        panel
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Badge"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Label {
+            text: self.text.clone(),
+            font_size: 12.0,
+            color: self.color,
+            options: draw_ui::TextOptions::no_wrap(),
+        }
     }
 }
+
+draw_app::impl_scene_child!(Badge);
 ```
+
+The default `build` creates the control, installs `widget()`, and applies the
+spec (layout, background/foreground, click callback, `.child()` list). Override
+`prepare(&mut self)` to compute decorators/children from field values, and
+`build` for fully custom composites.
 
 Keep behavior driven only by core state so components stay headless-testable.
 
 ## Full example
 
 See `demos/component_demo` for the complete recommended pattern (composition,
-layout, `on_click`, state -> UI, WASM attach).
+layout, `on_click`, state -> UI, WASM attach) and `demos/demo_app` for the
+themed component library.

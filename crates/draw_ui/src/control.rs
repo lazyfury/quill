@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use draw_core::{Edges, NodeId, Rect, Size, Vec2, ViewportSize};
 use draw_scene::SceneTree;
-use draw_theme::Theme;
 
 use crate::decor::DecorRef;
 use crate::layout::{ApproxTextMeasurer, ContentSize, LayoutStyle, TextMeasurer, TextOptions};
@@ -167,13 +166,13 @@ pub(crate) struct LayoutCache {
     pub(crate) measure: HashMap<(NodeId, u32, u32), ContentSize>,
 }
 
-/// Everything the UI layer stores on the root node: the active theme, the text
-/// measurer, viewport GUI interaction state, and the layout cache.
+/// Everything the UI layer stores on the root node: the text measurer,
+/// viewport GUI interaction state and the layout cache.
 ///
 /// `Ui` is a zero-sized environment on top of this; the tree (root node) is the
-/// single owner of UI state.
+/// single owner of UI state. The theme is not stored here: it is a plain value
+/// passed to component builders by the application.
 pub(crate) struct UiRootState {
-    pub(crate) theme: Theme,
     pub(crate) text_measurer: Rc<dyn TextMeasurer>,
     pub(crate) gui: GuiState,
     pub(crate) layout: RefCell<LayoutCache>,
@@ -182,7 +181,6 @@ pub(crate) struct UiRootState {
 impl Default for UiRootState {
     fn default() -> Self {
         Self {
-            theme: Theme::default(),
             text_measurer: Rc::new(ApproxTextMeasurer),
             gui: GuiState::default(),
             layout: RefCell::new(LayoutCache::default()),

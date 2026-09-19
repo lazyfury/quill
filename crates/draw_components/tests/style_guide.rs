@@ -3,7 +3,7 @@
 
 use draw_backend_recording::RecordingBackend;
 use draw_components::{
-    Badge, Card, Checkbox, CodeBlock, Divider, EmptyState, Switch, Terminal, Text,
+    Badge, Card, Checkbox, CodeBlock, Component, Divider, EmptyState, Switch, Terminal, Text,
 };
 use draw_core::{Edges, Size, ViewportSize};
 use draw_render::{DrawCommand, PaintContext, RenderBackend};
@@ -12,59 +12,36 @@ use draw_theme::{Theme, Tone};
 
 fn build(theme: Theme) -> SceneTree {
     let mut tree = SceneTree::new();
-    draw_ui::set_theme(&mut tree, theme);
     let tree_root = tree.root();
-    let root = draw_app::add_flex(&mut tree, tree_root, draw_ui::FlexStyle::column());
-    draw_app::update_control(&mut tree, root, |data| {
-        data.mouse_filter = draw_ui::MouseFilter::Ignore
-    });
+    let root = tree.add_child(
+        tree_root,
+        draw_app::Flex::column().mouse_filter(draw_ui::MouseFilter::Ignore),
+    );
 
-    let card = draw_app::add(
-        &mut tree,
+    let card = tree.add_child(
         root,
-        Card::new().padding(Edges::all(24.0)).gap(12.0),
+        Card::new(theme)
+            .padding(Edges::all(24.0))
+            .gap(12.0)
+            .child(Text::title("Component Kit", theme))
+            .child(Text::small("design tokens + themed components", theme).tone(Tone::Muted))
+            .child(Divider::horizontal(theme))
+            .child(Badge::new("Stable", theme).tone(Tone::Success))
+            .child(Checkbox::new("Enable logs", theme).checked(true))
+            .child(Switch::new(theme).label("Dark mode").on(true))
+            .child(
+                CodeBlock::new("cargo test --workspace", theme)
+                    .filename("shell")
+                    .language("bash"),
+            )
+            .child(
+                Terminal::new(theme)
+                    .command("cargo test")
+                    .output("test result: ok. 23 passed; 0 failed"),
+            )
+            .child(EmptyState::new("No items", theme).description("Create one to get started.")),
     );
-    draw_app::add(&mut tree, card.id(), Text::title("Component Kit"));
-    draw_app::add(
-        &mut tree,
-        card.id(),
-        Text::small("design tokens + themed components").tone(Tone::Muted),
-    );
-    draw_app::add(&mut tree, card.id(), Divider::horizontal());
-    draw_app::add(
-        &mut tree,
-        card.id(),
-        Badge::new("Stable").tone(Tone::Success),
-    );
-    draw_app::add(
-        &mut tree,
-        card.id(),
-        Checkbox::new("Enable logs").checked(true),
-    );
-    draw_app::add(
-        &mut tree,
-        card.id(),
-        Switch::new().label("Dark mode").on(true),
-    );
-    draw_app::add(
-        &mut tree,
-        card.id(),
-        CodeBlock::new("cargo test --workspace")
-            .filename("shell")
-            .language("bash"),
-    );
-    draw_app::add(
-        &mut tree,
-        card.id(),
-        Terminal::new()
-            .command("cargo test")
-            .output("test result: ok. 23 passed; 0 failed"),
-    );
-    draw_app::add(
-        &mut tree,
-        card.id(),
-        EmptyState::new("No items").description("Create one to get started."),
-    );
+    let _ = card;
 
     tree
 }

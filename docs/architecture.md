@@ -61,15 +61,14 @@ logical size plus the world -> screen `canvas_transform`.)
 - Stage 12 — layout engine v2 [done]: intrinsic sizing (`ContentSize`),
   flex (grow/shrink/basis/justify/align/wrap), grid (`Track`, placement,
   spans), and deterministic text wrapping. `VBox`/`HBox` are now thin
-  aliases over a column/row `FlexStyle`; `add_flex`/`add_grid` add
-  configurable containers.
+  aliases over a column/row `FlexStyle`; `Flex`/`Grid` are components.
 - Stage 13 — layout v2 polish [done]: flex `align-content` and separate
   cross-axis gap; grid `align-items`/`justify-items`/`align-content`,
   span-aware auto tracks; per-control `LayoutStyle::order`.
 - Stage 14 — text measurement [done]: pluggable `TextMeasurer`
   (`ApproxTextMeasurer`, `FixedWidthTextMeasurer`), `TextOptions`
   (`wrap`/`max_lines`/`ellipsis`). A host injects metrics via
-  `Ui::set_text_measurer`; layout stays deterministic without font shaping.
+  `draw_ui::set_text_measurer`; layout stays deterministic without font shaping.
 - Stage 15 — incremental layout [done]: `Ui` caches the resolved viewport and
   skips measure/arrange unless a dirty flag is set (structure/property/text
   changes, `tree_mut`, measurer swap, or a different viewport).
@@ -111,15 +110,21 @@ logical size plus the world -> screen `canvas_transform`.)
   plus `Ui::add_decor` / `Ui::state_for` let components attach themed chrome to
   their root node. `Ui::paint` runs decorators around the widget content in one
   pass and `Ui::set_on_click` accepts any control, dispatching to the nearest
-  ancestor. `Ui` owns the active `Theme` (`Ui::theme`/`set_theme`, so
-  `draw_ui -> draw_theme`) and the `Kit` runtime is gone: `draw_components` components
-  implement `draw_ui::Component`, read `ui.theme()` and attach decorators, and
-  hosts run a single `ui.paint` / `ui.handle_input`.
-- Stage 24 — declarative views [done]: `draw_ui::{View, BuildContext, ViewExt,
-  Column, Row}` + `Ui::mount`. A view tree composes with `.child(..)` and
-  chainable modifiers that post-process the built node, so node ids and
-  `ui.set_*` stay out of app code. `Component` is blanket a `View`, and
-  `demo_app` / overlay content are built as view trees.
+  ancestor. The `Kit` runtime is gone: `draw_components` components attach
+  decorators, and hosts run a single paint / input pass.
+- Stage 24 — declarative views [done, superseded by Stage 25]:
+  `draw_ui::{View, BuildContext, ViewExt, Column, Row}` + `Ui::mount`. A view
+  tree composes with `.child(..)` and chainable modifiers that post-process the
+  built node. Stage 25 replaced this layer with component-native `.child()`.
+- Stage 25 — unified scene + component API [in progress]: one `SceneTree` owns
+  world and UI. `draw_scene::{Viewport, Camera2D, CanvasLayer}` drive the world
+  and layer UI in viewport coordinates. Components are values built with
+  `SceneTree::add_child`; every `draw_app::Component` carries a `Spec` and
+  supports `.child()`/`.background()`/`.grow()` natively (no `View`/`ViewExt`
+  layer). The theme is a `Copy` value passed to constructors — it is no longer
+  stored on the tree; the text measurer still lives on the root.
+  `draw_ui` is layout + paint free functions plus per-node runtime
+  (`ControlData`/`Widget`/decorators/GUI state/layout cache).
 
 ## Debugging & performance inspection (Stage 10)
 

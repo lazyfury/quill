@@ -1,6 +1,7 @@
 # Godot-style migration
 
-Status: **Stage 25.9 (Phase 4g) complete — Phase 6 next.**
+Status: **Stage 25.11 — component-native API (`add_child` + `.child()`), theme
+off the tree; Phase 6 next.**
 
 Goal: turn quill from "a UI toolkit that also has a scene tree" into a
 **2D-first scene engine** modeled on Godot, where a single `SceneTree` owns both
@@ -192,6 +193,17 @@ This is the largest refactor; split it.
   `ui::paint(&tree, ctx)`, `ui::route_input(&mut tree, ev)`, …); `Component::mount`
   and `BuildContext` carry only the tree, and demos hold just a `SceneTree`.
   `docs/` examples use this style.
+
+  **Component-native (Stage 25.10/25.11):** the `View`/`ViewExt`/`Modify`/
+  `BuildContext` layer and the `add_*`/`mount`/`insert` free functions were
+  deleted. `draw_scene` gained `SceneChild` + `SceneTree::add_child(parent, c)`,
+  and `draw_app::Component` now carries a `Spec` and exposes the modifiers
+  (`child`, `background`, `surface`, `dynamic_background`, `foreground`,
+  `on_click`, `grow`, `min_size`, …) as methods. `draw_components` components
+  take the `Theme` as a plain `Copy` value; **the theme is no longer stored on
+  the tree** (Phase 4f is reversed for the theme only — the text measurer still
+  lives on the root). `draw_ui` decorators no longer take a `Theme`; their
+  closures capture the colors they need.
 - **4c** — migrate `demo_app`, `web_demo`, `component_demo`, `wgpu_demo` to the
   borrowed API (the demos currently use the `UiHost` compatibility host).
   **(DONE, Stage 25.4c)**

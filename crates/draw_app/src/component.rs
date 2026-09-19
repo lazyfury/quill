@@ -1,77 +1,312 @@
-//! Reusable component API.
+//! Components: node-building values composed with `.child()`.
 //!
-//! Components are small builder structs mounted into a [`SceneTree`]:
+//! A component builds exactly one primary control node; nesting is expressed by
+//! chaining [`Component::child`] or by attaching the component to the scene
+//! with [`SceneTree::add_child`](draw_scene::SceneTree::add_child):
 //!
 //! ```ignore
-//! let panel = add(tree, root, Panel::new());
-//! let vbox = add(tree, panel.id(), VBox::new());
-//! let label = add(tree, vbox.id(), Label::new("Hello"));
-//! let button = add(tree, vbox.id(), Button::new("Click me").on_click(|| { /* ... */ }));
+//! let root = tree.add_child(tree.root(), Flex::column()
+//!     .gap(12.0)
+//!     .child(Label::new("Hello"))
+//!     .child(Button::new("Save").on_click(|| { /* ... */ })));
 //! ```
 //!
-//! Layout is applied per-frame via [`draw_ui::layout`]; state changes only
-//! touch core data and the next `paint` produces a fresh `DrawList`.
+//! Every component carries a [`Spec`] with the layout inputs, background,
+//! foreground, click callback and children. The theme is never stored here: a
+//! component receives the concrete colors it paints.
 
-use draw_core::{Color, Edges, NodeId};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use draw_core::{Color, Edges, NodeId, Rect, Size};
+use draw_render::PaintContext;
 use draw_scene::SceneTree;
-use draw_ui::layout::{
-    Align, AlignContent, FlexDirection, FlexStyle, GridStyle, Justify, TextOptions, Track,
+use draw_ui::layout::{FlexDirection, FlexStyle, GridStyle, SizeBasis, Track};
+use draw_ui::{
+    dynamic_surface_decor, foreground_decor, ButtonData, Control, ControlData, InteractState,
+    MouseFilter, SurfaceStyle, Widget,
 };
-use draw_ui::{ButtonData, ControlData, Widget};
 
-use crate::build::insert;
-use crate::view::{child, BuildContext, Child, View};
+/// A child builder stored on a [`Spec`].
+pub type ChildFn = Box<dyn FnOnce(&mut SceneTree, NodeId)>;
 
-/// An owned handle to a mounted control.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ControlRef {
-    id: NodeId,
+/// The common node state every component carries.
+///
+/// Layout fields mirror [`ControlData`]; the rest are the decorators, click
+/// callback and children applied when the component is built.
+pub struct Spec {
+    pub data: ControlData,
+    pub background: Option<Box<dyn Fn(InteractState) -> SurfaceStyle>>,
+    pub foreground: Option<Box<dyn Fn(&mut PaintContext, Rect, InteractState)>>,
+    pub on_click: Option<Box<dyn FnMut()>>,
+    pub children: Vec<ChildFn>,
 }
 
-impl ControlRef {
-    pub fn new(id: NodeId) -> Self {
-        Self { id }
-    }
-
-    pub fn id(self) -> NodeId {
-        self.id
-    }
-}
-
-impl From<ControlRef> for NodeId {
-    fn from(control: ControlRef) -> Self {
-        control.id
+impl Default for Spec {
+    fn default() -> Self {
+        Self {
+            data: ControlData::fill_parent(),
+            background: None,
+            foreground: None,
+            on_click: None,
+            children: Vec::new(),
+        }
     }
 }
 
-/// Something that can be mounted into a [`SceneTree`].
-pub trait Component {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef;
+impl Spec {
+    /// A spec with leaf defaults (top-left anchors, so it sizes to contents).
+    pub fn leaf() -> Self {
+        Self {
+            data: ControlData::default(),
+            ..Self::default()
+        }
+    }
+}
+
+/// A value that builds one primary control node into a [`SceneTree`].
+///
+/// Implementors embed a [`Spec`], return it from [`Component::spec`], and
+/// describe their visual with [`Component::widget`]. The default [`build`]
+/// creates the node and applies the spec, so components compose natively with
+/// `.child()`, `.background()`, `.grow()` and friends.
+///
+/// [`build`]: Component::build
+pub trait Component: Sized {
+    /// The component's common node state.
+    fn spec(&mut self) -> &mut Spec;
+
+    /// Node name shown in debug overlays.
+    fn name(&self) -> &'static str {
+        "Control"
+    }
+
+    /// The visual widget for the primary node.
+    fn widget(&self) -> Widget;
+
+    /// Finalizes the spec from the component's fields (surface styles, child
+    /// closures) after every builder method has run.
+    ///
+    /// The default does nothing. Override it when a decorator or an internal
+    /// child depends on more than one builder value.
+    fn prepare(&mut self) {}
+
+    /// Builds this component's node under `parent` and returns its id.
+    ///
+    /// The default runs [`prepare`](Component::prepare), creates a `Control`
+    /// node, installs the widget and applies the spec (layout, decorators,
+    /// click callback, children).
+    fn build(mut self, tree: &mut SceneTree, parent: NodeId) -> NodeId {
+        self.prepare();
+        let spec = std::mem::take(self.spec());
+        let id = tree.add_control(parent, self.name());
+        tree.set_data(id, Control::new(spec.data, self.widget()));
+        apply_spec(tree, id, spec);
+        id
+    }
+
+    /// Adds one child component.
+    fn child<C: Component + 'static>(mut self, child: C) -> Self {
+        self.spec().children.push(Box::new(move |tree, parent| {
+            child.build(tree, parent);
+        }));
+        self
+    }
+
+    /// Adds several child components.
+    fn children<I, C>(mut self, children: I) -> Self
+    where
+        I: IntoIterator<Item = C>,
+        C: Component + 'static,
+    {
+        for child in children {
+            self = self.child(child);
+        }
+        self
+    }
+
+    /// Paints a rounded surface behind the node.
+    fn background(mut self, color: Color) -> Self {
+        self = self.surface(SurfaceStyle::new(color));
+        self
+    }
+
+    /// Paints an explicit surface style behind the node.
+    fn surface(mut self, style: SurfaceStyle) -> Self {
+        self.spec().background = Some(Box::new(move |_| style));
+        self
+    }
+
+    /// A surface whose style is resolved from the interaction state each frame.
+    fn dynamic_background(
+        mut self,
+        resolve: impl Fn(InteractState) -> SurfaceStyle + 'static,
+    ) -> Self {
+        self.spec().background = Some(Box::new(resolve));
+        self
+    }
+
+    /// Paints arbitrary chrome in front of the node.
+    fn foreground(
+        mut self,
+        draw: impl Fn(&mut PaintContext, Rect, InteractState) + 'static,
+    ) -> Self {
+        self.spec().foreground = Some(Box::new(draw));
+        self
+    }
+
+    /// Runs `callback` when the node is clicked or activated.
+    fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
+        self.spec().on_click = Some(Box::new(callback));
+        self
+    }
+
+    /// Flex grow factor.
+    fn grow(mut self, grow: f32) -> Self {
+        self.spec().data.layout.grow = grow;
+        self
+    }
+
+    /// Flex shrink factor.
+    fn shrink(mut self, shrink: f32) -> Self {
+        self.spec().data.layout.shrink = shrink;
+        self
+    }
+
+    /// Flex basis.
+    fn basis(mut self, basis: SizeBasis) -> Self {
+        self.spec().data.layout.basis = basis;
+        self
+    }
+
+    /// Minimum intrinsic size.
+    fn min_size(mut self, width: f32, height: f32) -> Self {
+        self.spec().data.min_size = Size::new(width, height);
+        self
+    }
+
+    /// Layout order within the parent.
+    fn order(mut self, order: i32) -> Self {
+        self.spec().data.layout.order = order;
+        self
+    }
+
+    /// Anchor edges (`0` = parent start, `1` = parent end).
+    fn anchors(mut self, anchors: Edges) -> Self {
+        self.spec().data.anchors = anchors;
+        self
+    }
+
+    /// Offset edges, in the same order as [`Edges`].
+    fn offsets(mut self, offsets: Edges) -> Self {
+        self.spec().data.offsets = offsets;
+        self
+    }
+
+    /// Pointer hit-test behaviour.
+    fn mouse_filter(mut self, filter: MouseFilter) -> Self {
+        self.spec().data.mouse_filter = filter;
+        self
+    }
+}
+
+/// Implements [`SceneChild`](draw_scene::SceneChild) for component types.
+///
+/// The trait lives in `draw_scene` (so `SceneTree::add_child` stays UI-neutral),
+/// so each component type needs its own impl; the macro keeps that to one line
+/// per type without introducing a forwarding layer.
+#[macro_export]
+macro_rules! impl_scene_child {
+    ($($t:ty),* $(,)?) => {$(
+        impl draw_scene::SceneChild for $t {
+            fn attach(
+                self,
+                tree: &mut draw_scene::SceneTree,
+                parent: draw_core::NodeId,
+            ) -> draw_core::NodeId {
+                <Self as $crate::Component>::build(self, tree, parent)
+            }
+        }
+    )*};
+}
+
+impl_scene_child!(Panel, Label, Button, VBox, HBox, Flex, Column, Row, Grid);
+
+/// Applies a spec to an already-created node (decorators, callback, children).
+pub fn apply_spec(tree: &mut SceneTree, id: NodeId, spec: Spec) {
+    if let Some(background) = spec.background {
+        draw_ui::add_decor(tree, id, dynamic_surface_decor(background));
+    }
+    if let Some(foreground) = spec.foreground {
+        draw_ui::add_decor(tree, id, foreground_decor(foreground));
+    }
+    if let Some(callback) = spec.on_click {
+        set_on_click(tree, id, callback);
+    }
+    for child in spec.children {
+        child(tree, id);
+    }
+}
+
+/// Borrows a control's runtime from the node's extension slot.
+pub fn control_mut(tree: &mut SceneTree, id: NodeId) -> Option<&mut Control> {
+    tree.data_mut::<Control>(id)
+}
+
+/// Registers a click callback on `id`.
+pub fn set_on_click<F>(tree: &mut SceneTree, id: NodeId, callback: F) -> bool
+where
+    F: FnMut() + 'static,
+{
+    match tree.data_mut::<Control>(id) {
+        Some(control) => {
+            control.callback = Some(Rc::new(RefCell::new(callback)));
+            true
+        }
+        None => false,
+    }
+}
+
+/// Replaces a control's text, marking layout dirty only when it changed.
+pub fn set_text(tree: &mut SceneTree, id: NodeId, text: impl Into<String>) -> bool {
+    let changed = match tree.data_mut::<Control>(id) {
+        Some(control) => control.widget.set_text(text),
+        None => return false,
+    };
+    if changed {
+        draw_ui::mark_dirty(tree, id);
+    }
+    true
+}
+
+/// Mutates a control's layout data and marks the tree dirty.
+pub fn update_control(tree: &mut SceneTree, id: NodeId, f: impl FnOnce(&mut ControlData)) -> bool {
+    let changed = match tree.data_mut::<Control>(id) {
+        Some(control) => {
+            f(&mut control.data);
+            true
+        }
+        None => false,
+    };
+    if changed {
+        draw_ui::mark_dirty(tree, id);
+    }
+    changed
 }
 
 /// A card/background control. Fills its parent by default.
 pub struct Panel {
+    spec: Spec,
     color: Color,
     border: Option<Color>,
-    children: Vec<Child>,
-}
-
-impl std::fmt::Debug for Panel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Panel")
-            .field("color", &self.color)
-            .field("border", &self.border)
-            .field("children", &self.children.len())
-            .finish()
-    }
 }
 
 impl Default for Panel {
     fn default() -> Self {
         Self {
+            spec: Spec::default(),
             color: Color::new(0.13, 0.15, 0.20, 1.0),
             border: Some(Color::new(0.26, 0.30, 0.40, 1.0)),
-            children: Vec::new(),
         }
     }
 }
@@ -95,57 +330,42 @@ impl Panel {
         self.border = None;
         self
     }
-
-    /// Adds one child view.
-    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
-        self.children.push(child(view));
-        self
-    }
-
-    /// Adds several child views.
-    pub fn children<I, V>(mut self, views: I) -> Self
-    where
-        I: IntoIterator<Item = V>,
-        V: View + 'static,
-    {
-        self.children.extend(views.into_iter().map(child));
-        self
-    }
 }
 
 impl Component for Panel {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let id = insert(
-            tree,
-            parent,
-            "Panel",
-            ControlData::fill_parent(),
-            Widget::Panel {
-                color: self.color,
-                border: self.border,
-            },
-        );
-        BuildContext::new(tree, id).children(self.children);
-        ControlRef::new(id)
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Panel"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Panel {
+            color: self.color,
+            border: self.border,
+        }
     }
 }
 
 /// A text label.
-#[derive(Debug, Clone)]
 pub struct Label {
+    spec: Spec,
     text: String,
     font_size: f32,
     color: Color,
-    options: TextOptions,
+    options: draw_ui::TextOptions,
 }
 
 impl Label {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
+            spec: Spec::leaf(),
             text: text.into(),
             font_size: 20.0,
             color: Color::new(0.92, 0.94, 0.98, 1.0),
-            options: TextOptions::default(),
+            options: draw_ui::TextOptions::default(),
         }
     }
 
@@ -159,124 +379,116 @@ impl Label {
         self
     }
 
-    /// Enables/disables soft wrapping (default on).
     pub fn wrap(mut self, wrap: bool) -> Self {
         self.options.wrap = wrap;
         self
     }
 
-    /// Caps the number of painted lines.
     pub fn max_lines(mut self, max_lines: usize) -> Self {
         self.options = self.options.max_lines(max_lines);
         self
     }
 
-    /// Appends `…` when `max_lines` clips the text.
     pub fn ellipsis(mut self, ellipsis: bool) -> Self {
         self.options = self.options.ellipsis(ellipsis);
         self
     }
 
-    pub fn text_options(mut self, options: TextOptions) -> Self {
+    pub fn text_options(mut self, options: draw_ui::TextOptions) -> Self {
         self.options = options;
         self
     }
 }
 
 impl Component for Label {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        ControlRef::new(insert(
-            tree,
-            parent,
-            "Label",
-            ControlData::default(),
-            Widget::Label {
-                text: self.text,
-                font_size: self.font_size,
-                color: self.color,
-                options: self.options,
-            },
-        ))
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Label"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Label {
+            text: self.text.clone(),
+            font_size: self.font_size,
+            color: self.color,
+            options: self.options,
+        }
     }
 }
 
 /// A clickable button with an optional click callback.
 pub struct Button {
-    text: String,
-    on_click: Option<Box<dyn FnMut()>>,
-    options: TextOptions,
+    spec: Spec,
+    data: ButtonData,
 }
 
 impl Button {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
-            text: text.into(),
-            on_click: None,
-            options: TextOptions::no_wrap(),
+            spec: Spec::leaf(),
+            data: ButtonData::new(text),
         }
     }
 
-    /// Registers a callback invoked when the button is clicked (or activated
-    /// with Enter/Space).
+    pub fn font_size(mut self, font_size: f32) -> Self {
+        self.data.font_size = font_size;
+        self
+    }
+
+    pub fn fill(mut self, color: Color) -> Self {
+        self.data.color = color;
+        self
+    }
+
+    pub fn hover_fill(mut self, color: Color) -> Self {
+        self.data.hover_color = color;
+        self
+    }
+
+    pub fn pressed_fill(mut self, color: Color) -> Self {
+        self.data.pressed_color = color;
+        self
+    }
+
+    pub fn text_color(mut self, color: Color) -> Self {
+        self.data.text_color = color;
+        self
+    }
+
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
-        self.on_click = Some(Box::new(callback));
-        self
-    }
-
-    /// Enables soft wrapping of the button label (default off).
-    pub fn wrap(mut self, wrap: bool) -> Self {
-        self.options.wrap = wrap;
-        self
-    }
-
-    /// Caps the number of label lines.
-    pub fn max_lines(mut self, max_lines: usize) -> Self {
-        self.options = self.options.max_lines(max_lines);
-        self
-    }
-
-    /// Appends `…` when `max_lines` clips the label.
-    pub fn ellipsis(mut self, ellipsis: bool) -> Self {
-        self.options = self.options.ellipsis(ellipsis);
-        self
-    }
-
-    pub fn text_options(mut self, options: TextOptions) -> Self {
-        self.options = options;
+        self = Component::on_click(self, callback);
         self
     }
 }
 
 impl Component for Button {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let mut data = ButtonData::new(self.text);
-        data.options = self.options;
-        let id = insert(
-            tree,
-            parent,
-            "Button",
-            ControlData::default(),
-            Widget::Button(data),
-        );
-        if let Some(callback) = self.on_click {
-            crate::set_on_click(tree, id, callback);
-        }
-        ControlRef::new(id)
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Button"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Button(self.data.clone())
     }
 }
 
 /// A vertical stacking container (a column [`Flex`] with a separation).
-#[derive(Debug, Clone, Copy)]
 pub struct VBox {
-    separation: f32,
-    padding: Edges,
+    spec: Spec,
+    style: FlexStyle,
 }
 
 impl Default for VBox {
     fn default() -> Self {
         Self {
-            separation: 8.0,
-            padding: Edges::all(16.0),
+            spec: Spec::default(),
+            style: FlexStyle::column().gap(8.0).padding(Edges::all(16.0)),
         }
     }
 }
@@ -287,43 +499,42 @@ impl VBox {
     }
 
     pub fn separation(mut self, separation: f32) -> Self {
-        self.separation = separation;
+        self.style.gap = separation;
+        self.style.cross_gap = separation;
         self
     }
 
     pub fn padding(mut self, padding: Edges) -> Self {
-        self.padding = padding;
+        self.style.padding = padding;
         self
     }
 }
 
 impl Component for VBox {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let style = FlexStyle::column()
-            .gap(self.separation)
-            .padding(self.padding);
-        ControlRef::new(insert(
-            tree,
-            parent,
-            "VBox",
-            ControlData::fill_parent(),
-            Widget::Flex(style),
-        ))
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "VBox"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(self.style)
     }
 }
 
 /// A horizontal stacking container (a row [`Flex`] with a separation).
-#[derive(Debug, Clone, Copy)]
 pub struct HBox {
-    separation: f32,
-    padding: Edges,
+    spec: Spec,
+    style: FlexStyle,
 }
 
 impl Default for HBox {
     fn default() -> Self {
         Self {
-            separation: 8.0,
-            padding: Edges::all(16.0),
+            spec: Spec::default(),
+            style: FlexStyle::row().gap(8.0).padding(Edges::all(16.0)),
         }
     }
 }
@@ -334,49 +545,42 @@ impl HBox {
     }
 
     pub fn separation(mut self, separation: f32) -> Self {
-        self.separation = separation;
+        self.style.gap = separation;
+        self.style.cross_gap = separation;
         self
     }
 
     pub fn padding(mut self, padding: Edges) -> Self {
-        self.padding = padding;
+        self.style.padding = padding;
         self
     }
 }
 
 impl Component for HBox {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let style = FlexStyle::row().gap(self.separation).padding(self.padding);
-        ControlRef::new(insert(
-            tree,
-            parent,
-            "HBox",
-            ControlData::fill_parent(),
-            Widget::Flex(style),
-        ))
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "HBox"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(self.style)
     }
 }
 
 /// A configurable flex container.
 pub struct Flex {
+    spec: Spec,
     style: FlexStyle,
-    children: Vec<Child>,
-}
-
-impl std::fmt::Debug for Flex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Flex")
-            .field("style", &self.style)
-            .field("children", &self.children.len())
-            .finish()
-    }
 }
 
 impl Default for Flex {
     fn default() -> Self {
         Self {
+            spec: Spec::default(),
             style: FlexStyle::default(),
-            children: Vec::new(),
         }
     }
 }
@@ -389,14 +593,14 @@ impl Flex {
     pub fn row() -> Self {
         Self {
             style: FlexStyle::row(),
-            children: Vec::new(),
+            ..Self::default()
         }
     }
 
     pub fn column() -> Self {
         Self {
             style: FlexStyle::column(),
-            children: Vec::new(),
+            ..Self::default()
         }
     }
 
@@ -405,17 +609,17 @@ impl Flex {
         self
     }
 
-    pub fn justify(mut self, justify: Justify) -> Self {
+    pub fn justify(mut self, justify: draw_ui::Justify) -> Self {
         self.style.justify = justify;
         self
     }
 
-    pub fn align(mut self, align: Align) -> Self {
+    pub fn align(mut self, align: draw_ui::Align) -> Self {
         self.style.align = align;
         self
     }
 
-    pub fn align_content(mut self, align_content: AlignContent) -> Self {
+    pub fn align_content(mut self, align_content: draw_ui::AlignContent) -> Self {
         self.style.align_content = align_content;
         self
     }
@@ -432,7 +636,6 @@ impl Flex {
         self
     }
 
-    /// Gap between wrapped lines along the cross axis.
     pub fn cross_gap(mut self, gap: f32) -> Self {
         self.style.cross_gap = gap;
         self
@@ -446,45 +649,23 @@ impl Flex {
         self.style.padding = padding;
         self
     }
-
-    /// Adds one child view.
-    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
-        self.children.push(child(view));
-        self
-    }
-
-    /// Adds several child views.
-    pub fn children<I, V>(mut self, views: I) -> Self
-    where
-        I: IntoIterator<Item = V>,
-        V: View + 'static,
-    {
-        self.children.extend(views.into_iter().map(child));
-        self
-    }
 }
 
 impl Component for Flex {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let id = insert(
-            tree,
-            parent,
-            "Flex",
-            ControlData::fill_parent(),
-            Widget::Flex(self.style),
-        );
-        BuildContext::new(tree, id).children(self.children);
-        ControlRef::new(id)
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Flex"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(self.style)
     }
 }
 
 /// A vertical flex stack with zero default padding/gap.
-///
-/// ```ignore
-/// ui.mount(root, Column::new().gap(12.0).padding(Edges::all(16.0))
-///     .child(Label::new("Settings"))
-///     .child(Button::new("Save")));
-/// ```
 pub struct Column {
     flex: Flex,
 }
@@ -512,40 +693,28 @@ impl Column {
         self
     }
 
-    pub fn align(mut self, align: Align) -> Self {
+    pub fn align(mut self, align: draw_ui::Align) -> Self {
         self.flex = self.flex.align(align);
         self
     }
 
-    pub fn justify(mut self, justify: Justify) -> Self {
+    pub fn justify(mut self, justify: draw_ui::Justify) -> Self {
         self.flex = self.flex.justify(justify);
         self
     }
-
-    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
-        self.flex = self.flex.child(view);
-        self
-    }
-
-    pub fn children<I, V>(mut self, views: I) -> Self
-    where
-        I: IntoIterator<Item = V>,
-        V: View + 'static,
-    {
-        self.flex = self.flex.children(views);
-        self
-    }
 }
 
-impl std::fmt::Debug for Column {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Column").field("flex", &self.flex).finish()
+impl Component for Column {
+    fn spec(&mut self) -> &mut Spec {
+        self.flex.spec()
     }
-}
 
-impl View for Column {
-    fn build(self, cx: &mut BuildContext) -> NodeId {
-        self.flex.build(cx)
+    fn name(&self) -> &'static str {
+        "Column"
+    }
+
+    fn widget(&self) -> Widget {
+        self.flex.widget()
     }
 }
 
@@ -577,52 +746,41 @@ impl Row {
         self
     }
 
-    pub fn align(mut self, align: Align) -> Self {
+    pub fn align(mut self, align: draw_ui::Align) -> Self {
         self.flex = self.flex.align(align);
         self
     }
 
-    pub fn justify(mut self, justify: Justify) -> Self {
+    pub fn justify(mut self, justify: draw_ui::Justify) -> Self {
         self.flex = self.flex.justify(justify);
         self
     }
-
-    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
-        self.flex = self.flex.child(view);
-        self
-    }
-
-    pub fn children<I, V>(mut self, views: I) -> Self
-    where
-        I: IntoIterator<Item = V>,
-        V: View + 'static,
-    {
-        self.flex = self.flex.children(views);
-        self
-    }
 }
 
-impl std::fmt::Debug for Row {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Row").field("flex", &self.flex).finish()
+impl Component for Row {
+    fn spec(&mut self) -> &mut Spec {
+        self.flex.spec()
     }
-}
 
-impl View for Row {
-    fn build(self, cx: &mut BuildContext) -> NodeId {
-        self.flex.build(cx)
+    fn name(&self) -> &'static str {
+        "Row"
+    }
+
+    fn widget(&self) -> Widget {
+        self.flex.widget()
     }
 }
 
 /// A grid container with fixed / `fr` / auto tracks.
-#[derive(Debug, Clone)]
 pub struct Grid {
+    spec: Spec,
     style: GridStyle,
 }
 
 impl Grid {
     pub fn new(columns: Vec<Track>) -> Self {
         Self {
+            spec: Spec::default(),
             style: GridStyle::new(columns),
         }
     }
@@ -632,17 +790,17 @@ impl Grid {
         self
     }
 
-    pub fn align_items(mut self, align: Align) -> Self {
+    pub fn align_items(mut self, align: draw_ui::Align) -> Self {
         self.style.align_items = align;
         self
     }
 
-    pub fn justify_items(mut self, align: Align) -> Self {
+    pub fn justify_items(mut self, align: draw_ui::Align) -> Self {
         self.style.justify_items = align;
         self
     }
 
-    pub fn align_content(mut self, align: AlignContent) -> Self {
+    pub fn align_content(mut self, align: draw_ui::AlignContent) -> Self {
         self.style.align_content = align;
         self
     }
@@ -670,13 +828,15 @@ impl Grid {
 }
 
 impl Component for Grid {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        ControlRef::new(insert(
-            tree,
-            parent,
-            "Grid",
-            ControlData::fill_parent(),
-            Widget::Grid(self.style),
-        ))
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Grid"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Grid(self.style.clone())
     }
 }

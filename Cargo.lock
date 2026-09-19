@@ -517,7 +517,6 @@ dependencies = [
  "draw_core",
  "draw_render",
  "draw_scene",
- "draw_theme",
 ]
 
 [[package]]

@@ -1,69 +1,52 @@
 //! Structural, presentational components.
 
-use draw_app::{child, BuildContext, Child, Flex, Label, View};
-use draw_core::{Color, Edges, NodeId, Size, Vec2};
+use draw_app::{Component, Flex, Label, Spec};
+use draw_core::{Color, Edges, Size, Vec2};
 use draw_render::PaintContext;
-use draw_scene::SceneTree;
-use draw_theme::{radius, space, TextSize};
-use draw_ui::{Align, Justify, TextOptions};
+use draw_theme::{radius, space, SurfaceTone, TextSize, Theme, Tone};
+use draw_ui::{Align, Justify, SurfaceStyle, TextOptions, Widget};
 
-use crate::{Component, ControlRef, Text};
-use draw_theme::{SurfaceTone, Tone};
-use draw_ui::{foreground_decor, surface_decor};
-use draw_ui::{surface, SurfaceStyle};
+use crate::Text;
 
 /// A structured container: thin border, subtle surface, restrained radius.
 ///
 /// The card is a column flex container, so children flow vertically. Its
-/// surface is attached as a `draw_ui::NodeDecor` and painted behind its content.
+/// surface is attached when it builds.
 ///
 /// ```ignore
-/// ui.mount(root, Card::new().gap(12.0)
-///     .child(Text::heading("Settings"))
-///     .child(Checkbox::new("Verbose")));
+/// tree.add_child(root, Card::new(theme).gap(12.0)
+///     .child(Text::heading("Settings", theme))
+///     .child(Checkbox::new("Verbose", theme)));
 /// ```
 pub struct Card {
+    spec: Spec,
+    theme: Theme,
     tone: SurfaceTone,
     fill: Option<Color>,
     hairline: bool,
     radius: f32,
     padding: Edges,
     gap: f32,
-    children: Vec<Child>,
-}
-
-impl std::fmt::Debug for Card {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Card")
-            .field("tone", &self.tone)
-            .field("children", &self.children.len())
-            .finish()
-    }
-}
-
-impl Default for Card {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Card {
     /// A raised card with a hairline border.
-    pub fn new() -> Self {
+    pub fn new(theme: Theme) -> Self {
         Self {
+            spec: Spec::default(),
+            theme,
             tone: SurfaceTone::Raised,
             fill: None,
             hairline: true,
             radius: radius::LG,
             padding: Edges::all(space::LG),
             gap: space::MD,
-            children: Vec::new(),
         }
     }
 
     /// A borderless card.
-    pub fn flat() -> Self {
-        Self::new().bordered(false)
+    pub fn flat(theme: Theme) -> Self {
+        Self::new(theme).bordered(false)
     }
 
     /// Chooses the surface level used for the fill.
@@ -97,103 +80,123 @@ impl Card {
         self.gap = gap;
         self
     }
-
-    /// Adds one child view.
-    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
-        self.children.push(child(view));
-        self
-    }
-
-    /// Adds several child views.
-    pub fn children<I, V>(mut self, views: I) -> Self
-    where
-        I: IntoIterator<Item = V>,
-        V: View + 'static,
-    {
-        self.children.extend(views.into_iter().map(child));
-        self
-    }
 }
 
 impl Component for Card {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let theme = draw_ui::theme(tree);
-        let fill = self.fill.unwrap_or_else(|| self.tone.color(&theme));
-        let border = if self.hairline {
-            Some(theme.palette.border)
-        } else {
-            None
-        };
-        let card = draw_app::add(
-            tree,
-            parent,
-            Flex::column().gap(self.gap).padding(self.padding),
-        );
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Card"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(
+            draw_ui::FlexStyle::column()
+                .gap(self.gap)
+                .padding(self.padding),
+        )
+    }
+
+    fn prepare(&mut self) {
+        let fill = self.fill.unwrap_or_else(|| self.tone.color(&self.theme));
+        let border = self.hairline.then(|| self.theme.palette.border);
         let style = SurfaceStyle::new(fill)
             .radius(self.radius)
             .border_opt(border);
-        draw_ui::add_decor(tree, card.id(), surface_decor(style));
-        BuildContext::new(tree, card.id()).children(self.children);
-        card
+        self.spec.background = Some(Box::new(move |_| style));
     }
 }
 
 /// A 1px grouping divider.
-#[derive(Debug, Clone, Copy)]
 pub struct Divider {
+    spec: Spec,
+    theme: Theme,
     vertical: bool,
+    color: Option<Color>,
 }
 
 impl Divider {
     /// A horizontal rule (stretches across a column).
-    pub fn horizontal() -> Self {
-        Self { vertical: false }
+    pub fn horizontal(theme: Theme) -> Self {
+        Self {
+            spec: Spec::leaf(),
+            theme,
+            vertical: false,
+            color: None,
+        }
     }
 
     /// A vertical rule (stretches down a row).
-    pub fn vertical() -> Self {
-        Self { vertical: true }
+    pub fn vertical(theme: Theme) -> Self {
+        Self {
+            spec: Spec::leaf(),
+            theme,
+            vertical: true,
+            color: None,
+        }
+    }
+
+    pub fn color(mut self, color: Color) -> Self {
+        self.color = Some(color);
+        self
     }
 }
 
 impl Component for Divider {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let node = draw_app::add(tree, parent, Flex::new().padding(Edges::ZERO));
-        crate::detach(tree, node.id());
-        let min = if self.vertical {
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Divider"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(draw_ui::FlexStyle::default().padding(Edges::ZERO))
+    }
+
+    fn prepare(&mut self) {
+        let color = self.color.unwrap_or(self.theme.palette.border_subtle);
+        self.spec.data.min_size = if self.vertical {
             Size::new(1.0, 0.0)
         } else {
             Size::new(0.0, 1.0)
         };
-        draw_app::update_control(tree, node.id(), |d| d.min_size = min);
-        let style = SurfaceStyle::new(draw_ui::theme(tree).palette.border_subtle);
-        draw_ui::add_decor(tree, node.id(), surface_decor(style));
-        node
+        self.spec.background = Some(Box::new(move |_| SurfaceStyle::new(color)));
     }
 }
 
 /// A compact metadata tag.
-#[derive(Debug, Clone)]
 pub struct Badge {
+    spec: Spec,
+    theme: Theme,
     text: String,
     tone: Tone,
     solid: bool,
+    fill: Option<Color>,
+    text_color: Option<Color>,
     radius: f32,
 }
 
 impl Badge {
-    pub fn new(text: impl Into<String>) -> Self {
+    pub fn new(text: impl Into<String>, theme: Theme) -> Self {
         Self {
+            spec: Spec::leaf(),
+            theme,
             text: text.into(),
             tone: Tone::Muted,
             solid: false,
+            fill: None,
+            text_color: None,
             radius: radius::SM,
         }
     }
 
     /// A fully rounded (pill) badge.
-    pub fn pill(text: impl Into<String>) -> Self {
-        Self::new(text).radius(radius::FULL)
+    pub fn pill(text: impl Into<String>, theme: Theme) -> Self {
+        Self::new(text, theme).radius(radius::FULL)
     }
 
     pub fn tone(mut self, tone: Tone) -> Self {
@@ -207,6 +210,16 @@ impl Badge {
         self
     }
 
+    pub fn fill(mut self, color: Color) -> Self {
+        self.fill = Some(color);
+        self
+    }
+
+    pub fn text_color(mut self, color: Color) -> Self {
+        self.text_color = Some(color);
+        self
+    }
+
     pub fn radius(mut self, radius: f32) -> Self {
         self.radius = radius;
         self
@@ -214,23 +227,26 @@ impl Badge {
 }
 
 impl Component for Badge {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let theme = draw_ui::theme(tree);
-        let font = TextSize::Caption.px();
-        let accent = self.tone.color(&theme);
-        let pad = Edges::symmetric(space::SM, space::XXS);
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
 
-        let node = draw_app::add(
-            tree,
-            parent,
-            Flex::row()
+    fn name(&self) -> &'static str {
+        "Badge"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(
+            draw_ui::FlexStyle::row()
                 .align(Align::Center)
                 .justify(Justify::Center)
                 .gap(0.0)
-                .padding(pad),
-        );
-        crate::detach(tree, node.id());
+                .padding(Edges::symmetric(space::SM, space::XXS)),
+        )
+    }
 
+    fn prepare(&mut self) {
+        let accent = self.fill.unwrap_or_else(|| self.tone.color(&self.theme));
         let style = if self.solid {
             SurfaceStyle::new(accent).radius(self.radius)
         } else {
@@ -238,36 +254,35 @@ impl Component for Badge {
                 .border(accent.with_alpha(0.30))
                 .radius(self.radius)
         };
-        draw_ui::add_decor(tree, node.id(), surface_decor(style));
+        self.spec.background = Some(Box::new(move |_| style));
 
-        let text_color = if self.solid {
-            theme.palette.on_accent
+        let text_color = self.text_color.unwrap_or(if self.solid {
+            self.theme.palette.on_accent
         } else {
             accent
-        };
-        draw_app::add(
-            tree,
-            node.id(),
-            Label::new(&self.text)
-                .font_size(font)
-                .color(text_color)
-                .text_options(TextOptions::no_wrap()),
-        );
-        node
+        });
+        let text = self.text.clone();
+        let theme = self.theme;
+        self.spec.children.push(Box::new(move |tree, parent| {
+            tree.add_child(parent, Text::caption(text, theme).color(text_color));
+        }));
     }
 }
 
 /// A code block: monospace content on a dedicated surface.
-#[derive(Debug, Clone)]
 pub struct CodeBlock {
+    spec: Spec,
+    theme: Theme,
     code: String,
     filename: Option<String>,
     language: Option<String>,
 }
 
 impl CodeBlock {
-    pub fn new(code: impl Into<String>) -> Self {
+    pub fn new(code: impl Into<String>, theme: Theme) -> Self {
         Self {
+            spec: Spec::default(),
+            theme,
             code: code.into(),
             filename: None,
             language: None,
@@ -286,58 +301,78 @@ impl CodeBlock {
 }
 
 impl Component for CodeBlock {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let theme = draw_ui::theme(tree);
-        let block = draw_app::add(
-            tree,
-            parent,
-            Flex::column().gap(space::SM).padding(Edges::all(space::LG)),
-        );
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "CodeBlock"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(
+            draw_ui::FlexStyle::column()
+                .gap(space::SM)
+                .padding(Edges::all(space::LG)),
+        )
+    }
+
+    fn prepare(&mut self) {
+        let theme = self.theme;
         let style = SurfaceStyle::new(theme.palette.code_surface)
             .border(theme.palette.border)
             .radius(radius::LG);
-        draw_ui::add_decor(tree, block.id(), surface_decor(style));
+        self.spec.background = Some(Box::new(move |_| style));
 
-        if self.filename.is_some() || self.language.is_some() {
-            let header = draw_app::add(
-                tree,
-                block.id(),
-                Flex::row().align(Align::Center).gap(space::SM),
-            );
-            if let Some(filename) = self.filename {
-                draw_app::add(tree, header.id(), Text::small(filename).tone(Tone::Muted));
-            }
-            if let Some(language) = self.language {
-                draw_app::add(
-                    tree,
-                    header.id(),
-                    Text::caption(language).tone(Tone::Subtle),
+        let filename = self.filename.clone();
+        let language = self.language.clone();
+        let code = self.code.clone();
+        self.spec.children.push(Box::new(move |tree, parent| {
+            if filename.is_some() || language.is_some() {
+                let header = tree.add_child(
+                    parent,
+                    Flex::row()
+                        .align(Align::Center)
+                        .gap(space::SM)
+                        .anchors(Edges::ZERO)
+                        .offsets(Edges::ZERO),
                 );
+                if let Some(filename) = filename {
+                    tree.add_child(header, Text::small(filename, theme).tone(Tone::Muted));
+                }
+                if let Some(language) = language {
+                    tree.add_child(header, Text::caption(language, theme).tone(Tone::Subtle));
+                }
             }
-        }
-
-        draw_app::add(
-            tree,
-            block.id(),
-            Label::new(self.code)
-                .font_size(TextSize::Small.px())
-                .color(theme.palette.foreground)
-                .text_options(TextOptions::no_wrap()),
-        );
-        block
+            tree.add_child(
+                parent,
+                Label::new(code)
+                    .font_size(TextSize::Small.px())
+                    .color(theme.palette.foreground)
+                    .text_options(TextOptions::no_wrap())
+                    .anchors(Edges::ZERO)
+                    .offsets(Edges::ZERO),
+            );
+        }));
     }
 }
 
 /// A terminal window: header dots, a command and its output.
-#[derive(Debug, Clone, Default)]
 pub struct Terminal {
+    spec: Spec,
+    theme: Theme,
     command: Option<String>,
     output: Vec<String>,
 }
 
 impl Terminal {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(theme: Theme) -> Self {
+        Self {
+            spec: Spec::default(),
+            theme,
+            command: None,
+            output: Vec::new(),
+        }
     }
 
     pub fn command(mut self, command: impl Into<String>) -> Self {
@@ -363,78 +398,98 @@ impl Terminal {
 }
 
 impl Component for Terminal {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let theme = draw_ui::theme(tree);
-        let terminal = draw_app::add(
-            tree,
-            parent,
-            Flex::column().gap(space::SM).padding(Edges::all(space::LG)),
-        );
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "Terminal"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(
+            draw_ui::FlexStyle::column()
+                .gap(space::SM)
+                .padding(Edges::all(space::LG)),
+        )
+    }
+
+    fn prepare(&mut self) {
+        let theme = self.theme;
         let style = SurfaceStyle::new(theme.palette.code_surface)
             .border(theme.palette.border)
             .radius(radius::LG);
-        draw_ui::add_decor(tree, terminal.id(), surface_decor(style));
+        self.spec.background = Some(Box::new(move |_| style));
 
-        let header = draw_app::add(tree, terminal.id(), Flex::row().gap(space::XS));
-        draw_app::update_control(tree, header.id(), |d| d.min_size = Size::new(0.0, 8.0));
-        draw_ui::add_decor(
-            tree,
-            header.id(),
-            foreground_decor(theme, |ctx: &mut PaintContext, rect, theme, _| {
-                let r = 3.5;
-                let step = r * 2.0 + space::XXS;
-                let y = rect.top() + r;
-                for (index, color) in [
-                    theme.palette.error,
-                    theme.palette.warning,
-                    theme.palette.success,
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    ctx.fill_circle(
-                        Vec2::new(rect.left() + r + index as f32 * step, y),
-                        r,
-                        color,
-                    );
-                }
-            }),
-        );
-
-        if let Some(command) = self.command {
-            draw_app::add(
-                tree,
-                terminal.id(),
-                Label::new(format!("$ {command}"))
-                    .font_size(TextSize::Small.px())
-                    .color(theme.palette.foreground)
-                    .text_options(TextOptions::no_wrap()),
+        let command = self.command.clone();
+        let output = self.output.join("\n");
+        self.spec.children.push(Box::new(move |tree, parent| {
+            let dots = [
+                theme.palette.error,
+                theme.palette.warning,
+                theme.palette.success,
+            ];
+            let header = tree.add_child(
+                parent,
+                Flex::row()
+                    .gap(space::XS)
+                    .padding(Edges::ZERO)
+                    .anchors(Edges::ZERO)
+                    .offsets(Edges::ZERO)
+                    .min_size(0.0, 8.0)
+                    .foreground(move |ctx: &mut PaintContext, rect, _| {
+                        let r = 3.5;
+                        let step = r * 2.0 + space::XXS;
+                        let y = rect.top() + r;
+                        for (index, color) in dots.into_iter().enumerate() {
+                            ctx.fill_circle(
+                                Vec2::new(rect.left() + r + index as f32 * step, y),
+                                r,
+                                color,
+                            );
+                        }
+                    }),
             );
-        }
-        if !self.output.is_empty() {
-            draw_app::add(
-                tree,
-                terminal.id(),
-                Label::new(self.output.join("\n"))
-                    .font_size(TextSize::Small.px())
-                    .color(theme.palette.muted)
-                    .text_options(TextOptions::no_wrap()),
-            );
-        }
-        terminal
+            let _ = header;
+            if let Some(command) = command {
+                tree.add_child(
+                    parent,
+                    Label::new(format!("$ {command}"))
+                        .font_size(TextSize::Small.px())
+                        .color(theme.palette.foreground)
+                        .text_options(TextOptions::no_wrap())
+                        .anchors(Edges::ZERO)
+                        .offsets(Edges::ZERO),
+                );
+            }
+            if !output.is_empty() {
+                tree.add_child(
+                    parent,
+                    Label::new(output.clone())
+                        .font_size(TextSize::Small.px())
+                        .color(theme.palette.muted)
+                        .text_options(TextOptions::no_wrap())
+                        .anchors(Edges::ZERO)
+                        .offsets(Edges::ZERO),
+                );
+            }
+        }));
     }
 }
 
 /// An informational empty state: small icon, title, description.
-#[derive(Debug, Clone)]
 pub struct EmptyState {
+    spec: Spec,
+    theme: Theme,
     title: String,
     description: Option<String>,
 }
 
 impl EmptyState {
-    pub fn new(title: impl Into<String>) -> Self {
+    pub fn new(title: impl Into<String>, theme: Theme) -> Self {
         Self {
+            spec: Spec::default(),
+            theme,
             title: title.into(),
             description: None,
         }
@@ -447,41 +502,52 @@ impl EmptyState {
 }
 
 impl Component for EmptyState {
-    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
-        let theme = draw_ui::theme(tree);
-        let container = draw_app::add(
-            tree,
-            parent,
-            Flex::column()
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "EmptyState"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Flex(
+            draw_ui::FlexStyle::column()
                 .align(Align::Center)
                 .gap(space::MD)
                 .padding(Edges::all(space::XXXL)),
-        );
+        )
+    }
 
-        let icon = draw_app::add(tree, container.id(), Flex::new().padding(Edges::ZERO));
-        draw_app::update_control(tree, icon.id(), |d| d.min_size = Size::new(32.0, 32.0));
-        draw_ui::add_decor(
-            tree,
-            icon.id(),
-            foreground_decor(theme, |ctx, rect, theme, _| {
-                surface(
-                    ctx,
-                    rect,
-                    &SurfaceStyle::new(theme.palette.background)
-                        .border(theme.palette.border)
-                        .radius(radius::MD),
-                );
-            }),
-        );
-
-        draw_app::add(tree, container.id(), Text::subheading(self.title));
-        if let Some(description) = self.description {
-            draw_app::add(
-                tree,
-                container.id(),
-                Text::small(description).tone(Tone::Muted),
+    fn prepare(&mut self) {
+        let theme = self.theme;
+        let title = self.title.clone();
+        let description = self.description.clone();
+        self.spec.children.push(Box::new(move |tree, parent| {
+            let icon = tree.add_child(
+                parent,
+                Flex::new()
+                    .padding(Edges::ZERO)
+                    .anchors(Edges::ZERO)
+                    .offsets(Edges::ZERO)
+                    .min_size(32.0, 32.0)
+                    .foreground(move |ctx, rect, _| {
+                        draw_ui::surface(
+                            ctx,
+                            rect,
+                            &SurfaceStyle::new(theme.palette.background)
+                                .border(theme.palette.border)
+                                .radius(radius::MD),
+                        );
+                    }),
             );
-        }
-        container
+            let _ = icon;
+            tree.add_child(parent, Text::subheading(title, theme));
+            if let Some(description) = description {
+                tree.add_child(parent, Text::small(description, theme).tone(Tone::Muted));
+            }
+        }));
     }
 }
+
+draw_app::impl_scene_child!(Card, Divider, Badge, CodeBlock, Terminal, EmptyState);

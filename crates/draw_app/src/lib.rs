@@ -1,63 +1,49 @@
 //! `draw_app` — the application layer on top of `draw_ui`.
 //!
-//! `draw_ui` owns layout and paint. This crate owns everything an application
-//! needs around them:
+//! `draw_ui` owns layout and paint; the [`SceneTree`] owns composition. This
+//! crate supplies the pieces an application needs around them:
 //!
-//! - **Construction** — [`Component`], [`View`], [`BuildContext`], [`ViewExt`]
-//!   and the `add_*` helpers build controls into a [`SceneTree`].
+//! - **Components** — the [`Component`] trait plus [`Flex`], [`Panel`],
+//!   [`Label`], [`Button`] and [`Grid`]. Components compose with `.child()`
+//!   and attach to the scene with
+//!   [`SceneTree::add_child`](draw_scene::SceneTree::add_child).
 //! - **Input** — [`hit_test`] / [`handle_input`] / [`route_input`] run the GUI
 //!   hit-test and the `_input -> world -> GUI -> _unhandled_input` order.
-//! - **Runtime** — [`App`] owns a tree and submits a frame to a
-//!   [`RenderBackend`](draw_render::RenderBackend); layout/paint themselves live
-//!   in `draw_ui` (`draw_ui::layout`, `draw_ui::paint`).
+//! - **Runtime** — [`App`] binds a tree and submits a frame to a
+//!   [`RenderBackend`](draw_render::RenderBackend); layout/paint live in
+//!   `draw_ui`.
+//!
+//! The theme is a plain value: components receive concrete colors, and nothing
+//! reads a theme from the tree.
 //!
 //! ```ignore
-//! use draw_app as app;
-//! use draw_ui as ui;
+//! use draw_app::{Flex, Label};
+//! use draw_scene::SceneTree;
 //!
-//! let mut app = app::App::new();
-//! app::set_theme(app.tree_mut(), Theme::dark());
-//! let root = app::add_flex(app.tree_mut(), app.tree().root(), FlexStyle::column());
-//! app::mount(app.tree_mut(), root, Column::new().child(Label::new("Hi")));
-//! app.event(&event);
-//! app.render(viewport, &mut backend)?;
+//! let mut tree = SceneTree::new();
+//! let root = tree.root();
+//! tree.add_child(root, Flex::column().child(Label::new("Hi")));
 //! ```
 
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_app";
 
 mod app;
-mod build;
 mod component;
 mod input;
-mod view;
 
 pub use app::App;
-pub use build::{
-    add_button, add_flex, add_grid, add_hbox, add_label, add_panel, add_vbox, control_mut, insert,
-    set_on_click, set_text, update_control, ClickCallback,
-};
 pub use component::{
-    Button, Column, Component, ControlRef, Flex, Grid, HBox, Label, Panel, Row, VBox,
+    apply_spec, control_mut, set_on_click, set_text, update_control, Button, ChildFn, Column,
+    Component, Flex, Grid, HBox, Label, Panel, Row, Spec, VBox,
 };
 pub use input::{
     focused, handle_input, hit_test, hovered, hovered_is_button, is_interactive, route_input,
 };
-pub use view::{child, widget as insert_widget, BuildContext, Child, Modify, View, ViewExt};
 
 use draw_core::NodeId;
 use draw_scene::SceneTree;
 use draw_ui::{ButtonState, Control, Widget};
-
-/// Mounts a [`Component`] under `parent`.
-pub fn add<C: Component>(tree: &mut SceneTree, parent: NodeId, component: C) -> ControlRef {
-    component.mount(tree, parent)
-}
-
-/// Mounts a declarative [`View`] under `parent`.
-pub fn mount<V: View>(tree: &mut SceneTree, parent: NodeId, view: V) -> NodeId {
-    view.build(&mut BuildContext::new(tree, parent))
-}
 
 /// Runtime state of a button control.
 pub fn button_state(tree: &SceneTree, id: NodeId) -> Option<ButtonState> {
@@ -80,7 +66,7 @@ mod tests {
 
     use draw_core::{EventResult, InputEvent, PointerButton, Rect, Size, Vec2, ViewportSize};
     use draw_scene::Visual;
-    use draw_ui::{FlexStyle, MouseFilter, SizeBasis};
+    use draw_ui::{MouseFilter, SizeBasis};
 
     fn viewport(w: f32, h: f32) -> ViewportSize {
         ViewportSize::new(Size::new(w, h))
@@ -88,11 +74,8 @@ mod tests {
 
     fn host() -> (SceneTree, NodeId) {
         let mut tree = SceneTree::new();
-        let tree_root = tree.root();
-        let root = add_flex(&mut tree, tree_root, FlexStyle::column());
-        update_control(&mut tree, root, |data| {
-            data.mouse_filter = MouseFilter::Ignore
-        });
+        let root = tree.root();
+        let root = tree.add_child(root, Flex::column().mouse_filter(MouseFilter::Ignore));
         (tree, root)
     }
 
@@ -116,10 +99,17 @@ mod tests {
     #[test]
     fn build_layout_and_paint() {
         let (mut tree, root) = host();
-        let panel = add_panel(&mut tree, root);
-        let vbox = add_vbox(&mut tree, panel);
-        let label = add_label(&mut tree, vbox, "Hello");
-        let button = add_button(&mut tree, vbox, "Click me");
+        let panel = tree.add_child(
+            root,
+            Panel::new().child(
+                VBox::new()
+                    .child(Label::new("Hello"))
+                    .child(Button::new("Click me")),
+            ),
+        );
+        let vbox = tree.children(panel).unwrap()[0];
+        let label = tree.children(vbox).unwrap()[0];
+        let button = tree.children(vbox).unwrap()[1];
         draw_ui::layout(&mut tree, viewport(800.0, 600.0));
         tree.update();
 
@@ -144,23 +134,9 @@ mod tests {
     #[test]
     fn flex_grow_distributes_leftover() {
         let (mut tree, root) = host();
-        let row = add_flex(
-            &mut tree,
-            root,
-            FlexStyle::row().gap(0.0).padding(draw_core::Edges::ZERO),
-        );
-        let a = add_panel(&mut tree, row);
-        let b = add_panel(&mut tree, row);
-        update_control(&mut tree, a, |data| {
-            data.layout = draw_ui::layout::LayoutStyle::new()
-                .basis(SizeBasis::Px(100.0))
-                .shrink(0.0);
-        });
-        update_control(&mut tree, b, |data| {
-            data.layout = draw_ui::layout::LayoutStyle::new()
-                .basis(SizeBasis::Px(100.0))
-                .grow(1.0);
-        });
+        let row = tree.add_child(root, Flex::row().gap(0.0).padding(draw_core::Edges::ZERO));
+        let a = tree.add_child(row, Panel::new().basis(SizeBasis::Px(100.0)).shrink(0.0));
+        let b = tree.add_child(row, Panel::new().basis(SizeBasis::Px(100.0)).grow(1.0));
         draw_ui::layout(&mut tree, viewport(300.0, 100.0));
         assert_eq!(draw_ui::control(&tree, a).unwrap().rect.size.width, 100.0);
         assert_eq!(draw_ui::control(&tree, b).unwrap().rect.size.width, 200.0);
@@ -171,8 +147,10 @@ mod tests {
         let (mut tree, root) = host();
         let clicks = Rc::new(Cell::new(0));
         let counter = clicks.clone();
-        let button = add_button(&mut tree, root, "Click me");
-        set_on_click(&mut tree, button, move || counter.set(counter.get() + 1));
+        let button = tree.add_child(
+            root,
+            Button::new("Click me").on_click(move || counter.set(counter.get() + 1)),
+        );
         draw_ui::layout(&mut tree, viewport(400.0, 200.0));
         tree.update();
 
@@ -188,8 +166,10 @@ mod tests {
         let (mut tree, root) = host();
         let clicks = Rc::new(Cell::new(0));
         let counter = clicks.clone();
-        let button = add_button(&mut tree, root, "Hit");
-        set_on_click(&mut tree, button, move || counter.set(counter.get() + 1));
+        let button = tree.add_child(
+            root,
+            Button::new("Hit").on_click(move || counter.set(counter.get() + 1)),
+        );
         draw_ui::layout(&mut tree, viewport(200.0, 200.0));
         tree.update();
 
@@ -225,13 +205,10 @@ mod tests {
     }
 
     #[test]
-    fn theme_and_layout_cache_live_on_the_tree() {
+    fn layout_cache_lives_on_the_tree() {
         let (mut tree, _root) = host();
-        draw_ui::set_theme(&mut tree, draw_theme::Theme::light());
         draw_ui::layout(&mut tree, viewport(100.0, 100.0));
         assert_eq!(draw_ui::layout_count(&tree), 1);
-
-        assert_eq!(draw_ui::theme(&tree), draw_theme::Theme::light());
         draw_ui::layout(&mut tree, viewport(100.0, 100.0));
         assert_eq!(draw_ui::layout_count(&tree), 1, "cache hit");
     }
@@ -265,8 +242,8 @@ mod tests {
         }
 
         let (mut tree, root) = host();
-        let a = add_label(&mut tree, root, "A");
-        let b = add_label(&mut tree, root, "B");
+        let a = tree.add_child(root, Label::new("A"));
+        let b = tree.add_child(root, Label::new("B"));
         let log = Rc::new(RefCell::new(Vec::new()));
         draw_ui::add_decor(
             &mut tree,

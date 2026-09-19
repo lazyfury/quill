@@ -1,5 +1,5 @@
 //! Shared, backend-neutral demo application: a three-column, macOS-style notes
-//! app built from `draw_components` components on the frozen `draw_ui` core.
+//! app built from `draw_components` components on the `draw_app` runtime.
 //!
 //! Layout is the classic macOS split view:
 //!
@@ -12,11 +12,9 @@
 //! └──────────┴────────────────┴──────────────────────────────┘
 //! ```
 //!
-//! Icons and images are monochrome rounded squares (placeholders). The detail
-//! hero renders a static image placeholder (monochrome rounded square).
-//!
-//! The app is intentionally **static**: nothing animates, so a host can profile
-//! the idle cost (layout caching, paint and GPU submit) without animation noise.
+//! Icons and images are monochrome rounded squares (placeholders). Every node is
+//! composed with [`SceneTree::add_child`](draw_scene::SceneTree::add_child) and
+//! components chain `.child()`; the theme is a value passed to the constructors.
 //!
 //! Hosts drive it through the usual pipeline:
 //!
@@ -28,18 +26,18 @@
 //! The app owns no window/backend/browser API. Both `wgpu_demo` and the WASM
 //! `web_demo` build and drive this exact app.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 
-use draw_app::{Column, Flex, Label, Panel, Row, View, ViewExt};
+use draw_app::{Column, Component, Flex, Label, Panel, Row};
 use draw_components::{Badge, Button, Checkbox, Divider, Overlays, Switch, Text};
 use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize};
 use draw_render::{CornerRadii, PaintContext};
 use draw_scene::SceneTree;
 use draw_theme::{radius, space, TextSize, Theme, Tone};
 use draw_ui::{
-    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, FlexStyle, Justify, MouseFilter,
-    SurfaceStyle, TextMeasurer, TextOptions,
+    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Justify, MouseFilter, SurfaceStyle,
+    TextMeasurer, TextOptions,
 };
 
 /// Sidebar width in logical pixels.
@@ -155,46 +153,42 @@ impl DemoApp {
     /// Builds the app with an explicit theme.
     pub fn with_theme(theme: Theme) -> Self {
         let mut tree = SceneTree::new();
-        draw_ui::set_theme(&mut tree, theme);
         let tree_root = tree.root();
-        let root = draw_app::add_flex(&mut tree, tree_root, FlexStyle::column());
-        draw_app::update_control(&mut tree, root, |data| {
-            data.mouse_filter = MouseFilter::Ignore
-        });
+        let root = tree.add_child(tree_root, Flex::column().mouse_filter(MouseFilter::Ignore));
 
         let selected = Rc::new(Cell::new(0));
         let selected_nav = Rc::new(Cell::new(0));
         let delete_requested = Rc::new(Cell::new(false));
         let clicks = Rc::new(Cell::new(0));
-        let ids = Rc::new(RefCell::new(Ids::default()));
 
-        // Three columns plus their hairline separators, all declarative.
-        draw_app::mount(&mut tree, root, sidebar_view(theme, &selected_nav, &ids));
-        draw_app::mount(&mut tree, root, list_view(theme, &selected, &ids));
-        draw_app::mount(
+        let (sidebar, nav_rows) = build_sidebar(&mut tree, root, theme, &selected_nav);
+        let (list, list_rows) = build_list(&mut tree, root, theme, &selected);
+        let detail = build_detail(
             &mut tree,
             root,
-            detail_view(theme, &selected, &clicks, &delete_requested, &ids),
+            theme,
+            &selected,
+            &clicks,
+            &delete_requested,
         );
         for x in [SIDEBAR_WIDTH, DETAIL_X] {
-            draw_app::mount(&mut tree, root, separator_view(theme, x));
+            tree.add_child(root, separator_view(theme, x));
         }
 
-        let ids = ids.borrow();
         Self {
             tree,
             theme,
-            sidebar: ids.sidebar.expect("sidebar node"),
-            list: ids.list.expect("list node"),
-            detail: ids.detail.expect("detail node"),
-            hero: ids.hero.expect("hero node"),
-            list_rows: ids.list_rows.clone(),
-            nav_rows: ids.nav_rows.clone(),
-            detail_title: ids.detail_title.expect("detail title node"),
-            detail_body: ids.detail_body.expect("detail body node"),
-            detail_tag: ids.detail_tag.expect("detail tag node"),
-            detail_meta: ids.detail_meta.expect("detail meta node"),
-            primary_button: ids.primary_button.expect("primary button node"),
+            sidebar,
+            list,
+            detail: detail.root,
+            hero: detail.hero,
+            list_rows,
+            nav_rows,
+            detail_title: detail.title,
+            detail_body: detail.body,
+            detail_tag: detail.tag,
+            detail_meta: detail.meta,
+            primary_button: detail.primary_button,
             selected,
             selected_nav,
             clicks,
@@ -325,8 +319,7 @@ impl DemoApp {
 
     /// Emits this frame's `DrawList` into `ctx`.
     ///
-    /// Order: window background, kit surfaces, UI content, kit foregrounds
-    /// (indicators, icons, the hero image placeholder), then overlays.
+    /// Order: window background, UI content (+ decor), then overlays.
     pub fn paint(&self, ctx: &mut PaintContext) {
         let size = self.viewport.logical_size();
         ctx.fill_rect(
@@ -338,7 +331,7 @@ impl DemoApp {
         self.overlays.paint(ctx);
     }
 
-    /// Routes an event to the overlays first, then kit interactions, then UI.
+    /// Routes an event to the overlays first, then UI interactions.
     pub fn event(&mut self, event: &InputEvent) -> EventResult {
         if self.overlays.handle_input(event).is_handled() {
             return EventResult::Handled;
@@ -358,30 +351,13 @@ impl DemoApp {
     }
 }
 
-/// Adds a compact rounded-square icon/thumbnail placeholder.
-/// Node ids captured while the view tree is built.
-#[derive(Default)]
-struct Ids {
-    sidebar: Option<NodeId>,
-    list: Option<NodeId>,
-    detail: Option<NodeId>,
-    hero: Option<NodeId>,
-    detail_title: Option<NodeId>,
-    detail_body: Option<NodeId>,
-    detail_tag: Option<NodeId>,
-    detail_meta: Option<NodeId>,
-    primary_button: Option<NodeId>,
-    list_rows: Vec<NodeId>,
-    nav_rows: Vec<NodeId>,
-}
-
 /// A compact square placeholder: hover surface + a small inner mark.
-fn icon_box(size: f32) -> impl View {
+fn icon_box(theme: Theme, size: f32) -> Panel {
     Panel::new()
         .color(Color::TRANSPARENT)
         .flat()
         .min_size(size, size)
-        .dynamic_background(|theme, state| {
+        .dynamic_background(move |state| {
             let fill = if state.hovered || state.pressed {
                 theme.palette.surface_hover
             } else {
@@ -389,36 +365,36 @@ fn icon_box(size: f32) -> impl View {
             };
             SurfaceStyle::new(fill).radius(radius::SM)
         })
-        .foreground(|ctx, rect, theme, _| {
+        .foreground(move |ctx, rect, _| {
             let inner = inset(rect, rect.size.width * 0.32);
             fill_rounded_rect(ctx, inner, 1.5, theme.palette.subtle);
         })
 }
 
 /// The app icon: accent square with a light inner mark.
-fn app_icon(size: f32, theme: Theme) -> impl View {
+fn app_icon(size: f32, theme: Theme) -> Panel {
     Panel::new()
         .color(Color::TRANSPARENT)
         .flat()
         .min_size(size, size)
-        .background(SurfaceStyle::new(theme.palette.accent).radius(radius::SM))
-        .foreground(|ctx, rect, theme, _| {
+        .surface(SurfaceStyle::new(theme.palette.accent).radius(radius::SM))
+        .foreground(move |ctx, rect, _| {
             fill_rounded_rect(ctx, inset(rect, 6.0), 1.0, theme.palette.on_accent);
         })
 }
 
 /// A note thumbnail: bordered surface with a shaded inner rectangle.
-fn thumb(size: f32, theme: Theme, shade: f32) -> impl View {
+fn thumb(size: f32, theme: Theme, shade: f32) -> Panel {
     Panel::new()
         .color(Color::TRANSPARENT)
         .flat()
         .min_size(size, size)
-        .background(
+        .surface(
             SurfaceStyle::new(theme.palette.surface_raised)
                 .border(theme.palette.border)
                 .radius(radius::MD),
         )
-        .foreground(move |ctx, rect, theme, _| {
+        .foreground(move |ctx, rect, _| {
             fill_rounded_rect(
                 ctx,
                 inset(rect, 12.0),
@@ -428,7 +404,7 @@ fn thumb(size: f32, theme: Theme, shade: f32) -> impl View {
         })
 }
 
-fn separator_view(theme: Theme, x: f32) -> impl View {
+fn separator_view(theme: Theme, x: f32) -> Panel {
     Panel::new()
         .color(theme.palette.border_subtle)
         .flat()
@@ -436,25 +412,18 @@ fn separator_view(theme: Theme, x: f32) -> impl View {
         .offsets(Edges::new(x, 0.0, x + 1.0, 0.0))
 }
 
-fn nav_row_view(
-    label: &str,
-    index: usize,
-    selected: &Rc<Cell<usize>>,
-    ids: &Rc<RefCell<Ids>>,
-) -> impl View {
+fn nav_row_view(theme: Theme, label: &str, index: usize, selected: &Rc<Cell<usize>>) -> Row {
     let held = selected.clone();
-    let current = index;
     let click = selected.clone();
-    let row_ids = ids.clone();
     Row::new()
         .align(Align::Center)
         .gap(space::SM)
         .padding(Edges::new(space::SM, space::XS, space::SM, space::XS))
-        .child(icon_box(14.0))
-        .child(Text::small(label))
+        .child(icon_box(theme, 14.0))
+        .child(Text::small(label, theme))
         .min_size(0.0, 28.0)
-        .dynamic_background(move |theme, interact| {
-            let fill = if held.get() == current {
+        .dynamic_background(move |interact| {
+            let fill = if held.get() == index {
                 theme.palette.selection
             } else if interact.hovered {
                 theme.palette.surface_hover
@@ -464,15 +433,30 @@ fn nav_row_view(
             SurfaceStyle::new(fill).radius(radius::SM)
         })
         .on_click(move || click.set(index))
-        .capture(move |node| row_ids.borrow_mut().nav_rows.push(node))
 }
 
-fn sidebar_view(theme: Theme, selected_nav: &Rc<Cell<usize>>, ids: &Rc<RefCell<Ids>>) -> impl View {
-    let traffic =
+fn build_sidebar(
+    tree: &mut SceneTree,
+    root: NodeId,
+    theme: Theme,
+    selected_nav: &Rc<Cell<usize>>,
+) -> (NodeId, Vec<NodeId>) {
+    let sidebar = tree.add_child(
+        root,
+        Column::new()
+            .gap(space::MD)
+            .padding(Edges::new(space::LG, space::MD, space::MD, space::MD))
+            .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
+            .offsets(Edges::new(0.0, 0.0, SIDEBAR_WIDTH, 0.0))
+            .surface(SurfaceStyle::new(theme.palette.surface)),
+    );
+
+    tree.add_child(
+        sidebar,
         Row::new()
             .gap(space::XS)
             .min_size(0.0, 12.0)
-            .foreground(|ctx, rect, theme, _| {
+            .foreground(move |ctx, rect, _| {
                 let radius = 5.0;
                 let step = radius * 2.0 + 6.0;
                 let y = rect.center().y;
@@ -490,100 +474,91 @@ fn sidebar_view(theme: Theme, selected_nav: &Rc<Cell<usize>>, ids: &Rc<RefCell<I
                         color,
                     );
                 }
-            });
+            }),
+    );
 
-    let title_row = Row::new()
-        .align(Align::Center)
-        .gap(space::SM)
-        .child(app_icon(20.0, theme))
-        .child(Text::subheading("Quill"));
+    tree.add_child(
+        sidebar,
+        Row::new()
+            .align(Align::Center)
+            .gap(space::SM)
+            .child(app_icon(20.0, theme))
+            .child(Text::subheading("Quill", theme)),
+    );
 
-    let search_label = Label::new("Search")
-        .font_size(TextSize::Small.px())
-        .color(theme.palette.muted)
-        .text_options(TextOptions::no_wrap())
-        .anchors(Edges::new(0.0, 0.5, 1.0, 0.5))
-        .offsets(Edges::new(space::SM, -8.0, -space::SM, 8.0));
-    let search = Panel::new()
-        .color(Color::TRANSPARENT)
-        .flat()
-        .child(search_label)
-        .min_size(0.0, 30.0)
-        .background(
-            SurfaceStyle::new(theme.palette.surface_raised)
-                .border(theme.palette.border)
-                .radius(radius::MD),
-        );
+    tree.add_child(
+        sidebar,
+        Panel::new()
+            .color(Color::TRANSPARENT)
+            .flat()
+            .min_size(0.0, 30.0)
+            .surface(
+                SurfaceStyle::new(theme.palette.surface_raised)
+                    .border(theme.palette.border)
+                    .radius(radius::MD),
+            )
+            .child(
+                Label::new("Search")
+                    .font_size(TextSize::Small.px())
+                    .color(theme.palette.muted)
+                    .text_options(TextOptions::no_wrap())
+                    .anchors(Edges::new(0.0, 0.5, 1.0, 0.5))
+                    .offsets(Edges::new(space::SM, -8.0, -space::SM, 8.0)),
+            ),
+    );
 
-    let library_rows: Vec<_> = NAV_ITEMS
-        .iter()
-        .enumerate()
-        .map(|(index, label)| nav_row_view(label, index, selected_nav, ids))
-        .collect();
-    let tag_rows: Vec<_> = TAG_ITEMS
-        .iter()
-        .enumerate()
-        .map(|(index, label)| nav_row_view(label, NAV_ITEMS.len() + index, selected_nav, ids))
-        .collect();
+    tree.add_child(sidebar, Text::caption("Library", theme).tone(Tone::Subtle));
+    let mut nav_rows = Vec::new();
+    for (index, label) in NAV_ITEMS.iter().enumerate() {
+        nav_rows.push(tree.add_child(sidebar, nav_row_view(theme, label, index, selected_nav)));
+    }
+    tree.add_child(sidebar, Text::caption("Tags", theme).tone(Tone::Subtle));
+    for (index, label) in TAG_ITEMS.iter().enumerate() {
+        nav_rows.push(tree.add_child(
+            sidebar,
+            nav_row_view(theme, label, NAV_ITEMS.len() + index, selected_nav),
+        ));
+    }
 
-    let footer = Row::new()
-        .align(Align::Center)
-        .gap(space::SM)
-        .child(Badge::new("v0.1.0").tone(Tone::Muted))
-        .child(Text::caption("local").tone(Tone::Subtle));
+    tree.add_child(sidebar, Flex::new().padding(Edges::ZERO).grow(1.0));
+    tree.add_child(
+        sidebar,
+        Row::new()
+            .align(Align::Center)
+            .gap(space::SM)
+            .child(Badge::new("v0.1.0", theme).tone(Tone::Muted))
+            .child(Text::caption("local", theme).tone(Tone::Subtle)),
+    );
 
-    let sidebar_ids = ids.clone();
-    Column::new()
-        .gap(space::MD)
-        .padding(Edges::new(space::LG, space::MD, space::MD, space::MD))
-        .child(traffic)
-        .child(title_row)
-        .child(search)
-        .child(Text::caption("Library").tone(Tone::Subtle))
-        .children(library_rows)
-        .child(Text::caption("Tags").tone(Tone::Subtle))
-        .children(tag_rows)
-        .child(Flex::new().padding(Edges::ZERO).grow(1.0))
-        .child(footer)
-        .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
-        .offsets(Edges::new(0.0, 0.0, SIDEBAR_WIDTH, 0.0))
-        .background(SurfaceStyle::new(theme.palette.surface))
-        .capture(move |node| sidebar_ids.borrow_mut().sidebar = Some(node))
+    (sidebar, nav_rows)
 }
 
-fn note_row_view(
-    theme: Theme,
-    note: &Note,
-    index: usize,
-    selected: &Rc<Cell<usize>>,
-    ids: &Rc<RefCell<Ids>>,
-) -> impl View {
+fn note_row_view(theme: Theme, note: &Note, index: usize, selected: &Rc<Cell<usize>>) -> Row {
     let held = selected.clone();
-    let current = index;
     let click = selected.clone();
     let bar = selected.clone();
-    let row_ids = ids.clone();
     let shade = 0.18 + index as f32 * 0.05;
-    let column = Column::new()
-        .gap(space::XXS)
-        .child(Text::small(note.title))
-        .child(
-            Text::caption(note.snippet)
-                .tone(Tone::Muted)
-                .max_lines(1)
-                .ellipsis(true),
-        )
-        .grow(1.0);
 
     Row::new()
         .align(Align::Start)
         .gap(space::MD)
         .padding(Edges::all(space::SM))
         .child(thumb(44.0, theme, shade))
-        .child(column)
+        .child(
+            Column::new()
+                .gap(space::XXS)
+                .child(Text::small(note.title, theme))
+                .child(
+                    Text::caption(note.snippet, theme)
+                        .tone(Tone::Muted)
+                        .max_lines(1)
+                        .ellipsis(true),
+                )
+                .grow(1.0),
+        )
         .min_size(0.0, 60.0)
-        .dynamic_background(move |theme, interact| {
-            let fill = if held.get() == current {
+        .dynamic_background(move |interact| {
+            let fill = if held.get() == index {
                 theme.palette.selection
             } else if interact.hovered {
                 theme.palette.surface_hover
@@ -592,8 +567,8 @@ fn note_row_view(
             };
             SurfaceStyle::new(fill).corners(CornerRadii::new(0.0, radius::MD, radius::MD, 0.0))
         })
-        .foreground(move |ctx, rect, theme, _| {
-            if bar.get() == current {
+        .foreground(move |ctx, rect, _| {
+            if bar.get() == index {
                 let bar = Rect::from_min_max(
                     Vec2::new(rect.left(), rect.top()),
                     Vec2::new(rect.left() + 3.0, rect.bottom()),
@@ -607,165 +582,195 @@ fn note_row_view(
             }
         })
         .on_click(move || click.set(index))
-        .capture(move |node| row_ids.borrow_mut().list_rows.push(node))
 }
 
-fn list_view(theme: Theme, selected: &Rc<Cell<usize>>, ids: &Rc<RefCell<Ids>>) -> impl View {
-    let header = Row::new()
-        .align(Align::Center)
-        .justify(Justify::SpaceBetween)
-        .gap(space::SM)
-        .padding(Edges::new(space::SM, space::XS, space::SM, space::XS))
-        .child(Text::heading("All Notes"))
-        .child(Text::small(format!("{} notes", NOTES.len())).tone(Tone::Muted))
-        .min_size(0.0, 32.0);
+fn build_list(
+    tree: &mut SceneTree,
+    root: NodeId,
+    theme: Theme,
+    selected: &Rc<Cell<usize>>,
+) -> (NodeId, Vec<NodeId>) {
+    let list = tree.add_child(
+        root,
+        Column::new()
+            .gap(space::XS)
+            .padding(Edges::new(space::MD, space::MD, space::MD, space::MD))
+            .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
+            .offsets(Edges::new(SIDEBAR_WIDTH, 0.0, DETAIL_X, 0.0))
+            .surface(SurfaceStyle::new(theme.palette.background)),
+    );
 
-    let rows: Vec<_> = NOTES
+    tree.add_child(
+        list,
+        Row::new()
+            .align(Align::Center)
+            .justify(Justify::SpaceBetween)
+            .gap(space::SM)
+            .padding(Edges::new(space::SM, space::XS, space::SM, space::XS))
+            .min_size(0.0, 32.0)
+            .child(Text::heading("All Notes", theme))
+            .child(Text::small(format!("{} notes", NOTES.len()), theme).tone(Tone::Muted)),
+    );
+    tree.add_child(list, Divider::horizontal(theme));
+
+    let rows = NOTES
         .iter()
         .enumerate()
-        .map(|(index, note)| note_row_view(theme, note, index, selected, ids))
+        .map(|(index, note)| tree.add_child(list, note_row_view(theme, note, index, selected)))
         .collect();
 
-    let list_ids = ids.clone();
-    Column::new()
-        .gap(space::XS)
-        .padding(Edges::new(space::MD, space::MD, space::MD, space::MD))
-        .child(header)
-        .child(Divider::horizontal())
-        .children(rows)
-        .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
-        .offsets(Edges::new(SIDEBAR_WIDTH, 0.0, DETAIL_X, 0.0))
-        .background(SurfaceStyle::new(theme.palette.background))
-        .capture(move |node| list_ids.borrow_mut().list = Some(node))
+    (list, rows)
 }
 
-fn detail_view(
+struct DetailIds {
+    root: NodeId,
+    hero: NodeId,
+    title: NodeId,
+    body: NodeId,
+    tag: NodeId,
+    meta: NodeId,
+    primary_button: NodeId,
+}
+
+fn build_detail(
+    tree: &mut SceneTree,
+    root: NodeId,
     theme: Theme,
     selected: &Rc<Cell<usize>>,
     clicks: &Rc<Cell<u32>>,
     delete_requested: &Rc<Cell<bool>>,
-    ids: &Rc<RefCell<Ids>>,
-) -> impl View {
+) -> DetailIds {
+    let detail = tree.add_child(
+        root,
+        Column::new()
+            .gap(0.0)
+            .padding(Edges::ZERO)
+            .anchors(Edges::new(0.0, 0.0, 1.0, 1.0))
+            .offsets(Edges::new(DETAIL_X, 0.0, 0.0, 0.0))
+            .surface(SurfaceStyle::new(theme.palette.background)),
+    );
+
+    // Toolbar.
     let back = selected.clone();
     let forward = selected.clone();
     let nav_group = Row::new()
         .align(Align::Center)
         .gap(space::XS)
-        .child(icon_box(28.0).on_click(move || {
+        .child(icon_box(theme, 28.0).on_click(move || {
             let value = back.get();
             back.set(value.saturating_sub(1));
         }))
-        .child(icon_box(28.0).on_click(move || {
+        .child(icon_box(theme, 28.0).on_click(move || {
             let value = forward.get();
             forward.set((value + 1).min(NOTES.len() - 1));
         }));
 
     let counter = clicks.clone();
-    let primary_ids = ids.clone();
-    let primary = Button::primary("New Note")
-        .on_click(move || counter.set(counter.get() + 1))
-        .capture(move |node| primary_ids.borrow_mut().primary_button = Some(node));
-    let actions = Row::new()
-        .align(Align::Center)
-        .gap(space::SM)
-        .child(Button::ghost("Share"))
-        .child(primary);
+    let toolbar = tree.add_child(
+        detail,
+        Row::new()
+            .align(Align::Center)
+            .gap(space::SM)
+            .padding(Edges::new(space::LG, space::SM, space::LG, space::SM))
+            .min_size(0.0, 48.0)
+            .child(nav_group)
+            .child(Flex::new().padding(Edges::ZERO).grow(1.0))
+            .child(
+                Row::new()
+                    .align(Align::Center)
+                    .gap(space::SM)
+                    .child(Button::ghost("Share", theme))
+                    .child(Button::primary("New Note", theme).on_click(move || {
+                        counter.set(counter.get() + 1);
+                    })),
+            ),
+    );
+    // Capture the primary button id (last child of the actions row, itself the
+    // last child of the toolbar).
+    let actions = tree.children(toolbar).unwrap().last().copied().unwrap();
+    let primary_button = tree.children(actions).unwrap().last().copied().unwrap();
 
-    let toolbar = Row::new()
-        .align(Align::Center)
-        .gap(space::SM)
-        .padding(Edges::new(space::LG, space::SM, space::LG, space::SM))
-        .child(nav_group)
-        .child(Flex::new().padding(Edges::ZERO).grow(1.0))
-        .child(actions)
-        .min_size(0.0, 48.0);
+    tree.add_child(detail, Divider::horizontal(theme));
+
+    // Content.
+    let content = tree.add_child(
+        detail,
+        Column::new().gap(space::LG).padding(Edges::new(
+            space::XXL,
+            space::LG,
+            space::XXL,
+            space::XXL,
+        )),
+    );
 
     let note = &NOTES[0];
-    let hero_ids = ids.clone();
-    let hero = Flex::new()
-        .padding(Edges::ZERO)
-        .min_size(0.0, 220.0)
-        .background(
-            SurfaceStyle::new(theme.palette.surface_raised)
-                .border(theme.palette.border)
-                .radius(radius::LG),
-        )
-        .foreground(|ctx, rect, theme, _| {
-            let side = 64.0f32
-                .min(rect.size.width - 24.0)
-                .min(rect.size.height - 24.0)
-                .max(0.0);
-            if side > 0.0 {
-                let inner = Rect::from_center_size(rect.center(), Size::splat(side));
-                fill_rounded_rect(
-                    ctx,
-                    inner,
-                    radius::MD,
-                    theme.palette.subtle.with_alpha(0.18),
-                );
-            }
-        })
-        .capture(move |node| hero_ids.borrow_mut().hero = Some(node));
+    let hero = tree.add_child(
+        content,
+        Flex::new()
+            .padding(Edges::ZERO)
+            .min_size(0.0, 220.0)
+            .surface(
+                SurfaceStyle::new(theme.palette.surface_raised)
+                    .border(theme.palette.border)
+                    .radius(radius::LG),
+            )
+            .foreground(move |ctx, rect, _| {
+                let side = 64.0f32
+                    .min(rect.size.width - 24.0)
+                    .min(rect.size.height - 24.0)
+                    .max(0.0);
+                if side > 0.0 {
+                    let inner = Rect::from_center_size(rect.center(), Size::splat(side));
+                    fill_rounded_rect(
+                        ctx,
+                        inner,
+                        radius::MD,
+                        theme.palette.subtle.with_alpha(0.18),
+                    );
+                }
+            }),
+    );
 
-    let title_ids = ids.clone();
-    let detail_title = Text::heading(note.title)
-        .grow(1.0)
-        .capture(move |node| title_ids.borrow_mut().detail_title = Some(node));
-    let tag_ids = ids.clone();
-    let detail_tag = Text::caption(note.tag)
-        .tone(Tone::Accent)
-        .capture(move |node| tag_ids.borrow_mut().detail_tag = Some(node));
-    let title_row = Row::new()
-        .align(Align::Center)
-        .gap(space::SM)
-        .child(detail_title)
-        .child(detail_tag);
+    let title_row = tree.add_child(content, Row::new().align(Align::Center).gap(space::SM));
+    let detail_title = tree.add_child(title_row, Text::heading(note.title, theme).grow(1.0));
+    let detail_tag = tree.add_child(title_row, Text::caption(note.tag, theme).tone(Tone::Accent));
 
-    let meta_ids = ids.clone();
-    let detail_meta = Text::small(format!("Edited {} · {}", note.modified, note.tag))
-        .tone(Tone::Muted)
-        .capture(move |node| meta_ids.borrow_mut().detail_meta = Some(node));
-    let body_ids = ids.clone();
-    let detail_body = Text::new(note.body)
-        .tone(Tone::Muted)
-        .capture(move |node| body_ids.borrow_mut().detail_body = Some(node));
+    let detail_meta = tree.add_child(
+        content,
+        Text::small(format!("Edited {} · {}", note.modified, note.tag), theme).tone(Tone::Muted),
+    );
+    let detail_body = tree.add_child(content, Text::new(note.body, theme).tone(Tone::Muted));
 
-    let preferences = Row::new()
-        .align(Align::Center)
-        .gap(space::XL)
-        .child(Checkbox::new("Pin note"))
-        .child(Switch::new().label("Shared"));
+    tree.add_child(
+        content,
+        Row::new()
+            .align(Align::Center)
+            .gap(space::XL)
+            .child(Checkbox::new("Pin note", theme))
+            .child(Switch::new(theme).label("Shared")),
+    );
+    tree.add_child(content, Divider::horizontal(theme));
 
     let delete_flag = delete_requested.clone();
-    let content_actions = Row::new()
-        .align(Align::Center)
-        .gap(space::SM)
-        .child(Button::secondary("Open"))
-        .child(Button::secondary("Duplicate"))
-        .child(Button::ghost("Delete").on_click(move || delete_flag.set(true)));
+    tree.add_child(
+        content,
+        Row::new()
+            .align(Align::Center)
+            .gap(space::SM)
+            .child(Button::secondary("Open", theme))
+            .child(Button::secondary("Duplicate", theme))
+            .child(Button::ghost("Delete", theme).on_click(move || delete_flag.set(true))),
+    );
 
-    let content = Column::new()
-        .gap(space::LG)
-        .padding(Edges::new(space::XXL, space::LG, space::XXL, space::XXL))
-        .child(hero)
-        .child(title_row)
-        .child(detail_meta)
-        .child(detail_body)
-        .child(preferences)
-        .child(Divider::horizontal())
-        .child(content_actions);
-
-    let detail_ids = ids.clone();
-    Column::new()
-        .gap(0.0)
-        .padding(Edges::ZERO)
-        .child(toolbar)
-        .child(Divider::horizontal())
-        .child(content)
-        .anchors(Edges::new(0.0, 0.0, 1.0, 1.0))
-        .offsets(Edges::new(DETAIL_X, 0.0, 0.0, 0.0))
-        .background(SurfaceStyle::new(theme.palette.background))
-        .capture(move |node| detail_ids.borrow_mut().detail = Some(node))
+    DetailIds {
+        root: detail,
+        hero,
+        title: detail_title,
+        body: detail_body,
+        tag: detail_tag,
+        meta: detail_meta,
+        primary_button,
+    }
 }
 
 #[cfg(test)]

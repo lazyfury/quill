@@ -51,16 +51,19 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 draw_core            (no draw_* deps)
 draw_theme   -> draw_core
 draw_scene    -> draw_core, draw_render
-draw_ui         -> draw_core, draw_scene, draw_render, draw_theme
-draw_components -> draw_core, draw_ui, draw_render, draw_theme
+draw_ui         -> draw_core, draw_scene, draw_render
+draw_app        -> draw_core, draw_scene, draw_render, draw_ui, draw_theme
+draw_components -> draw_core, draw_app, draw_ui, draw_render, draw_theme
 draw_render   -> draw_core
 draw_profile  -> draw_core, draw_render
-draw_debug_ui -> draw_core, draw_render, draw_ui, draw_profile
+draw_debug_ui -> draw_core, draw_scene, draw_render, draw_ui, draw_app, draw_profile
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core, draw_ui
 draw_bench    (std only, no draw_* deps)
-draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui
-demo_app      -> draw_core, draw_render, draw_scene, draw_ui   (no backend)
+draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui, draw_app
+demo_app      -> draw_core, draw_render, draw_scene, draw_ui, draw_app,
+                 draw_theme, draw_components   (no backend)
+component_demo -> draw_core, draw_render, draw_scene, draw_ui, draw_app, draw_wasm
 web_demo      -> draw_core, draw_scene, demo_app, draw_wasm
 wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, demo_app,
                  draw_backend_wgpu, draw_profile, draw_debug_ui, winit
@@ -162,21 +165,28 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       `Component` is automatically a `View` (blanket impl). `Card` takes
       children; `demo_app` and the overlay popover content are built as view
       trees.
-      Recorded in `docs/design-system.md`.
-- [ ] Stage 25 — Godot-style unified scene (planning approved; Phases 1-5 and
-      the full UI-state migration complete, Phase 6 next). One `SceneTree` for
-      world + UI, `Viewport`/`Camera2D` driving the world, and UI under a
-      `CanvasLayer` in viewport coordinates; every node owns its own state and
-      `draw_ui` is a set of free functions over the tree (no `Ui` object). Full
-      phase plan, target architecture, decisions and open questions:
-      `docs/godot-migration.md`. Phases: 1 `draw_scene` extension point +
-      layers (done), 2 `Viewport`/`Camera2D` (done), 3 `CanvasLayer` painting
-      (done), 4 unified tree: 4a `Ui` borrows the tree, 4b `ControlData` onto
-      the node slot, 4c migrate demos, 4d all control runtime + GUI state onto
-      nodes, 4e layout cache onto the root, 4f theme + measurer onto the root,
-      4g remove `Ui`/`UiHost` in favor of free functions (done), 5 unified
-      lifecycle/input (done), 6 `draw_game` capabilities, 7 native continuous
-      loop, 8 observability/tests/docs.
+      Recorded in `docs/design-system.md`. **Superseded by Stage 25.10/25.11:** the
+      `View`/`ViewExt`/`BuildContext`/`Modify` layer and the `add_*`/`mount`
+      helpers were deleted; components compose natively with `.child()`.
+- [ ] Stage 25 — Godot-style unified scene (planning approved; Phases 1-5,
+      the UI-state migration and the component-native API complete, Phase 6
+      next). One `SceneTree` for world + UI, `Viewport`/`Camera2D` driving the
+      world, and UI under a `CanvasLayer` in viewport coordinates; every node
+      owns its own state and `draw_ui` is a set of free functions over the tree
+      (no `Ui` object). Full phase plan, target architecture, decisions and open
+      questions: `docs/godot-migration.md`. Phases: 1 `draw_scene` extension
+      point + layers (done), 2 `Viewport`/`Camera2D` (done), 3 `CanvasLayer`
+      painting (done), 4 unified tree: 4a `Ui` borrows the tree, 4b
+      `ControlData` onto the node slot, 4c migrate demos, 4d all control runtime
+      + GUI state onto nodes, 4e layout cache onto the root, 4f theme + measurer
+      onto the root (theme now a passed-in value again, 25.11), 4g remove
+      `Ui`/`UiHost` in favor of free functions (done), 5 unified lifecycle/input
+      (done), 6 `draw_game` capabilities, 7 native continuous loop, 8
+      observability/tests/docs.
+      **Stage 25.10/25.11 (component-native API):** `draw_scene::SceneChild` +
+      `SceneTree::add_child`; `draw_app::Component` carries a `Spec` and exposes
+      modifiers as methods; `draw_components` components take the `Theme` as a
+      `Copy` value; the theme is no longer stored on the tree.
 
 ## Per-stage gate (must run)
 

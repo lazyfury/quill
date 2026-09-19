@@ -1,28 +1,26 @@
-//! `draw_components` — a themed component library for `draw_ui`.
+//! `draw_components` — a themed component library for `draw_app`.
 //!
-//! The crate only contains component builders. Components implement
-//! [`draw_app::Component`], read the active [`Theme`] from
-//! `draw_ui::theme()`, and attach their chrome with the styling primitives from
-//! `draw_ui` (`SurfaceStyle`, `Tone`, `surface_decor`, …). There is no runtime
-//! object and no second paint pass:
+//! Components implement [`draw_app::Component`], receive the active [`Theme`] as
+//! a value, and attach their chrome with the styling primitives from `draw_ui`
+//! (`SurfaceStyle`, `Tone`, a foreground/surface decorator). There is no runtime
+//! object, no theme on the tree and no second paint pass:
 //!
 //! ```ignore
 //! use draw_components::{Card, Checkbox, Text};
 //! use draw_scene::SceneTree;
 //! use draw_theme::{space, Theme};
-//! use draw_ui as ui;
 //!
+//! let theme = Theme::dark();
 //! let mut tree = SceneTree::new();
-//! ui::set_theme(&mut tree, Theme::dark());
+//! let root = tree.root();
 //!
-//! let root = ui::add_flex(&mut tree, tree.root(), ui::FlexStyle::column());
-//! ui::mount(&mut tree, root, Card::new().gap(space::MD)
-//!     .child(Text::heading("Settings"))
-//!     .child(Checkbox::new("Verbose output")));
+//! let panel = tree.add_child(root, Card::new(theme).gap(space::MD)
+//!     .child(Text::heading("Settings", theme))
+//!     .child(Checkbox::new("Verbose output", theme)));
 //!
-//! ui::layout(&mut tree, viewport);
-//! ui::paint(&tree, &mut ctx);      // surfaces + content + marks, in tree order
-//! ui::route_input(&mut tree, &event);
+//! draw_ui::layout(&mut tree, viewport);
+//! draw_ui::paint(&tree, &mut ctx);      // surfaces + content + marks, in tree order
+//! draw_ui::route_input(&mut tree, &event);
 //! ```
 //!
 //! ## Implemented
@@ -47,19 +45,6 @@ pub use components::{
 };
 pub use overlay::{OverlayId, Overlays, Placement};
 
-// Re-exported so component users need one import for the common surface.
-pub use draw_app::{child, BuildContext, Child, Column, Component, ControlRef, Row, View, ViewExt};
+pub use draw_app::{Component, Flex, Grid, Label, Panel, Spec};
 pub use draw_render::CornerRadii;
 pub use draw_theme::{self as theme, SurfaceTone, Theme, Tone};
-
-/// Resets a control to top-left anchors so it sizes to its own content.
-///
-/// `draw_ui` container components default to `fill_parent`; leaf components
-/// call this so they do not stretch when mounted directly under the root.
-/// The override is ignored when the parent is a flex/grid container.
-pub(crate) fn detach(tree: &mut draw_scene::SceneTree, id: draw_core::NodeId) {
-    draw_app::update_control(tree, id, |data| {
-        data.anchors = draw_core::Edges::ZERO;
-        data.offsets = draw_core::Edges::ZERO;
-    });
-}

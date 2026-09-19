@@ -1,4 +1,4 @@
-use draw_app::{Label, Panel, VBox};
+use draw_app::{Component, Flex, Label, Panel, VBox};
 use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, ViewportSize};
 use draw_profile::{InspectionReport, Phase, Profiler, Severity};
 use draw_render::PaintContext;
@@ -163,25 +163,23 @@ impl PerformanceOverlay {
     pub fn with_config(config: OverlayConfig) -> Self {
         let mut tree = SceneTree::new();
         let tree_root = tree.root();
-        let root = draw_app::add_flex(&mut tree, tree_root, draw_ui::FlexStyle::column());
-        draw_app::update_control(&mut tree, root, |d| {
-            d.mouse_filter = draw_ui::MouseFilter::Ignore
-        });
+        let root = tree.add_child(
+            tree_root,
+            Flex::column().mouse_filter(draw_ui::MouseFilter::Ignore),
+        );
 
-        let panel = draw_app::add(
-            &mut tree,
+        let (anchors, offsets) = config.placement();
+        let panel = tree.add_child(
             root,
             Panel::new()
                 .color(config.background)
-                .border(Some(config.border)),
+                .border(Some(config.border))
+                .anchors(anchors)
+                .offsets(offsets),
         );
-        let (anchors, offsets) = config.placement();
-        draw_app::update_control(&mut tree, panel.id(), |d| d.anchors = anchors);
-        draw_app::update_control(&mut tree, panel.id(), |d| d.offsets = offsets);
 
-        let vbox = draw_app::add(
-            &mut tree,
-            panel.id(),
+        let vbox = tree.add_child(
+            panel,
             VBox::new()
                 .separation(config.separation)
                 .padding(Edges::all(config.padding)),
@@ -193,12 +191,7 @@ impl PerformanceOverlay {
         let font_size = config.font_size;
 
         let add = |tree: &mut SceneTree, text: &str, size: f32, color: Color| -> NodeId {
-            draw_app::add(
-                tree,
-                vbox.id(),
-                Label::new(text).font_size(size).color(color),
-            )
-            .id()
+            tree.add_child(vbox, Label::new(text).font_size(size).color(color))
         };
 
         let title = add(&mut tree, "Performance", title_size, text_color);
@@ -222,7 +215,7 @@ impl PerformanceOverlay {
 
         Self {
             tree,
-            panel: panel.id(),
+            panel,
             open: true,
             config,
             rows: Rows {

@@ -60,38 +60,55 @@ Then submit `list` to any `RenderBackend` (recording, Canvas 2D, ...). See
 
 ## Create your first control
 
+Components compose into one node tree. Attach a component with
+`SceneTree::add_child`; nest with `.child()`. The theme is a value passed to the
+constructors, never stored on the tree.
+
 ```rust
+use draw_app::{Button, Component, Flex, Label, Panel, VBox};
 use draw_core::{Size, ViewportSize};
 use draw_scene::SceneTree;
-use draw_ui as ui;
+use draw_theme::Theme;
 
+let theme = Theme::dark();
 let mut tree = SceneTree::new();
-let root = ui::add_flex(&mut tree, tree.root(), ui::FlexStyle::column());
-let panel = ui::add(&mut tree, root, Panel::new());
-let vbox = ui::add(&mut tree, panel.id(), VBox::new());
-ui::add(&mut tree, vbox.id(), Label::new("Hello"));
 
-let button = ui::add(
-    &mut tree,
-    vbox.id(),
+let root = tree.add_child(tree.root(), Flex::column());
+let panel = tree.add_child(root, Panel::new());
+let vbox = tree.add_child(panel, VBox::new());
+tree.add_child(vbox, Label::new("Hello"));
+
+let _button = tree.add_child(
+    vbox,
     Button::new("Click me").on_click(|| println!("clicked!")),
 );
 
-ui::layout(&mut tree, ViewportSize::new(Size::new(800.0, 600.0)));
+// Or compose a subtree as a value before attaching it:
+tree.add_child(
+    root,
+    Panel::new().child(Label::new("Composed")).child(Button::new("Save")),
+);
+
+draw_ui::layout(&mut tree, ViewportSize::new(Size::new(800.0, 600.0)));
 
 // Pointer/keyboard input (backend-neutral):
-ui::route_input(&mut tree, &draw_core::InputEvent::PointerDown {
-    position: draw_core::Vec2::new(100.0, 100.0),
-    button: draw_core::PointerButton::Left,
-});
+draw_app::route_input(
+    &mut tree,
+    &draw_core::InputEvent::PointerDown {
+        position: draw_core::Vec2::new(100.0, 100.0),
+        button: draw_core::PointerButton::Left,
+    },
+);
 
 // Paint into a DrawList:
 let mut ctx = draw_render::PaintContext::new();
-ui::paint(&tree, &mut ctx);
+draw_ui::paint(&tree, &mut ctx);
 ```
 
-See `docs/components.md` for anchors, containers, events and custom components,
-and `demos/component_demo` for a runnable browser example.
+Themed components (`draw_components::Text`, `Card`, `Button`, `Checkbox`, …)
+take the theme as their first argument: `Text::heading("Notes", theme)`,
+`Card::new(theme)`. See `docs/components.md` for anchors, containers, events and
+custom components, and `demos/component_demo` for a runnable browser example.
 
 ## Debug component bounds
 
@@ -103,11 +120,11 @@ use draw_debug_ui::DebugOverlay;
 let mut debug = DebugOverlay::new();
 
 // per frame, after painting the UI into `ctx`:
-debug.paint(&ui, &mut ctx);
+debug.paint(&tree, &mut ctx);
 ```
 
-`draw_ui::Ui::paint_debug(&DebugDrawOptions)` does the drawing; `DebugOverlay` just
-adds an open/closed toggle. See `docs/debug.md`.
+`draw_ui::paint_debug` does the drawing; `DebugOverlay` just adds an
+open/closed toggle. See `docs/debug.md`.
 
 ## Inspect performance
 
