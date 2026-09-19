@@ -38,7 +38,8 @@ pub use component::{
     Column, Component, Flex, Grid, HBox, Label, Panel, Row, Spec, VBox,
 };
 pub use input::{
-    focused, handle_input, hit_test, hovered, hovered_is_button, is_interactive, route_input,
+    focused, handle_input, hit_test, hovered, hovered_cursor, hovered_is_button, is_interactive,
+    route_input,
 };
 
 use draw_core::NodeId;

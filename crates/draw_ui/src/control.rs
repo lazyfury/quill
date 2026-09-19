@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use draw_core::{Edges, NodeId, Rect, Size, Vec2, ViewportSize};
+use draw_core::{Cursor, Edges, NodeId, Rect, Size, Vec2, ViewportSize};
 use draw_scene::SceneTree;
 
 use crate::decor::DecorRef;
@@ -40,6 +40,8 @@ pub struct ControlData {
     /// Absolute rectangle in logical viewport coordinates, valid after layout.
     pub rect: Rect,
     pub mouse_filter: MouseFilter,
+    /// Cursor the host should show while the pointer is over this control.
+    pub cursor: Cursor,
     /// How this control participates in its parent container's layout.
     pub layout: LayoutStyle,
 }
@@ -52,6 +54,7 @@ impl Default for ControlData {
             min_size: Size::ZERO,
             rect: Rect::ZERO,
             mouse_filter: MouseFilter::Stop,
+            cursor: Cursor::Default,
             layout: LayoutStyle::default(),
         }
     }

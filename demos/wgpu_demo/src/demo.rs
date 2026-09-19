@@ -97,8 +97,8 @@ impl Demo {
         self.app.control_count()
     }
 
-    /// Whether the pointer is over anything clickable (drives the cursor icon).
-    pub fn pointer_over_clickable(&self) -> bool {
-        self.app.pointer_over_clickable()
+    /// Cursor the host should show for the current pointer position.
+    pub fn cursor(&self) -> draw_core::Cursor {
+        self.app.cursor()
     }
 }

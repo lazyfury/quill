@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use draw_app::{update_control, Component, Spec};
-use draw_core::{Color, Edges, NodeId, Size, Vec2};
+use draw_core::{Color, Cursor, Edges, NodeId, Size, Vec2};
 use draw_theme::Theme;
 use draw_ui::{MouseFilter, SizeBasis, Widget};
 
@@ -115,6 +115,11 @@ impl Component for ResizeHandle {
         let size = self.size;
 
         self.spec.data.mouse_filter = MouseFilter::Stop;
+        self.spec.data.cursor = if vertical {
+            Cursor::ColResize
+        } else {
+            Cursor::RowResize
+        };
         // A fixed gutter: never grow or shrink along the main axis.
         self.spec.data.layout.grow = 0.0;
         self.spec.data.layout.shrink = 0.0;

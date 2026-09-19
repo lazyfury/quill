@@ -31,7 +31,9 @@ use std::rc::Rc;
 
 use draw_app::{Column, Component, Flex, Label, Panel, Row};
 use draw_components::{Badge, Button, Checkbox, Divider, Overlays, ResizeHandle, Switch, Text};
-use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize};
+use draw_core::{
+    Color, Cursor, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize,
+};
 use draw_render::{CornerRadii, PaintContext};
 use draw_scene::SceneTree;
 use draw_theme::{radius, space, TextSize, Theme, Tone};
@@ -51,9 +53,11 @@ pub const RESIZE_GUTTER: f32 = 6.0;
 /// Bounds the sidebar can be resized to.
 pub const SIDEBAR_MIN: f32 = 140.0;
 pub const SIDEBAR_MAX: f32 = 400.0;
-/// X offset where the detail pane starts (after the resize gutter and one
-/// separator).
-pub const DETAIL_X: f32 = SIDEBAR_WIDTH + RESIZE_GUTTER + LIST_WIDTH + SEPARATOR_WIDTH;
+/// Bounds the list can be resized to.
+pub const LIST_MIN: f32 = 200.0;
+pub const LIST_MAX: f32 = 560.0;
+/// X offset where the detail pane starts (after both resize gutters).
+pub const DETAIL_X: f32 = SIDEBAR_WIDTH + RESIZE_GUTTER + LIST_WIDTH + RESIZE_GUTTER;
 
 /// A note shown in the list/detail panes.
 #[derive(Debug, Clone, Copy)]
@@ -140,6 +144,7 @@ pub struct DemoApp {
     selected: Rc<Cell<usize>>,
     selected_nav: Rc<Cell<usize>>,
     sidebar_width: Rc<Cell<f32>>,
+    list_width: Rc<Cell<f32>>,
     clicks: Rc<Cell<u32>>,
     overlays: Overlays,
     delete_requested: Rc<Cell<bool>>,
@@ -181,6 +186,7 @@ impl DemoApp {
         let delete_requested = Rc::new(Cell::new(false));
         let clicks = Rc::new(Cell::new(0));
         let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
+        let list_width = Rc::new(Cell::new(LIST_WIDTH));
 
         // Split view: panes and separators are siblings in the flex row, so the
         // dividers take part in layout instead of being overlaid on the column
@@ -196,8 +202,15 @@ impl DemoApp {
                 .min(SIDEBAR_MIN)
                 .max(SIDEBAR_MAX),
         );
-        let (list, list_rows) = build_list(&mut tree, split, theme, &selected);
-        tree.add_child(split, Divider::vertical(theme).shrink(0.0));
+        let (list, list_rows) = build_list(&mut tree, split, theme, &list_width, &selected);
+        tree.add_child(
+            split,
+            ResizeHandle::vertical(theme)
+                .target(list)
+                .width(list_width.clone())
+                .min(LIST_MIN)
+                .max(LIST_MAX),
+        );
         let detail = build_detail(
             &mut tree,
             split,
@@ -226,6 +239,7 @@ impl DemoApp {
             clicks,
             overlays: Overlays::new(theme),
             sidebar_width,
+            list_width,
             delete_requested,
             deleted: Rc::new(Cell::new(false)),
             viewport: ViewportSize::new(Size::new(1100.0, 720.0)),
@@ -292,6 +306,11 @@ impl DemoApp {
     /// Current sidebar width, in logical pixels (draggable via the gutter).
     pub fn sidebar_width(&self) -> f32 {
         self.sidebar_width.get()
+    }
+
+    /// Current list width, in logical pixels (draggable via the gutter).
+    pub fn list_width(&self) -> f32 {
+        self.list_width.get()
     }
 
     /// Number of times the primary ("New Note") button has been clicked.
@@ -386,6 +405,11 @@ impl DemoApp {
     /// core button). Hosts use this for cursor feedback.
     pub fn pointer_over_clickable(&self) -> bool {
         draw_app::hovered(&self.tree).is_some_and(|id| draw_app::is_interactive(&self.tree, id))
+    }
+
+    /// Cursor the host should show for the current pointer position.
+    pub fn cursor(&self) -> Cursor {
+        draw_app::hovered_cursor(&self.tree)
     }
 }
 
@@ -619,6 +643,7 @@ fn build_list(
     tree: &mut SceneTree,
     root: NodeId,
     theme: Theme,
+    width: &Rc<Cell<f32>>,
     selected: &Rc<Cell<usize>>,
 ) -> (NodeId, Vec<NodeId>) {
     let list = tree.add_child(
@@ -626,7 +651,7 @@ fn build_list(
         Column::new()
             .gap(space::XS)
             .padding(Edges::new(space::MD, space::MD, space::MD, space::MD))
-            .basis(SizeBasis::Px(LIST_WIDTH))
+            .basis(SizeBasis::Px(width.get()))
             .shrink(0.0)
             .surface(SurfaceStyle::new(theme.palette.background)),
     );
@@ -965,6 +990,60 @@ mod tests {
             button: PointerButton::Left,
         });
         assert!((app.sidebar_width() - SIDEBAR_MIN).abs() < 1e-3);
+    }
+
+    #[test]
+    fn dragging_the_list_gutter_resizes_the_list() {
+        let mut app = laid_out(1100.0, 720.0);
+        let viewport = app.viewport();
+        assert!((app.list_width() - LIST_WIDTH).abs() < 1e-3);
+
+        let start = Vec2::new(
+            app.sidebar_width() + RESIZE_GUTTER + app.list_width() + RESIZE_GUTTER / 2.0,
+            360.0,
+        );
+        app.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        app.event(&InputEvent::PointerMove {
+            position: start + Vec2::new(50.0, 0.0),
+        });
+        app.event(&InputEvent::PointerUp {
+            position: start + Vec2::new(50.0, 0.0),
+            button: PointerButton::Left,
+        });
+        app.layout(viewport);
+
+        assert!((app.list_width() - (LIST_WIDTH + 50.0)).abs() < 1e-3);
+        let detail = rect(&app, app.detail());
+        let expected = SIDEBAR_WIDTH + RESIZE_GUTTER + LIST_WIDTH + 50.0 + RESIZE_GUTTER;
+        assert!((detail.left() - expected).abs() < 1e-3);
+    }
+
+    #[test]
+    fn hovering_a_gutter_reports_a_resize_cursor() {
+        let mut app = laid_out(1100.0, 720.0);
+        assert_eq!(app.cursor(), Cursor::Default);
+
+        let sidebar_gutter = Vec2::new(app.sidebar_width() + RESIZE_GUTTER / 2.0, 360.0);
+        app.event(&InputEvent::PointerMove {
+            position: sidebar_gutter,
+        });
+        assert_eq!(app.cursor(), Cursor::ColResize);
+
+        let list_gutter = Vec2::new(
+            app.sidebar_width() + RESIZE_GUTTER + app.list_width() + RESIZE_GUTTER / 2.0,
+            360.0,
+        );
+        app.event(&InputEvent::PointerMove {
+            position: list_gutter,
+        });
+        assert_eq!(app.cursor(), Cursor::ColResize);
+
+        let button = app.button_center().expect("button rect");
+        app.event(&InputEvent::PointerMove { position: button });
+        assert_eq!(app.cursor(), Cursor::Pointer);
     }
 
     #[test]

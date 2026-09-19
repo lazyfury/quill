@@ -139,8 +139,8 @@ mod demo {
             );
         }
 
-        fn pointer_cursor(&self) -> bool {
-            draw_app::hovered_is_button(&self.tree)
+        fn cursor(&self) -> draw_core::Cursor {
+            draw_app::hovered_cursor(&self.tree)
         }
 
         fn update(&mut self, viewport: ViewportSize) {

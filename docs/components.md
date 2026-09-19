@@ -252,6 +252,16 @@ tree.add_child(
 `LayoutStyle.basis` on drag; the surrounding `Flex` re-adapts the other panes.
 Fixed panes/gutters should use `shrink(0.0)`.
 
+### Cursor feedback
+
+`ControlData.cursor` carries a backend-neutral `draw_core::Cursor`
+(`Default`/`Pointer`/`Text`/`ColResize`/`RowResize`/`Grab`/`Grabbing`). Set it
+with `Component::cursor(..)`; `ResizeHandle` sets `ColResize`/`RowResize` itself.
+`draw_app::hovered_cursor(&tree)` returns the hovered control's cursor (walking
+up to the nearest ancestor that set one), falling back to `Pointer` for anything
+with a click/drag callback. Hosts map it onto winit `CursorIcon` or the CSS
+`cursor` property (`draw_wasm::App::cursor`).
+
 ## Request redraw
 
 The UI is immediate-mode over a persistent tree. Mutate state, call

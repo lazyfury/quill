@@ -4,7 +4,7 @@
 //! control data and layout, while `draw_app` owns the interaction state and the
 //! `_input -> world -> GUI -> _unhandled_input` order.
 
-use draw_core::{EventResult, InputEvent, Key, NodeId, PointerButton, Vec2};
+use draw_core::{Cursor, EventResult, InputEvent, Key, NodeId, PointerButton, Vec2};
 use draw_scene::SceneTree;
 use draw_ui::{Control, MouseFilter, Widget};
 
@@ -249,6 +249,35 @@ fn set_hover(tree: &mut SceneTree, hit: Option<NodeId>) {
 /// The node currently under the pointer.
 pub fn hovered(tree: &SceneTree) -> Option<NodeId> {
     draw_ui::gui_state_of(tree).and_then(|state| state.hovered)
+}
+
+/// Cursor the host should show for the current pointer position.
+///
+/// The hovered control's explicit [`Cursor`] wins (walking up to the nearest
+/// ancestor that set one); otherwise a control with a click or drag callback
+/// reports [`Cursor::Pointer`].
+pub fn hovered_cursor(tree: &SceneTree) -> Cursor {
+    let Some(hit) = hovered(tree) else {
+        return Cursor::Default;
+    };
+    let mut interactive = false;
+    let mut current = Some(hit);
+    while let Some(node) = current {
+        if let Some(control) = tree.data::<Control>(node) {
+            if control.data.cursor != Cursor::Default {
+                return control.data.cursor;
+            }
+            if control.callback.is_some() || control.drag_callback.is_some() {
+                interactive = true;
+            }
+        }
+        current = tree.parent(node);
+    }
+    if interactive {
+        Cursor::Pointer
+    } else {
+        Cursor::Default
+    }
 }
 
 /// Whether the pointer is currently over a clickable button.

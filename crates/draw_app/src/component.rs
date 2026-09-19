@@ -217,6 +217,12 @@ pub trait Component: Sized {
         self.spec().data.mouse_filter = filter;
         self
     }
+
+    /// Cursor the host shows while the pointer is over the node.
+    fn cursor(mut self, cursor: draw_core::Cursor) -> Self {
+        self.spec().data.cursor = cursor;
+        self
+    }
 }
 
 /// Implements [`SceneChild`](draw_scene::SceneChild) for component types.

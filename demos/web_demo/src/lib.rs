@@ -15,7 +15,7 @@ mod demo {
     use wasm_bindgen::prelude::*;
     use web_sys::CanvasRenderingContext2d;
 
-    use draw_core::{EventResult, InputEvent, ViewportSize};
+    use draw_core::{Cursor, EventResult, InputEvent, ViewportSize};
     use draw_render::PaintContext;
     use draw_wasm::{App, CanvasTextMeasurer};
 
@@ -53,8 +53,8 @@ mod demo {
                 .set_text_measurer(Rc::new(CanvasTextMeasurer::new(ctx.clone())));
         }
 
-        fn pointer_cursor(&self) -> bool {
-            self.0.pointer_over_clickable()
+        fn cursor(&self) -> Cursor {
+            self.0.cursor()
         }
 
         fn update(&mut self, viewport: ViewportSize) {

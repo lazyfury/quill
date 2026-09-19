@@ -6,7 +6,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, PointerEvent, Window};
 
 use draw_backend_canvas::Canvas2dBackend;
-use draw_core::{EventResult, InputEvent, Key, PointerButton, Size, Vec2, ViewportSize};
+use draw_core::{Cursor, EventResult, InputEvent, Key, PointerButton, Size, Vec2, ViewportSize};
 use draw_render::{PaintContext, RenderBackend};
 
 /// Application hook driven by the WASM runner.
@@ -23,12 +23,11 @@ pub trait App {
     /// match what the backend draws.
     fn attach_context(&mut self, _ctx: &CanvasRenderingContext2d) {}
 
-    /// Whether the pointer is currently over a clickable control.
+    /// Cursor the runner should show for the current pointer position.
     ///
-    /// While this is `true` the runner sets the canvas CSS cursor to
-    /// `pointer`; otherwise it resets to `default`. Evaluated every frame.
-    fn pointer_cursor(&self) -> bool {
-        false
+    /// Evaluated every frame and mapped onto the canvas CSS `cursor` property.
+    fn cursor(&self) -> Cursor {
+        Cursor::Default
     }
 
     fn update(&mut self, viewport: ViewportSize);
@@ -120,12 +119,16 @@ fn render_frame<A: App>(
 }
 
 fn apply_cursor<A: App>(app: &Rc<RefCell<A>>, canvas: &HtmlCanvasElement) {
-    let cursor = if app.borrow().pointer_cursor() {
-        "pointer"
-    } else {
-        "default"
+    let css = match app.borrow().cursor() {
+        Cursor::Default => "default",
+        Cursor::Pointer => "pointer",
+        Cursor::Text => "text",
+        Cursor::ColResize => "col-resize",
+        Cursor::RowResize => "row-resize",
+        Cursor::Grab => "grab",
+        Cursor::Grabbing => "grabbing",
     };
-    let _ = canvas.style().set_property("cursor", cursor);
+    let _ = canvas.style().set_property("cursor", css);
 }
 
 fn attach_pointer_listeners<A: App + 'static>(canvas: &HtmlCanvasElement, app: &Rc<RefCell<A>>) {

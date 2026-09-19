@@ -223,10 +223,14 @@ impl App {
         let Some(window) = self.window.as_ref() else {
             return;
         };
-        let cursor = if self.demo.pointer_over_clickable() {
-            CursorIcon::Pointer
-        } else {
-            CursorIcon::Default
+        let cursor = match self.demo.cursor() {
+            draw_core::Cursor::Default => CursorIcon::Default,
+            draw_core::Cursor::Pointer => CursorIcon::Pointer,
+            draw_core::Cursor::Text => CursorIcon::Text,
+            draw_core::Cursor::ColResize => CursorIcon::ColResize,
+            draw_core::Cursor::RowResize => CursorIcon::RowResize,
+            draw_core::Cursor::Grab => CursorIcon::Grab,
+            draw_core::Cursor::Grabbing => CursorIcon::Grabbing,
         };
         window.set_cursor(cursor);
     }
