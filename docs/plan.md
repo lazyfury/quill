@@ -73,6 +73,33 @@ polish, in priority order:
 6. **Migrate remaining imperative hosts** — `component_demo` and any lingering
    `ui.add` + `ui.set_*` construction; keep `Ui::set_*` runtime-internal only.
 
+## UI runtime — `Ui` boundary & lifecycle (Stage 25)
+
+`Ui` is necessary as the retained UI document + layout/paint/input runtime, but
+it is currently a god object and overlaps `SceneTree` on "who owns a control".
+Godot puts `Control` data on the node; here `draw_scene` stays a generic draw
+graph and UI data lives in `Ui`'s `NodeId`-keyed maps. Priority order:
+
+1. **Boundary** — public `Ui` shrinks to the runtime surface (`mount`, `layout`,
+   `paint`, `handle_input`, `theme`/`set_theme`, `set_text_measurer` + read-only
+   queries). Move `set_*` / `insert` / `add_decor` behind `BuildContext`
+   (`pub(crate)`), so construction is exclusively `View`. Merge `Component` into
+   `View` (or make it `pub(crate)`) — one construction abstraction, not three
+   (`Widget` runtime / `Component` mount / `View` build).
+2. **Ownership & lifecycle** — document that `SceneTree` is the hierarchy and
+   `Ui` is the control table over it, then add `Ui::remove` that synchronously
+   drops `controls` / `widgets` / `decorations` / `callbacks` for the subtree.
+   Long term: consider moving `Widget`/`ControlData` onto `SceneTree` control
+   nodes (Godot-style single source of truth); the cost is `draw_scene` knowing
+   about widgets.
+3. **Theme** — either accept and record "`Ui` is the UI runtime and owns the
+   active theme", or introduce an explicit `Environment`/`Context` inherited
+   from the root so the core stays theme-free. Fix the mount-time snapshot so a
+   theme swap updates live surfaces.
+4. **Naming** — `Ui` -> `UiRoot`/`UiDocument` to disambiguate "the UI" from "the
+   runtime instance"; only if it grows further, split `Layout`/`Painter` out and
+   leave `Ui` as a facade.
+
 ## Demo (`demos/demo_app`)
 
 - Light/dark toggle in the sidebar.
