@@ -79,7 +79,7 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
                     .data::<Control>(dragging)
                     .and_then(|control| control.drag_callback.clone())
                 {
-                    (callback.borrow_mut())(tree, delta);
+                    (callback.borrow_mut())(tree, draw_ui::DragPhase::Move, delta);
                 }
                 return EventResult::Handled;
             }
@@ -103,11 +103,19 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
             set_hover(tree, hit);
             // A drag handle (or an ancestor) captures the pointer on down.
             if let Some(drag) = hit.and_then(|id| nearest_with_drag(tree, id)) {
-                let state = draw_ui::gui_state_mut(tree);
-                state.focused = Some(drag);
-                state.dragging = Some(drag);
-                state.pressed = Some(drag);
-                state.drag_last = *position;
+                {
+                    let state = draw_ui::gui_state_mut(tree);
+                    state.focused = Some(drag);
+                    state.dragging = Some(drag);
+                    state.pressed = Some(drag);
+                    state.drag_last = *position;
+                }
+                if let Some(callback) = tree
+                    .data::<Control>(drag)
+                    .and_then(|control| control.drag_callback.clone())
+                {
+                    (callback.borrow_mut())(tree, draw_ui::DragPhase::Start, Vec2::ZERO);
+                }
                 return EventResult::Handled;
             }
             draw_ui::gui_state_mut(tree).focused = hit;
@@ -127,10 +135,13 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
             position,
             button: PointerButton::Left,
         } => {
-            if draw_ui::gui_state_of(tree)
-                .and_then(|state| state.dragging)
-                .is_some()
-            {
+            if let Some(dragging) = draw_ui::gui_state_of(tree).and_then(|state| state.dragging) {
+                if let Some(callback) = tree
+                    .data::<Control>(dragging)
+                    .and_then(|control| control.drag_callback.clone())
+                {
+                    (callback.borrow_mut())(tree, draw_ui::DragPhase::End, Vec2::ZERO);
+                }
                 let state = draw_ui::gui_state_mut(tree);
                 state.dragging = None;
                 state.pressed = None;
@@ -264,6 +275,12 @@ pub fn hovered_cursor(tree: &SceneTree) -> Cursor {
     let mut current = Some(hit);
     while let Some(node) = current {
         if let Some(control) = tree.data::<Control>(node) {
+            if let Some(provider) = &control.cursor_provider {
+                let cursor = provider();
+                if cursor != Cursor::Default {
+                    return cursor;
+                }
+            }
             if control.data.cursor != Cursor::Default {
                 return control.data.cursor;
             }

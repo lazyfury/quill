@@ -34,8 +34,9 @@ mod input;
 
 pub use app::App;
 pub use component::{
-    apply_spec, control_mut, set_on_click, set_on_drag, set_text, update_control, Button, ChildFn,
-    Column, Component, Flex, Grid, HBox, Label, Panel, Row, Spec, VBox,
+    apply_spec, control_mut, set_cursor_provider, set_on_click, set_on_drag, set_text,
+    update_control, Button, ChildFn, Column, Component, Flex, Grid, HBox, Label, Panel, Row, Spec,
+    VBox,
 };
 pub use input::{
     focused, handle_input, hit_test, hovered, hovered_cursor, hovered_is_button, is_interactive,
@@ -66,7 +67,7 @@ mod tests {
     use std::rc::Rc;
 
     use draw_core::{
-        Edges, EventResult, InputEvent, PointerButton, Rect, Size, Vec2, ViewportSize,
+        Cursor, Edges, EventResult, InputEvent, PointerButton, Rect, Size, Vec2, ViewportSize,
     };
     use draw_scene::Visual;
     use draw_ui::{MouseFilter, SizeBasis};
@@ -175,7 +176,7 @@ mod tests {
         );
         let total = Rc::new(Cell::new(0.0f32));
         let acc = total.clone();
-        set_on_drag(&mut tree, handle, move |_tree, delta| {
+        set_on_drag(&mut tree, handle, move |_tree, _phase, delta| {
             acc.set(acc.get() + delta.x);
         });
         draw_ui::layout(&mut tree, viewport(200.0, 200.0));
@@ -211,6 +212,43 @@ mod tests {
         );
 
         assert!((total.get() - 50.0).abs() < 1e-3, "total = {}", total.get());
+    }
+
+    #[test]
+    fn dynamic_cursor_provider_tracks_component_state() {
+        let (mut tree, root) = host();
+        let state = Rc::new(Cell::new(Cursor::Default));
+        let handle = tree.add_child(
+            root,
+            Panel::new()
+                .anchors(Edges::ZERO)
+                .offsets(Edges::new(0.0, 0.0, 20.0, 20.0)),
+        );
+        let s = state.clone();
+        set_cursor_provider(&mut tree, handle, move || s.get());
+        draw_ui::layout(&mut tree, viewport(200.0, 200.0));
+        tree.update();
+
+        handle_input(
+            &mut tree,
+            &InputEvent::PointerMove {
+                position: Vec2::new(10.0, 10.0),
+            },
+        );
+        assert_eq!(hovered_cursor(&tree), Cursor::Default);
+
+        // The component changes its own state; the cursor follows it.
+        state.set(Cursor::ColResize);
+        assert_eq!(hovered_cursor(&tree), Cursor::ColResize);
+
+        // Leaving the control resets the cursor.
+        handle_input(
+            &mut tree,
+            &InputEvent::PointerMove {
+                position: Vec2::new(180.0, 180.0),
+            },
+        );
+        assert_eq!(hovered_cursor(&tree), Cursor::Default);
     }
 
     #[test]

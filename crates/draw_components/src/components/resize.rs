@@ -6,7 +6,7 @@ use std::rc::Rc;
 use draw_app::{update_control, Component, Spec};
 use draw_core::{Color, Cursor, Edges, NodeId, Size, Vec2};
 use draw_theme::Theme;
-use draw_ui::{MouseFilter, SizeBasis, Widget};
+use draw_ui::{DragPhase, MouseFilter, SizeBasis, Widget};
 
 /// A divider that resizes the pane before it while dragged.
 ///
@@ -113,13 +113,25 @@ impl Component for ResizeHandle {
         let base = self.color.unwrap_or(theme.palette.border_subtle);
         let vertical = self.vertical;
         let size = self.size;
-
-        self.spec.data.mouse_filter = MouseFilter::Stop;
-        self.spec.data.cursor = if vertical {
+        let resize_cursor = if vertical {
             Cursor::ColResize
         } else {
             Cursor::RowResize
         };
+
+        self.spec.data.mouse_filter = MouseFilter::Stop;
+        self.spec.data.cursor = resize_cursor;
+        // While dragging the handle reports a grabbed cursor; otherwise the
+        // resize cursor. The component owns this state entirely.
+        let dragging = Rc::new(Cell::new(false));
+        let dragging_cursor = dragging.clone();
+        self.spec.cursor_provider = Some(Box::new(move || {
+            if dragging_cursor.get() {
+                Cursor::Grabbing
+            } else {
+                resize_cursor
+            }
+        }));
         // A fixed gutter: never grow or shrink along the main axis.
         self.spec.data.layout.grow = 0.0;
         self.spec.data.layout.shrink = 0.0;
@@ -155,15 +167,19 @@ impl Component for ResizeHandle {
             return;
         };
         let (min, max) = (self.min, self.max);
-        self.spec.on_drag = Some(Box::new(move |tree, delta| {
-            let current = width.get();
-            let step = if vertical { delta.x } else { delta.y };
-            let next = (current + step).clamp(min, max);
-            if (next - current).abs() > f32::EPSILON {
-                width.set(next);
-                update_control(tree, target, |data| {
-                    data.layout.basis = SizeBasis::Px(next);
-                });
+        self.spec.on_drag = Some(Box::new(move |tree, phase, delta| match phase {
+            DragPhase::Start => dragging.set(true),
+            DragPhase::End => dragging.set(false),
+            DragPhase::Move => {
+                let current = width.get();
+                let step = if vertical { delta.x } else { delta.y };
+                let next = (current + step).clamp(min, max);
+                if (next - current).abs() > f32::EPSILON {
+                    width.set(next);
+                    update_control(tree, target, |data| {
+                        data.layout.basis = SizeBasis::Px(next);
+                    });
+                }
             }
         }));
     }

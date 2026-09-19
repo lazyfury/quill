@@ -234,7 +234,9 @@ focused button. MVP does target dispatch; capture/bubble is a future extension.
 A node can own a pointer drag with `Component::on_drag` (or
 `draw_app::set_on_drag`). While held, the node captures the pointer: every
 `PointerMove` is routed to it (even outside its rect) as a delta in logical
-pixels, and `PointerUp` releases it.
+pixels, and `PointerUp` releases it. The callback receives a `DragPhase`
+(`Start`/`Move`/`End`) plus the delta, so a component can react to the start and
+end of a drag from inside itself.
 
 ```rust
 tree.add_child(
@@ -257,10 +259,16 @@ Fixed panes/gutters should use `shrink(0.0)`.
 `ControlData.cursor` carries a backend-neutral `draw_core::Cursor`
 (`Default`/`Pointer`/`Text`/`ColResize`/`RowResize`/`Grab`/`Grabbing`). Set it
 with `Component::cursor(..)`; `ResizeHandle` sets `ColResize`/`RowResize` itself.
-`draw_app::hovered_cursor(&tree)` returns the hovered control's cursor (walking
-up to the nearest ancestor that set one), falling back to `Pointer` for anything
-with a click/drag callback. Hosts map it onto winit `CursorIcon` or the CSS
-`cursor` property (`draw_wasm::App::cursor`).
+For a cursor that depends on the component's own state, use
+`Component::dynamic_cursor(|| ..)` (a closure evaluated while the control is
+hovered): `ResizeHandle` returns `Grabbing` while dragging and the resize cursor
+otherwise.
+
+`draw_app::hovered_cursor(&tree)` returns the hovered control's cursor (nearest
+ancestor that set one, dynamic provider first), falling back to `Pointer` for
+anything with a click/drag callback. The cursor *value* is backend-neutral; only
+the final application is platform code: hosts map it onto winit `CursorIcon`
+or the CSS `cursor` property (`draw_wasm::App::cursor`).
 
 ## Request redraw
 

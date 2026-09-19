@@ -18,13 +18,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use draw_core::{Color, Edges, NodeId, Rect, Size, Vec2};
+use draw_core::{Color, Cursor, Edges, NodeId, Rect, Size, Vec2};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
 use draw_ui::layout::{FlexDirection, FlexStyle, GridStyle, SizeBasis, Track};
 use draw_ui::{
-    dynamic_surface_decor, foreground_decor, ButtonData, Control, ControlData, InteractState,
-    MouseFilter, SurfaceStyle, Widget,
+    dynamic_surface_decor, foreground_decor, ButtonData, Control, ControlData, DragPhase,
+    InteractState, MouseFilter, SurfaceStyle, Widget,
 };
 
 /// A child builder stored on a [`Spec`].
@@ -39,7 +39,8 @@ pub struct Spec {
     pub background: Option<Box<dyn Fn(InteractState) -> SurfaceStyle>>,
     pub foreground: Option<Box<dyn Fn(&mut PaintContext, Rect, InteractState)>>,
     pub on_click: Option<Box<dyn FnMut()>>,
-    pub on_drag: Option<Box<dyn FnMut(&mut SceneTree, Vec2)>>,
+    pub on_drag: Option<Box<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>>,
+    pub cursor_provider: Option<Box<dyn Fn() -> Cursor>>,
     pub children: Vec<ChildFn>,
 }
 
@@ -51,6 +52,7 @@ impl Default for Spec {
             foreground: None,
             on_click: None,
             on_drag: None,
+            cursor_provider: None,
             children: Vec::new(),
         }
     }
@@ -163,10 +165,17 @@ pub trait Component: Sized {
         self
     }
 
-    /// Runs `callback` on every pointer move while the node is held, with the
+    /// Runs `callback` on drag start/move/end while the node is held, with the
     /// delta since the previous event. Gives the node pointer capture.
-    fn on_drag(mut self, callback: impl FnMut(&mut SceneTree, Vec2) + 'static) -> Self {
+    fn on_drag(mut self, callback: impl FnMut(&mut SceneTree, DragPhase, Vec2) + 'static) -> Self {
         self.spec().on_drag = Some(Box::new(callback));
+        self
+    }
+
+    /// A cursor resolved from the component's own state each frame while
+    /// hovered (overrides [`Component::cursor`] when non-default).
+    fn dynamic_cursor(mut self, cursor: impl Fn() -> Cursor + 'static) -> Self {
+        self.spec().cursor_provider = Some(Box::new(cursor));
         self
     }
 
@@ -261,6 +270,9 @@ pub fn apply_spec(tree: &mut SceneTree, id: NodeId, spec: Spec) {
     if let Some(callback) = spec.on_drag {
         set_on_drag(tree, id, callback);
     }
+    if let Some(provider) = spec.cursor_provider {
+        set_cursor_provider(tree, id, provider);
+    }
     for child in spec.children {
         child(tree, id);
     }
@@ -288,11 +300,25 @@ where
 /// Registers a pointer-drag callback on `id` (pointer capture while held).
 pub fn set_on_drag<F>(tree: &mut SceneTree, id: NodeId, callback: F) -> bool
 where
-    F: FnMut(&mut SceneTree, Vec2) + 'static,
+    F: FnMut(&mut SceneTree, DragPhase, Vec2) + 'static,
 {
     match tree.data_mut::<Control>(id) {
         Some(control) => {
             control.drag_callback = Some(Rc::new(RefCell::new(callback)));
+            true
+        }
+        None => false,
+    }
+}
+
+/// Registers a dynamic cursor provider on `id`, evaluated while it is hovered.
+pub fn set_cursor_provider<F>(tree: &mut SceneTree, id: NodeId, provider: F) -> bool
+where
+    F: Fn() -> Cursor + 'static,
+{
+    match tree.data_mut::<Control>(id) {
+        Some(control) => {
+            control.cursor_provider = Some(Rc::new(provider));
             true
         }
         None => false,

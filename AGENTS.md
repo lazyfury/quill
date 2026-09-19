@@ -191,12 +191,13 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       width }` + `PaintContext::draw_line`, implemented in Canvas / wgpu /
       recording; `Divider` and column separators draw a real line.
       **Stage 25.13 (drag + resize):** `GuiState.dragging` / `Control.drag_callback`
-      with pointer capture in `draw_app::handle_input`; `Component::on_drag` /
-      `draw_app::set_on_drag`; `draw_components::ResizeHandle` (a divider-styled
-      gutter that resizes a target pane's flex basis). `draw_core::Cursor` +
-      `ControlData.cursor` + `draw_app::hovered_cursor`; hosts map it (winit
-      `CursorIcon`, canvas CSS `cursor`). `demo_app`'s sidebar and list gutters
-      are both draggable.
+      with pointer capture in `draw_app::handle_input`; `Component::on_drag`
+      (`DragPhase::{Start,Move,End}` + delta) / `draw_app::set_on_drag`;
+      `draw_components::ResizeHandle` (a divider-styled gutter that resizes a
+      target pane's flex basis). `draw_core::Cursor` + `ControlData.cursor` +
+      `Component::dynamic_cursor` (per-control provider) +
+      `draw_app::hovered_cursor`; hosts map it (winit `CursorIcon`, canvas CSS
+      `cursor`). `demo_app`'s sidebar and list gutters are both draggable.
 
 ## Per-stage gate (must run)
 

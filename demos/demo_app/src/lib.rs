@@ -964,12 +964,15 @@ mod tests {
         app.event(&InputEvent::PointerMove {
             position: start + Vec2::new(40.0, 0.0),
         });
+        // The component swaps its own cursor while the drag is active.
+        assert_eq!(app.cursor(), Cursor::Grabbing);
         app.event(&InputEvent::PointerUp {
             position: start + Vec2::new(40.0, 0.0),
             button: PointerButton::Left,
         });
         app.layout(viewport);
 
+        assert_eq!(app.cursor(), Cursor::ColResize);
         assert!((app.sidebar_width() - (SIDEBAR_WIDTH + 40.0)).abs() < 1e-3);
         let sidebar = rect(&app, app.sidebar());
         let list = rect(&app, app.list());

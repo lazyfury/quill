@@ -92,12 +92,28 @@ impl ControlData {
 /// A callback invoked when a control is activated (clicked / Enter).
 pub type ClickCallback = Rc<RefCell<dyn FnMut()>>;
 
+/// Phase of a pointer drag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DragPhase {
+    /// The pointer went down on the control; `delta` is zero.
+    Start,
+    /// Pointer moved; `delta` is the change since the previous event.
+    Move,
+    /// The pointer was released; `delta` is zero.
+    End,
+}
+
 /// A callback invoked while a control owns a pointer drag.
 ///
-/// It receives the owning tree and the **delta** since the previous pointer
-/// event (logical pixels), so a component can accumulate the drag without
-/// tracking the pointer itself.
-pub type DragCallback = Rc<RefCell<dyn FnMut(&mut SceneTree, Vec2)>>;
+/// It receives the owning tree, the drag [`DragPhase`] and the **delta** since
+/// the previous pointer event (logical pixels), so a component can accumulate
+/// the drag and react to start/end without tracking the pointer itself.
+pub type DragCallback = Rc<RefCell<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>>;
+
+/// A closure returning a control's cursor, evaluated by the framework while the
+/// control is hovered. Lets a component derive its cursor from its own state
+/// instead of a fixed value.
+pub type CursorProvider = Rc<dyn Fn() -> Cursor>;
 
 /// Per-node UI runtime stored in a `SceneTree` node's extension slot.
 ///
@@ -111,6 +127,9 @@ pub struct Control {
     pub callback: Option<ClickCallback>,
     /// Pointer-drag callback (pointer capture while held).
     pub drag_callback: Option<DragCallback>,
+    /// Dynamic cursor, resolved each frame while hovered; overrides
+    /// [`ControlData::cursor`] when it returns a non-default value.
+    pub cursor_provider: Option<CursorProvider>,
     /// Themed chrome attached by components (surfaces, foregrounds).
     pub decorations: Vec<DecorRef>,
     /// Set when this control's layout inputs changed; cleared as it is arranged.
@@ -124,6 +143,7 @@ impl Control {
             widget,
             callback: None,
             drag_callback: None,
+            cursor_provider: None,
             decorations: Vec::new(),
             layout_dirty: true,
         }
