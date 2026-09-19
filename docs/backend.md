@@ -109,12 +109,12 @@ logical pixels before feeding `InputEvent`s to the UI.
 
 ### Demo
 
-`demos/wgpu_demo` is a `winit` runner around the shared backend-neutral
-`demos/demo_app` app: it maps window events to `draw_core` `InputEvent`s, calls
+`examples/wgpu_demo` is a `winit` runner around the shared backend-neutral
+`examples/demo_app` app: it maps window events to `draw_core` `InputEvent`s, calls
 `DemoApp::update/layout`, renders with `WgpuBackend::begin_frame_with_view`, and
 presents the surface. It injects the backend's `FontMetrics` as a
 `draw_ui::TextMeasurer` (shaping included). The backend stays the only `wgpu` renderer; the demo only drives the window
-and the surface lifecycle. The same `DemoApp` runs under `demos/web_demo` on the
+and the surface lifecycle. The same `DemoApp` runs under `examples/web_demo` on the
 Canvas backend.
 
 ### Scope
@@ -141,7 +141,7 @@ fail) when no GPU adapter is available.
 
 ## Where browser-specific code lives
 
-Only `draw_backend_canvas`, `draw_wasm`, and `demos/web_demo` may reference
+Only `draw_backend_canvas`, `draw_wasm`, and `examples/web_demo` may reference
 `web-sys` / `wasm-bindgen` / DOM APIs (and only under
 `cfg(target_arch = "wasm32")`, so native `cargo test` stays headless).
 

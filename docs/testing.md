@@ -39,7 +39,7 @@
 - Shared demo app tests — `demo_app` drives the backend-neutral `DemoApp`
   natively and asserts layout rects (panel bounds, wrapped-label clipping, flex
   fill, grid tiling/no overlap, resize) plus a full recorded frame via
-  `draw_backend_recording`. This is how the wgpu/WASM demos' layout is verified
+  `draw_backend_recording`. This is how the wgpu/WASM example layout is verified
   without a window or screenshot.
 
 Core behavior must be testable with native `cargo test`, without a browser.
@@ -53,7 +53,7 @@ recording, or any OS/window capture. Verify programmatically instead:
 - **Backend pixel/output assertions** — assert against what a backend produces
   (e.g. recorded command sequences via `CommandAsserts`).
 - **DrawList command sequences** — `CommandAsserts` and golden comparisons.
-- **DOM state markers** — the web demos expose `data-quill-*` attributes that
+- **DOM state markers** — the web demo exposes `data-quill-*` attributes that
   headless checks read from `--dump-dom` (no image capture).
 
 If a claim cannot be verified without a screenshot, say so explicitly rather than
@@ -77,16 +77,16 @@ pinned to `opt-level = 3`. See `docs/benchmarking.md`.
 ## What needs a browser
 
 - `draw_backend_canvas` + `draw_wasm` (Canvas 2D) — a browser.
-- `demos/web_demo`, `demos/component_demo` — a browser (functionality is also
-  covered by native `draw_ui` tests).
+- `examples/web_demo` — a browser (functionality is also covered by native
+  `draw_ui` tests).
 
 `draw_backend_wgpu` needs no browser: it renders offscreen and reads pixels back,
-so it runs under plain `cargo test`. Its windowed demo `demos/wgpu_demo` opens a
+so it runs under plain `cargo test`. Its windowed demo `examples/wgpu_demo` opens a
 real window and cannot be verified without a display; it is compiled by
 `cargo check` and run manually, and the render path it uses is the same one
 covered by the readback tests.
 
-The `demos/wgpu_demo` overlays are host-wired: the component bounds and the
+The `examples/wgpu_demo` overlays are host-wired: the component bounds and the
 performance panel text, layout and emitted commands are covered by
 `draw_ui`/`draw_debug_ui` tests, and the numbers the panel displays come from
 `draw_profile` (tested with injected durations). The windowed overlays themselves

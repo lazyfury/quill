@@ -2,8 +2,8 @@
 
 Native window demo for the `draw_backend_wgpu` backend.
 
-It opens a `winit` window, renders the same `SceneTree` + `Ui` the web demos
-use through `WgpuBackend`, and presents the result to a `wgpu` surface:
+It opens a `winit` window, renders the same `demo_app` scene/UI the `web_demo`
+renders through `WgpuBackend`, and presents the result to a `wgpu` surface:
 
 ```text
 winit events -> InputEvent -> Scene/UI -> DrawList -> WgpuBackend -> surface
@@ -151,7 +151,7 @@ over the panel; everything else is forwarded to the demo.
 ## Notes
 
 - The scene/UI/layout code lives in the shared, backend-neutral
-  `demos/demo_app` crate and is also used by the WASM (`web_demo`) demo; this
+  `examples/demo_app` crate and is also used by the WASM (`web_demo`) demo; this
   binary only adds the `winit`/`wgpu` host and a fixed-advance text measurer.
 - Rendering is animated with `winit`'s `ControlFlow::Poll` and
   `Window::request_redraw`; no timer thread is used.

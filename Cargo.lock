@@ -252,20 +252,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "component_demo"
-version = "0.1.0"
-dependencies = [
- "draw_components",
- "draw_core",
- "draw_render",
- "draw_scene",
- "draw_ui",
- "draw_wasm",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -62,7 +62,6 @@ draw_bench    (std only, no draw_* deps)
 draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui, draw_components
 demo_app      -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
                  draw_theme   (no backend)
-component_demo -> draw_core, draw_render, draw_scene, draw_ui, draw_components, draw_wasm
 web_demo      -> draw_core, draw_scene, demo_app, draw_wasm
 wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, demo_app,
                  draw_backend_wgpu, draw_profile, draw_debug_ui, winit
@@ -83,10 +82,10 @@ facade with opt-in features (`ui`, `game`, `wgpu`, `canvas`, `wasm`, `profile`,
 IR (no backend/browser deps), and the Paint step (Scene -> DrawList) lives in the
 scene. This does not weaken backend replaceability.
 
-Browser APIs only in `draw_backend_canvas`, `draw_wasm`, and the WASM demos
-(`demos/web_demo`, `demos/component_demo`).
-`winit` only in `demos/wgpu_demo`. `wgpu` only in `draw_backend_wgpu` (plus its
-tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
+Browser APIs only in `draw_backend_canvas`, `draw_wasm`, and the WASM example
+(`examples/web_demo`).
+`winit` only in `examples/wgpu_demo`. `wgpu` only in `draw_backend_wgpu` (plus its
+tests/bench) and `examples/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
 (`rustybuzz`, `unicode-bidi`) and system-font discovery live only in
 `draw_backend_wgpu`; the core stays text-free.
 
@@ -120,7 +119,7 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       wgpu missing-glyph box
 - [x] Stage 17 — partial relayout: per-node dirty propagation, clean-subtree
       skipping (`Ui::last_arranged_nodes`), cached child ordering (`order_cache`)
-- [x] Stage 18 — shared `demos/demo_app` used by `wgpu_demo` and the WASM demos,
+- [x] Stage 18 — shared `examples/demo_app` used by `wgpu_demo` and the WASM demos,
       with headless layout/pipeline tests through `draw_backend_recording`
 - [x] Stage 19 — real font stack in `draw_backend_wgpu`: `FontConfig` chooses
       `FontMode::System` (system font via `QUILL_FONT` or a per-OS list,
@@ -220,7 +219,7 @@ Then emit the report and stop for approval.
 
 ## Context hygiene (keep agent/LLM context small)
 
-- Do **not** read or `grep` `target/`, `demos/*/dist/` (ignored generated
+- Do **not** read or `grep` `target/`, `examples/*/dist/` (ignored generated
   wasm/js), or `Cargo.lock`. To find a symbol, `rg` from the repo root (ripgrep
   honors `.gitignore`); avoid `grep -r`.
 - Use the map below instead of `ls -R` / `find` exploration.

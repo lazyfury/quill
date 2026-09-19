@@ -15,10 +15,9 @@ members = [
     "crates/draw_backend_recording",
     "crates/draw_backend_wgpu",
     "crates/draw_wasm",
-    "demos/web_demo",
-    "demos/component_demo",
-    "demos/demo_app",
-    "demos/wgpu_demo",
+    "examples/web_demo",
+    "examples/demo_app",
+    "examples/wgpu_demo",
 ]
 
 [workspace.package]
@@ -43,7 +42,7 @@ draw_backend_canvas = { path = "crates/draw_backend_canvas" }
 draw_backend_recording = { path = "crates/draw_backend_recording" }
 draw_backend_wgpu = { path = "crates/draw_backend_wgpu" }
 draw_wasm = { path = "crates/draw_wasm" }
-demo_app = { path = "demos/demo_app" }
+demo_app = { path = "examples/demo_app" }
 
 [profile.release]
 opt-level = "s"

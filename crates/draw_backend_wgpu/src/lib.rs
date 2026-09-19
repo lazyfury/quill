@@ -10,7 +10,7 @@
 //! pixels** under native `cargo test`, with no window and no screenshot. To draw
 //! into a window instead, hand a surface texture view to
 //! [`WgpuBackend::begin_frame_with_view`] and present it after `end_frame` (see
-//! `demos/wgpu_demo`).
+//! `examples/wgpu_demo`).
 //!
 //! `wgpu` never enters `draw_core` / `draw_scene` / `draw_ui` / `draw_render`;
 //! it is confined to this crate.

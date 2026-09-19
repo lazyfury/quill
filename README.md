@@ -13,9 +13,11 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 | Crate | Responsibility |
 |---|---|
 | `draw_core` | math, color, IDs, base types |
-| `draw_scene` | `Node`, `SceneTree`, `CanvasItem`, `Node2D`, transforms |
-| `draw_ui` | `Control`, layout, containers, UI behavior |
 | `draw_render` | `DrawCommand`, `DrawList`, `PaintContext`, `RenderBackend` |
+| `draw_scene` | `Node`, `SceneTree`, `CanvasItem`, `Node2D`, transforms, `Viewport`/`Camera2D` |
+| `draw_ui` | `Control` runtime, layout, paint and input routing |
+| `draw_theme` | design tokens (palette, spacing, radius, type, motion) |
+| `draw_components` | component library: base builders (`Component`/`Spec`) + themed components |
 | `draw_profile` | frame timing/counters, `Profiler`, `inspect` / `InspectionReport` |
 | `draw_debug_ui` | component debug bounds (`DebugOverlay`) + performance panel (`PerformanceOverlay`) |
 | `draw_bench` | dependency-free benchmark harness (`BenchRunner`, `Baseline`, regression verdicts) |
@@ -30,32 +32,30 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 11 (benchmarking). `draw_core` provides math,
-colors, handles and the viewport model; `draw_scene` provides the scene tree
-with transform/visibility propagation and a `SceneTree::paint` step;
-`draw_render` provides the backend-neutral IR (`DrawCommand`/`DrawList`/
-`PaintContext`) and the `RenderBackend` trait; `draw_backend_recording` records
-frames for the fully headless `Scene -> DrawList -> RenderBackend` test pipeline;
-`draw_backend_canvas` + `draw_wasm` render that IR to an HTML Canvas with DPR
-handling and input; `draw_backend_wgpu` renders the same IR with `wgpu` to an
-offscreen texture and reads the pixels back for native `cargo test`; `draw_ui`
-provides `Control`, layout (anchors/offsets/containers), reusable components
-(`Panel`/`VBox`/`HBox`/`Label`/`Button`), hit-tested pointer/keyboard input, and
-click callbacks; `draw_profile` records per-phase timings/counters and audits
-frames; `draw_ui::paint_debug` + `draw_debug_ui::DebugOverlay` draw yellow
-component bounds with `Name #id` labels; and `draw_debug_ui::PerformanceOverlay`
-renders the profiler as a toggleable panel.
+Stage 25 (Godot-style unified scene). One `SceneTree` owns world (`Node2D`) and
+UI (`Control`); `draw_scene` provides `Viewport` / `Camera2D` / `CanvasLayer` and
+the `Scene -> DrawList` paint step; `draw_render` is the backend-neutral IR
+(`DrawCommand`/`DrawList`/`PaintContext`) plus the `RenderBackend` trait;
+`draw_ui` owns the `Control` runtime, layout, paint and input routing;
+`draw_theme` provides design tokens and `draw_components` the component library
+(base builders + themed components); `draw_backend_recording` gives the fully
+headless `Scene -> DrawList -> RenderBackend` test path, `draw_backend_canvas` +
+`draw_wasm` render to an HTML Canvas (DPR + input), and `draw_backend_wgpu`
+renders the same IR offscreen and reads pixels back for native `cargo test`.
+`draw_profile` records per-phase timings and audits frames;
+`draw_debug_ui::DebugOverlay` / `PerformanceOverlay` draw component bounds and the
+profiler panel.
 
 Three independent renderers consume the same `DrawList`:
 `draw_backend_canvas`, `draw_backend_recording`, and `draw_backend_wgpu`.
 
-## Demos
+## Examples
 
-| Demo | Shows |
+| Example | Shows |
 |---|---|
-| `demos/component_demo` | Recommended component API (compose, layout, `on_click`, state, WASM) |
-| `demos/web_demo` | Three-column macOS-style notes app (`demo_app`) on the Canvas backend |
-| `demos/wgpu_demo` | The same app on a native `wgpu` surface + component/perf debug overlays |
+| `examples/demo_app` | Shared three-column, macOS-style notes app (backend-neutral `DemoApp`) |
+| `examples/web_demo` | `demo_app` on the Canvas 2D backend (`draw_wasm`) |
+| `examples/wgpu_demo` | `demo_app` on a native `wgpu` surface + component/perf debug overlays |
 
 ## Build & test
 
@@ -90,11 +90,11 @@ See `docs/benchmarking.md`.
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.128
 
-# build wasm + JS glue into demos/web_demo/dist
-./demos/web_demo/build.sh
+# build wasm + JS glue into examples/web_demo/dist
+./examples/web_demo/build.sh
 
 # serve (ES modules need http, not file://)
-python3 -m http.server 8080 --directory demos/web_demo
+python3 -m http.server 8080 --directory examples/web_demo
 # open http://localhost:8080/
 ```
 
@@ -104,6 +104,6 @@ python3 -m http.server 8080 --directory demos/web_demo
 cargo run -p wgpu_demo --release
 ```
 
-See `demos/wgpu_demo/README.md` for details. Press **F3** / `` ` `` / **d** to
+See `examples/wgpu_demo/README.md` for details. Press **F3** / `` ` `` / **d** to
 toggle component debug bounds and **F4** / **p** for the performance panel; see
 `docs/debug.md` for wiring them into your own app.

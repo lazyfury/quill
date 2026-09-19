@@ -82,8 +82,8 @@ logical size plus the world -> screen `canvas_transform`.)
   entirely, so an isolated text change only re-arranges its own branch. Child
   ordering is cached per container (`order_cache`). `Ui::last_arranged_nodes()`
   reports the work done, and `Ui::invalidate_layout()` forces a full pass.
-- Stage 18 — shared demo app [done]: `demos/demo_app` owns the backend-neutral
-  `DemoApp` (scene + UI + update/layout/paint/event); `demos/wgpu_demo` and the
+- Stage 18 — shared demo app [done]: `examples/demo_app` owns the backend-neutral
+  `DemoApp` (scene + UI + update/layout/paint/event); `examples/wgpu_demo` and the
   WASM demos only add host glue and (for wgpu) a matching `TextMeasurer`. Its
   native tests verify layout and the full pipeline through
   `draw_backend_recording`.
@@ -182,22 +182,22 @@ they depend on the core crates but no core crate depends on them. See
 
 Same `Scene` + `UI` + `DrawList` must run on any backend without changing
 Scene/UI code. Backend-specific code lives only in `draw_backend_*`,
-`draw_wasm`, and the demos.
+`draw_wasm`, and the examples.
 
 Validated by three independent renderers consuming the same IR:
 
-- `draw_backend_canvas` (HTML Canvas 2D, WASM) — `demos/web_demo`,
-  `demos/component_demo`.
+- `draw_backend_canvas` (HTML Canvas 2D, WASM) — `examples/web_demo`.
 - `draw_backend_recording` (headless recording backend) — `tests/pipeline.rs`.
 - `draw_backend_wgpu` (native `wgpu`, offscreen target + pixel readback, and
   window-surface presentation) — `crates/draw_backend_wgpu/tests/render.rs`,
-  `demos/wgpu_demo`.
+  `examples/wgpu_demo`.
 
 Reused unchanged by both: `draw_core`, `draw_scene`, `draw_ui`, and the
 `DrawList` / `RenderBackend` contract in `draw_render`.
 Backend-specific: command-to-API mapping, resource registration, and the
-platform loop/window (`draw_wasm`, the demos).
+platform loop/window (`draw_wasm`, the examples).
 
-The native `wgpu_demo` and the WASM demos additionally share `demos/demo_app`:
-the same backend-neutral `DemoApp` drives both, and only the host glue (window
-loop / WASM `App` impl) and the injected `TextMeasurer` differ.
+The native `wgpu_demo` and the WASM `web_demo` additionally share
+`examples/demo_app`: the same backend-neutral `DemoApp` drives both, and only
+the host glue (window loop / WASM `App` impl) and the injected `TextMeasurer`
+differ.

@@ -331,6 +331,6 @@ Keep behavior driven only by core state so components stay headless-testable.
 
 ## Full example
 
-See `demos/component_demo` for the complete recommended pattern (composition,
-layout, `on_click`, state -> UI, WASM attach) and `demos/demo_app` for the
-themed component library.
+See `examples/demo_app` for the complete recommended pattern (composition,
+layout, `on_click`, state -> UI, WASM attach) built from the themed component
+library.

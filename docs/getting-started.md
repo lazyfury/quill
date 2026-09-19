@@ -19,8 +19,8 @@ cargo fmt --all -- --check
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version 0.2.128   # match the wasm-bindgen dep
 
-./demos/web_demo/build.sh
-python3 -m http.server 8080 --directory demos/web_demo
+./examples/web_demo/build.sh
+python3 -m http.server 8080 --directory examples/web_demo
 # open http://localhost:8080/
 ```
 
@@ -109,7 +109,7 @@ draw_ui::paint(&tree, &mut ctx);
 Themed components (`draw_components::Text`, `Card`, `Button`, `Checkbox`, …)
 take the theme as their first argument: `Text::heading("Notes", theme)`,
 `Card::new(theme)`. See `docs/components.md` for anchors, containers, events and
-custom components, and `demos/component_demo` for a runnable browser example.
+custom components, and `examples/web_demo` for a runnable browser example.
 
 ## Debug component bounds
 

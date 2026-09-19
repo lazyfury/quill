@@ -123,7 +123,7 @@ Surfaces are usually static, but selection and hover need per-frame styles:
 
 ### Demo
 
-`demos/demo_app` is a three-column, macOS-style notes app built from these
+`examples/demo_app` is a three-column, macOS-style notes app built from these
 components: sidebar (nav + selection), content list (note rows with thumbnail
 placeholders) and detail pane (toolbar, hero scene, body, actions).
 

@@ -25,7 +25,7 @@ native demo's `ControlFlow::Wait`. It is caused by structural decisions:
 | H4 | Paint traversal and input routing are split | `SceneTree::paint` vs `Ui::paint`; `Ui::handle_input` vs game input |
 | H5 | Dependency direction + frozen core | `draw_ui -> draw_scene`; rule 8 freezes `draw_ui::Widget` and the backend-neutral core |
 
-`ControlFlow::Wait` (only in `demos/wgpu_demo`) and the WASM `requestAnimationFrame`
+`ControlFlow::Wait` (only in `examples/wgpu_demo`) and the WASM `requestAnimationFrame`
 loop are **not** hard limits; the WASM runner already refreshes every frame.
 
 ## Target architecture
@@ -204,21 +204,19 @@ This is the largest refactor; split it.
   the tree** (Phase 4f is reversed for the theme only — the text measurer still
   lives on the root). `draw_ui` decorators no longer take a `Theme`; their
   closures capture the colors they need.
-- **4c** — migrate `demo_app`, `web_demo`, `component_demo`, `wgpu_demo` to the
+- **4c** — migrate `demo_app`, `web_demo`, `wgpu_demo` to the
   borrowed API (the demos currently use the `UiHost` compatibility host).
   **(DONE, Stage 25.4c)**
 
   `DemoApp` now owns a `SceneTree` + borrowed `Ui`; the `wgpu_demo` and
-  `web_demo` hosts drive it through `ui()`/`tree()`. `component_demo` uses
-  **one** tree for the rotated `Node2D` and the UI panel (the Phase 4 exit
-  demonstration). `Overlays::layout` took the borrowed host (`&Ui` +
-  `&SceneTree`); `DebugOverlay::paint` takes `&Ui` + `&SceneTree`. `UiHost`
-  remains available and is still used by the overlay layer's owned sub-UI and by
-  the unit tests.
+  `web_demo` hosts drive it through `ui()`/`tree()`. `Overlays::layout` took the
+  borrowed host (`&Ui` + `&SceneTree`); `DebugOverlay::paint` takes `&Ui` +
+  `&SceneTree`. `UiHost` remains available and is still used by the overlay
+  layer's owned sub-UI and by the unit tests.
 - Retain a compatibility layer (`UiHost`) during 4a-4c. **(in place)**
 - Exit: existing `draw_ui` / `demo_app` tests pass under the new signatures; UI
-  and `Node2D` coexist in one tree. **(met: `demo_app` migrated, `component_demo`
-  shares one tree, borrowed-API test in `draw_ui`)**
+  and `Node2D` coexist in one tree. **(met: `demo_app` migrated, borrowed-API
+  test in `draw_ui`)**
 
 ### Phase 5 — unified lifecycle and input routing (DONE, Stage 25.5)
 
@@ -269,7 +267,7 @@ Additive, outside the frozen core where possible.
 
 ### Phase 7 — native continuous loop + fixed timestep
 
-- `demos/wgpu_demo`: `ControlFlow::Wait` -> `Poll` or `WaitUntil` fixed step.
+- `examples/wgpu_demo`: `ControlFlow::Wait` -> `Poll` or `WaitUntil` fixed step.
 - Separate logic step from render interpolation (`_physics_process` vs
   `_process`).
 - `SubViewport` / offscreen render targets last.

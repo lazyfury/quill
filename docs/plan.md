@@ -114,7 +114,7 @@ priority order and add native tests.
 | 5 | Stale docs: `draw_scene` crate doc claims it must not depend on `draw_render` (it does, by design); `Overlays` module doc/example still says it owns a `Ui` and calls `app.ui.*`. | low (docs) | `draw_scene/src/lib.rs:4`, `draw_components/src/overlay/mod.rs:1` |
 | 6 | Naming: cross-link `draw_core::ViewportSize` vs `draw_scene::Viewport` docs; clarify that the internal zero-sized `draw_ui` `Ui` namespace is not a public object. | low | `draw_core`, `draw_ui/src/ui/mod.rs` |
 
-## Demo (`demos/demo_app`)
+## Demo (`examples/demo_app`)
 
 - Light/dark toggle in the sidebar.
 - Scrollable note list (depends on `ScrollView`).

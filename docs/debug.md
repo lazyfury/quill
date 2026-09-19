@@ -199,7 +199,7 @@ let perf = PerformanceOverlay::with_config(OverlayConfig {
 
 ## 4. wgpu demo
 
-`demos/wgpu_demo` wires both tools around its frame loop:
+`examples/wgpu_demo` wires both tools around its frame loop:
 
 ```text
 demo.paint -> debug.paint(component bounds) -> perf.paint -> submit

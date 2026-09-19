@@ -1,7 +1,7 @@
 /target
 **/*.rs.bk
 .dist
-demos/*/dist
+examples/*/dist
 node_modules
 
 # Benchmark baselines are machine-specific; generate them locally or on CI.
