@@ -25,8 +25,9 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 2 (SceneTree / Node / CanvasItem). Public API surfaces are intentionally empty; they
-are filled in one stage at a time. See the stage checklist in `AGENTS.md`.
+Stage 2 (SceneTree / Node / CanvasItem). `draw_core` provides math, colors,
+handles and the viewport model; `draw_scene` provides the scene tree with
+transform/visibility propagation. Render IR arrives in Stage 3.
 
 ## Build & test
 
