@@ -31,7 +31,7 @@ draw_core            (no draw_* deps)
 draw_scene    -> draw_core, draw_render
 draw_ui       -> draw_core, draw_scene
 draw_render   -> draw_core
-draw_backend_* -> draw_render
+draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas
 ```
 
@@ -47,7 +47,7 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 - [x] Stage 1 — core types / math
 - [x] Stage 2 — SceneTree / Node / CanvasItem
 - [x] Stage 3 — DrawList / render IR
-- [ ] Stage 4 — RecordingBackend / headless tests
+- [x] Stage 4 — RecordingBackend / headless tests
 - [ ] Stage 5 — Canvas2D backend + WASM
 - [ ] Stage 6 — Control / layout / input
 - [ ] Stage 7 — reusable component demo
@@ -91,3 +91,11 @@ recomputed transforms; 0 when clean). Child lists are kept sorted by
 `SceneTree::paint(&mut PaintContext)`; `Visual::{None,Rect,Circle}` on `Node2D`
 are a temporary built-in primitive. Geometry is in current-transform space;
 `ClipRect` is in viewport/logical space. No backend types in the IR.
+
+## Backend contract (Stage 4, `draw_render` + `draw_backend_recording`)
+
+`RenderBackend` trait: `begin_frame(Viewport)` -> `submit(&DrawList)` (0..n) ->
+`end_frame()`, with an associated `Error`. `RecordingBackend` records each
+frame's viewport + concatenated commands. `CommandAsserts` gives
+count/contains/sequence/last-transform/opacity/clip assertions. Full headless
+pipeline test lives in `draw_backend_recording/tests/pipeline.rs`.

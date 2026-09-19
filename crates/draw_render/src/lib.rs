@@ -11,15 +11,17 @@
 //! Scene / UI --paint--> PaintContext --> DrawList --> RenderBackend --> Pixels
 //! ```
 //!
-//! The `RenderBackend` trait itself arrives in Stage 4.
+//! The [`RenderBackend`] trait defines the frame lifecycle a backend implements.
 
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_render";
 
+mod backend;
 mod command;
 mod list;
 mod texture;
 
+pub use backend::RenderBackend;
 pub use command::{DrawCommand, Paint, TextAlign};
 pub use list::{DrawList, PaintContext};
 pub use texture::TextureId;

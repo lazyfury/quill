@@ -13,7 +13,9 @@ dependencies = [
 name = "draw_backend_recording"
 version = "0.1.0"
 dependencies = [
+ "draw_core",
  "draw_render",
+ "draw_scene",
 ]
 
 [[package]]
