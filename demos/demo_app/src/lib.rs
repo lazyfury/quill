@@ -278,6 +278,24 @@ impl DemoApp {
             TextAlign::Center,
             Paint::new(TEXT),
         );
+
+        // Large-glyph showcase for eyeballing text rasterization. `position`
+        // is the baseline; the same sample at two sizes reveals hinting /
+        // scaling issues that small UI text hides.
+        ctx.draw_text(
+            "Quill 大字 Wg 0123",
+            Vec2::new(size.width * 0.5, size.height - 90.0),
+            96.0,
+            TextAlign::Center,
+            Paint::new(TEXT),
+        );
+        ctx.draw_text(
+            "Quill 大字 Wg 0123",
+            Vec2::new(size.width * 0.5, size.height - 170.0),
+            48.0,
+            TextAlign::Center,
+            Paint::new(MUTED),
+        );
     }
 
     /// Routes a backend-neutral input event through the UI.

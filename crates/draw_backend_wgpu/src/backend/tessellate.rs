@@ -290,12 +290,23 @@ impl WgpuBackend {
             TextAlign::Right => position.x - total,
         };
 
+        // Glyphs are rasterized on the integer device-pixel grid, and the font
+        // atlas is sampled with nearest filtering. Placing a glyph at a
+        // fractional device offset would therefore resample it: diagonal edges
+        // alias and edge texel columns are skipped or duplicated. Snap each
+        // glyph's top-left to the device grid so the atlas maps 1:1.
+        let scale = self.scale_factor.max(f32::MIN_POSITIVE);
+        let snap = |value: f32| (value * scale).round() / scale;
+
         for ch in text.chars() {
             let slot = self.font.glyph(ch, font_size);
             if slot.size[0] > 0.0 && slot.size[1] > 0.0 {
                 // `position` is the baseline; `offset` is relative to the pen
                 // with y down, so it already accounts for the font's ascent.
-                let min = Vec2::new(pen + slot.offset[0], position.y + slot.offset[1]);
+                let min = Vec2::new(
+                    snap(pen + slot.offset[0]),
+                    snap(position.y + slot.offset[1]),
+                );
                 let rect = Rect::from_min_size(min, Size::new(slot.size[0], slot.size[1]));
                 self.quad(rect, slot.uv, color, Surface::Font);
             }

@@ -374,6 +374,75 @@ fn draw_text_renders_cjk_with_a_system_font() {
 }
 
 #[test]
+fn glyphs_snap_to_the_device_pixel_grid() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend.set_clear_color(Color::BLACK);
+
+    let render_at = |backend: &mut WgpuBackend, x: f32| {
+        let mut ctx = PaintContext::new();
+        ctx.draw_text(
+            "M",
+            Vec2::new(x, 24.0),
+            16.0,
+            TextAlign::Left,
+            Paint::new(Color::WHITE),
+        );
+        render(backend, ctx, viewport(32.0, 32.0))
+    };
+
+    // Glyphs are rasterized on the device grid and sampled with nearest
+    // filtering, so a sub-pixel offset must not resample them.
+    let a = render_at(&mut backend, 6.0);
+    let b = render_at(&mut backend, 6.25);
+    assert_eq!(a.data, b.data, "a sub-pixel offset changed the glyph");
+
+    // A whole-pixel shift does move it, so the check above is not vacuous.
+    let c = render_at(&mut backend, 7.0);
+    assert_ne!(a.data, c.data, "a full-pixel shift should move the glyph");
+}
+
+#[test]
+fn pixel_font_maps_glyph_texels_one_to_one() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend
+        .set_font_config(FontConfig {
+            mode: FontMode::Pixel,
+            device_pixel_rasterization: true,
+        })
+        .unwrap();
+    backend.set_clear_color(Color::BLACK);
+
+    // `size` 8 draws the 8x8 cell at 1:1, so every texel is one pixel. `_`, `|`
+    // and `A` include ink in the first/last columns, which the old half-texel
+    // UV inset used to drop.
+    use font8x8::UnicodeFonts;
+    for ch in ['L', '_', '|', 'A', 'W'] {
+        let mut ctx = PaintContext::new();
+        ctx.draw_text(
+            &ch.to_string(),
+            Vec2::new(0.0, 8.0),
+            8.0,
+            TextAlign::Left,
+            Paint::new(Color::WHITE),
+        );
+        let pixels = render(&mut backend, ctx, viewport(8.0, 8.0));
+
+        let glyph = font8x8::BASIC_FONTS.get(ch).expect("printable ASCII glyph");
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..8u32 {
+                let on = pixels.pixel(col, row as u32).unwrap()[0] > 127;
+                let expected = (bits >> col) & 1 == 1;
+                assert_eq!(on, expected, "glyph {ch:?} pixel (col={col}, row={row})");
+            }
+        }
+    }
+}
+
+#[test]
 fn text_alignment_shifts_the_glyph() {
     let Some(mut backend) = backend() else {
         return;

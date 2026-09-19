@@ -136,10 +136,10 @@ impl SystemFont {
         atlas.blit(origin_x, origin_y, width, height, &coverage);
 
         let uv = [
-            (origin_x as f32 + 0.5) / ATLAS_WIDTH as f32,
-            (origin_y as f32 + 0.5) / ATLAS_HEIGHT as f32,
-            ((origin_x + width) as f32 - 0.5) / ATLAS_WIDTH as f32,
-            ((origin_y + height) as f32 - 0.5) / ATLAS_HEIGHT as f32,
+            origin_x as f32 / ATLAS_WIDTH as f32,
+            origin_y as f32 / ATLAS_HEIGHT as f32,
+            (origin_x + width) as f32 / ATLAS_WIDTH as f32,
+            (origin_y + height) as f32 / ATLAS_HEIGHT as f32,
         ];
         GlyphSlot {
             uv,

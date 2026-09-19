@@ -82,10 +82,13 @@ pub fn build_atlas() -> Vec<u8> {
 /// Characters outside printable ASCII map to the missing-glyph box.
 pub fn glyph_uv(ch: char) -> [f32; 4] {
     let (cell_x, cell_y) = cell_origin_for_index(index_for(ch));
-    let u0 = (cell_x as f32 + 0.5) / ATLAS_WIDTH as f32;
-    let v0 = (cell_y as f32 + 0.5) / ATLAS_HEIGHT as f32;
-    let u1 = (cell_x as f32 + GLYPH_SIZE as f32 - 0.5) / ATLAS_WIDTH as f32;
-    let v1 = (cell_y as f32 + GLYPH_SIZE as f32 - 0.5) / ATLAS_HEIGHT as f32;
+    // Corner UVs: the glyph quad spans exactly this cell, so the quad's
+    // corners map to the cell's corners (not its texel centres). A half-texel
+    // inset would compress the glyph by one texel and skip edge columns.
+    let u0 = cell_x as f32 / ATLAS_WIDTH as f32;
+    let v0 = cell_y as f32 / ATLAS_HEIGHT as f32;
+    let u1 = (cell_x + GLYPH_SIZE) as f32 / ATLAS_WIDTH as f32;
+    let v1 = (cell_y + GLYPH_SIZE) as f32 / ATLAS_HEIGHT as f32;
     [u0, v0, u1, v1]
 }
 
