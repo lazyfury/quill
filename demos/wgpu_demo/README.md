@@ -25,15 +25,23 @@ cargo run -p wgpu_demo --release
     rows with selection, version badge,
   - **content list** (324px): header, note rows with thumbnail placeholders,
     selection highlight and an accent bar,
-  - **detail**: toolbar with icon buttons, a hero image placeholder that renders
-    a static image placeholder (monochrome rounded square), title/metadata,
-    wrapping body text, preference controls and action buttons.
+  - **detail**: toolbar with icon buttons, a static image placeholder
+    (monochrome rounded square), title/metadata, wrapping body text, preference
+    controls and action buttons.
 - Icons and images are monochrome rounded-square placeholders.
 - Clicking a note row (or the back/forward icon buttons) updates the detail
   pane; clicking nav rows updates the sidebar selection; **New Note** increments
   the click counter (the headless probe).
 - Resize the window (the UI re-lays out) or move it between displays with
   different DPRs.
+
+### Rendering
+
+The app is static and the window is **event-driven**: it renders on input,
+resize, scale and overlay toggles, then blocks on `ControlFlow::Wait`. There is
+no idle redraw loop, so a stationary window uses ~0% CPU. Overlays (debug /
+performance) refresh when you interact or move the pointer rather than every
+frame.
 
 The demo measures text with the backend's actual loaded font
 (`WgpuBackend::text_metrics`), so wrapping and advances stay in sync with what

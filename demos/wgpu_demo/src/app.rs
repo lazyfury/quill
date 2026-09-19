@@ -21,7 +21,10 @@ use crate::demo::Demo;
 /// Runs the demo until the window is closed.
 pub fn run(options: Options) {
     let event_loop = EventLoop::new().expect("create event loop");
-    event_loop.set_control_flow(ControlFlow::Poll);
+    // Event-driven: the app is static, so render only when something changes
+    // (input, resize, overlay toggle). `Poll` would burn CPU redrawing an
+    // unchanged frame as fast as possible.
+    event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = App::new(options);
     event_loop.run_app(&mut app).expect("run event loop");
 }
@@ -146,6 +149,9 @@ impl App {
         self.backend = Some(backend);
         self.config = Some(config);
         self.last_frame = Instant::now();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -312,8 +318,17 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // A redraw is already the render itself; do not request another.
+        if matches!(event, WindowEvent::RedrawRequested) {
+            self.render();
+            return;
+        }
+
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+                return;
+            }
             WindowEvent::Resized(size) => self.resize(size.width, size.height),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale_factor = scale_factor;
@@ -321,7 +336,6 @@ impl ApplicationHandler for App {
                     backend.set_scale_factor(scale_factor as f32);
                 }
             }
-            WindowEvent::RedrawRequested => self.render(),
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = self.to_logical(position);
                 self.feed(&InputEvent::PointerMove {
@@ -350,9 +364,8 @@ impl ApplicationHandler for App {
             }
             _ => {}
         }
-    }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        // Any handled event may have changed the UI; schedule exactly one frame.
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
