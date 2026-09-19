@@ -77,8 +77,8 @@ cargo bench -p draw_backend_wgpu --bench wgpu         # offscreen + readback (sk
 Save a baseline and later fail on a regression:
 
 ```bash
-cargo bench -p draw_bench_suite --bench pipeline -- --save-baseline benches/cpu.txt
-cargo bench -p draw_bench_suite --bench pipeline -- --baseline benches/cpu.txt
+cargo bench -p draw_bench_suite --bench pipeline -- --save-baseline benches/cpu.baseline.txt
+cargo bench -p draw_bench_suite --bench pipeline -- --baseline benches/cpu.baseline.txt
 ```
 
 See `docs/benchmarking.md`.

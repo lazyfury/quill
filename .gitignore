@@ -3,3 +3,7 @@
 .dist
 demos/*/dist
 node_modules
+
+# Benchmark baselines are machine-specific; generate them locally or on CI.
+*.baseline.txt
+bench-baselines/

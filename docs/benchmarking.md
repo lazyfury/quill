@@ -98,10 +98,10 @@ the CI gate:
 
 ```bash
 # record a baseline once (on a quiet, otherwise-idle machine)
-cargo bench -p draw_bench_suite --bench pipeline -- --save-baseline benches/cpu.txt
+cargo bench -p draw_bench_suite --bench pipeline -- --save-baseline benches/cpu.baseline.txt
 
 # later / in CI: fail on a >5% regression
-cargo bench -p draw_bench_suite --bench pipeline -- --baseline benches/cpu.txt
+cargo bench -p draw_bench_suite --bench pipeline -- --baseline benches/cpu.baseline.txt
 ```
 
 Benchmarks are machine- and load-sensitive. Pin the toolchain, close other work,

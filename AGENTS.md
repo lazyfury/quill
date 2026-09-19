@@ -1,11 +1,11 @@
 # AGENTS.md — quill
 
-Concise working agreement for agents. The full spec lives in `docs/architecture.md`
-(stage plan) — but this file is the short source of truth.
+Concise working agreement. Details live in `docs/` (see the map at the bottom);
+this file is the short source of truth for rules and status.
 
 ## Goal
 
-Backend-neutral 2D/UI drawing core in Rust. Canvas 2D via WASM is the first
+Backend-neutral 2D/UI drawing core in Rust. Canvas 2D (WASM) is the first
 backend. Godot-inspired: `SceneTree -> Node -> CanvasItem -> Node2D / Control`.
 
 ## Pipeline (must hold)
@@ -41,7 +41,7 @@ draw_profile  -> draw_core, draw_render
 draw_debug_ui -> draw_core, draw_render, draw_ui, draw_profile
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core
-draw_bench    (no draw_* deps; std only)
+draw_bench    (std only, no draw_* deps)
 draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui
 web_demo      -> draw_core, draw_render, draw_scene, draw_wasm
 wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, draw_backend_wgpu,
@@ -49,11 +49,12 @@ wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, draw_backend_wgpu,
 ```
 
 `draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
-IR (no backend/browser deps), and the pipeline's Paint step (Scene -> DrawList)
-lives in the scene. This does not weaken backend replaceability.
+IR (no backend/browser deps), and the Paint step (Scene -> DrawList) lives in the
+scene. This does not weaken backend replaceability.
 
-Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo`.
-The native window API (`winit`) is only allowed in `demos/wgpu_demo`.
+Browser APIs only in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo`.
+`winit` only in `demos/wgpu_demo`. `wgpu` only in `draw_backend_wgpu` (plus its
+tests/bench) and `demos/wgpu_demo`.
 
 ## Stages
 
@@ -65,8 +66,7 @@ The native window API (`winit`) is only allowed in `demos/wgpu_demo`.
 - [x] Stage 5 — Canvas2D backend + WASM
 - [x] Stage 6 — Control / layout / input
 - [x] Stage 7 — reusable component demo
-- [x] Stage 8 — second backend validation (required case covered by
-      `draw_backend_recording`; an extra native backend was tried and removed)
+- [x] Stage 8 — second backend validation (`draw_backend_recording`)
 - [x] Stage 9 — wgpu backend (`draw_backend_wgpu`, offscreen + pixel readback)
 - [x] Stage 10 — performance inspection (`draw_profile`) + debug overlay
       (`draw_debug_ui`)
@@ -81,157 +81,35 @@ cargo test --workspace
 cargo bench --workspace --no-run
 ```
 
-Then emit the fixed report format and stop for approval.
+Then emit the report and stop for approval.
 
-## Second backend (Stage 8)
+## Recurring decisions (do not undo)
 
-The required second-backend validation is satisfied by `draw_backend_recording`
-(a different `RenderBackend` consuming the same `DrawList`, no Scene/UI changes).
+- Stage 8: the second backend is `draw_backend_recording`. A native macOS Core
+  Graphics backend + `macos_demo` was implemented and **removed by request**; do
+  not reintroduce it without an explicit ask. (Background: `docs/architecture.md`.)
+- `cargo bench` uses the `bench` profile (`opt-level = 3`); bench targets use
+  `harness = false` and are run via `cargo bench -p <crate> --bench <name>`.
+- API priority: **API -> test -> implementation -> integration.**
 
-A native macOS Core Graphics backend plus a `macos_demo` was implemented and then
-**removed by request**: the result was judged not worth the added complexity. Do
-not reintroduce it without an explicit request.
+## Context hygiene (keep agent/LLM context small)
 
-## wgpu backend (Stage 9)
+- Do **not** read or `grep` `target/`, `demos/*/dist/` (ignored generated
+  wasm/js), or `Cargo.lock`. To find a symbol, `rg` from the repo root (ripgrep
+  honors `.gitignore`); avoid `grep -r`.
+- Use the map below instead of `ls -R` / `find` exploration.
+- Read one module, not a whole crate. If a file passes ~500 lines, prefer
+  splitting it over reading it whole.
 
-`draw_backend_wgpu` is a third `RenderBackend` over the same `DrawList`. It
-renders to an **offscreen** `Rgba8Unorm` texture by default and exposes
-`WgpuBackend::read_pixels()` so tests assert on real pixels under native
-`cargo test` (no window, no screenshot). It can also draw into an external view
-(window surface texture) via `begin_frame_with_view`; `demos/wgpu_demo` presents
-that with `winit`. Transform/opacity/clip are resolved on the CPU; one
-textured-triangle pipeline handles solid shapes, registered images, and a
-built-in `8x8` bitmap-font atlas. `wgpu` must stay confined to this crate plus
-its own tests and the demo; core/scene/UI/render never see it.
+## Where to look
 
-## Debugging & performance inspection (Stage 10, `draw_profile` + `draw_debug_ui`)
-
-`draw_profile` is a backend-neutral observer of the pipeline. It depends only on
-`draw_core` + `draw_render` and never measures time itself: the host samples
-`Instant` per phase and feeds milliseconds in, so the model is deterministic and
-unit-testable.
-
-- `FrameStats` = `index`, `frame_ms`, `StageTimes` (`update`/`layout`/`paint`/
-  `render`) and `FrameCounters` (`scene_nodes`, `controls`, `draw_commands`,
-  `draw_lists`).
-- `Profiler` keeps a bounded ring buffer of `FrameStats`, can be disabled at
-  runtime (no-op hot path), and derives a `FrameSummary` (avg/min/max, per-phase
-  averages, max commands, FPS).
-- `inspect(&DrawList, &FrameStats) -> InspectionReport` audits the frame with
-  `Severity`-ranked `Finding`s, aggregated by `FindingCode`: save/restore
-  balance, non-finite geometry/transform, degenerate rect/circle/stroke/clip,
-  opacity range, empty text, and command/frame-time/entity budgets
-  (`InspectionConfig`, default 2048 commands / 16.7 ms / 10k entities).
-
-`draw_ui` gains `Ui::paint_debug(&DebugDrawOptions)`: a yellow border plus a
-`Name #id` label on every visible control. `draw_debug_ui` renders both tools as
-ordinary `DrawCommand`s:
-
-- `DebugOverlay` is **component debug drawing** — it wraps
-  `Ui::paint_debug(&DebugDrawOptions)`. It owns no tree, so it draws over the
-  application's own `Ui`.
-- `PerformanceOverlay` turns a `Profiler` + `InspectionReport` into a `draw_ui`
-  panel (its own `Ui` tree, painted after the app UI, no-op while closed).
-
-`demos/wgpu_demo` instruments its frame, runs `inspect`, draws component bounds
-with `DebugOverlay`, and shows `PerformanceOverlay`; shortcuts are F3 / ` / d
-(bounds), F4 / p (panel), F5 / o (profiler).
-
-Like all core crates these are verified with native `cargo test`; the window
-overlays themselves are not screenshot-verified (see `docs/testing.md`).
-
-## Benchmarking (Stage 11, `draw_bench` + `draw_bench_suite`)
-
-A profiler says *where* time goes; a benchmark says *whether a change helped* and
-*keeps it from regressing*. `draw_profile` is the former; `draw_bench` is the
-latter.
-
-`draw_bench` is a dependency-free (`std` only, no randomness) harness:
-
-- `BenchRunner` warms up, calibrates an iteration count for one sample, collects
-  `BenchOptions::samples` samples, and returns `Stats` (min/max/mean/median/
-  stddev, p90/p95/p99).
-- `Baseline` is a plain-text file of `name -> median_ns`; `compare` yields
-  `Verdict::{Regression, Improvement, Stable, New, Removed}` at a ratio threshold.
-- `RunConfig` parses shared CLI flags (`--filter`, `--baseline`,
-  `--save-baseline`, `--threshold`, `--samples`, ...). `finish` prints the report,
-  saves/compares the baseline, and returns exit code `1` on any regression -- the
-  CI gate.
-
-`draw_bench_suite` owns deterministic scenarios (no I/O, fixed sizes) at 100 /
-1_000 / 10_000 entities: `scene/update_clean`, `scene/update_dirty_all`,
-`scene/paint`, `ui/layout`, `ui/hit_test`, `ui/paint`, and the end-to-end
-`pipeline/ui_frame`. It submits through `SinkBackend`, a consuming `RenderBackend`
-that counts commands and retains nothing. `draw_backend_wgpu` has its own
-`benches/wgpu.rs` for the offscreen render + readback path; it skips when no
-adapter is available.
-
-`cargo bench` uses the `bench` profile, pinned to `opt-level = 3`. Bench targets
-use `harness = false`; pass harness flags via the explicit target, e.g.
-`cargo bench -p draw_bench_suite --bench pipeline -- --filter scene/update`.
-Baselines are machine-sensitive: pin the toolchain and compare on the same host.
-
-See `docs/benchmarking.md`.
-
-## API priority: API -> test -> implementation -> integration.
-
-## Core types (Stage 1, `draw_core`)
-
-`Vec2`, `Size`, `Edges`, `Rect`, `Transform2D`, `Color`, `NodeId` +
-`NodeIdAllocator`, `Viewport`.
-Conventions: origin top-left, +X right, +Y down, logical pixels, radians,
-positive rotation +X -> +Y. Rect membership is half-open `[min, max)`.
-DPR never enters core: `Viewport::device_size(scale)` is a pure helper.
-
-## Scene (Stage 2, `draw_scene`)
-
-`SceneTree` arena over `Node` + `NodeId`. `NodeKind::{Node, Node2D}`; `Node2D`
-owns a `CanvasItem` (local transform, visibility, z-index). `SceneTree::update()`
-derives `world_transform` / `world_visible` using `DirtyFlags` (returns number of
-recomputed transforms; 0 when clean). Child lists are kept sorted by
-`(z_index, creation order)` for deterministic traversal. Transform propagation:
-`world = parent_world * local`.
-
-## Render IR (Stage 3, `draw_render`)
-
-`Paint` (solid color), `DrawCommand` (`Save`/`Restore`/`SetTransform`/
-`SetOpacity`/`ClipRect`/`FillRect`/`StrokeRect`/`FillCircle`/`StrokeCircle`/
-`DrawImage`/`DrawText`), `DrawList`, `PaintContext`, `TextureId`.
-`PaintContext::save`/`restore` are balanced. Scene paints via
-`SceneTree::paint(&mut PaintContext)`; `Visual::{None,Rect,Circle}` on `Node2D`
-are a temporary built-in primitive. Geometry is in current-transform space;
-`ClipRect` is in viewport/logical space. No backend types in the IR.
-
-## Backend contract (Stage 4, `draw_render` + `draw_backend_recording`)
-
-`RenderBackend` trait: `begin_frame(Viewport)` -> `submit(&DrawList)` (0..n) ->
-`end_frame()`, with an associated `Error`. `RecordingBackend` records each
-frame's viewport + concatenated commands. `CommandAsserts` gives
-count/contains/sequence/last-transform/opacity/clip assertions. Full headless
-pipeline test lives in `draw_backend_recording/tests/pipeline.rs`.
-
-## Browser layer (Stage 5)
-
-`Canvas2dBackend` maps `DrawCommand` to Canvas 2D. Logical coords are kept; the
-backing store is `logical * scale_factor` and every transform is multiplied by
-the scale factor, so DPR never reaches core/IR. `draw_wasm::start(canvas_id, app)`
-owns the RAF loop and `App::{update, paint, event}`. `ClipRect` is applied in device
-space then the logical transform is reapplied. Build/run the demo with
-`demos/web_demo/build.sh` + a static server. Only these two crates + the demo may
-touch `web-sys`/browser APIs.
-
-## UI (Stage 6, `draw_ui`)
-
-`Ui` owns a `SceneTree` of `Control` nodes plus `ControlData` (anchors/offsets/
-min_size/rect/mouse_filter) and `Widget` (Panel/Label/Button/VBox/HBox).
-`layout(viewport)` resolves absolute rects; `paint(ctx)` emits the DrawList;
-`handle_input(&InputEvent)` does topmost hit testing + target dispatch (capture/
-bubble reserved). Pointer position is computed from `clientX/Y` minus the canvas
-bounding rect. `InputEvent`/`EventResult` live in `draw_core`. Browser click path
-is verified in headless Chrome via `?selftest=1`.
-
-## Component API (Stage 7, `draw_ui`)
-
-`Component` trait + builder structs `Panel`/`VBox`/`HBox`/`Label`/`Button`.
-`ui.add(parent, Button::new("x").on_click(..))` returns an owned `ControlRef`.
-Demos: `demos/web_demo` (raw API) and `demos/component_demo` (recommended API).
+| I need... | Look at |
+|---|---|
+| Pipeline, coordinates, stage plan, backend replaceability | `docs/architecture.md` |
+| Backends (Canvas / wgpu / recording), adding a backend, browser boundary | `docs/backend.md` |
+| Controls, layout, components | `docs/components.md` |
+| Profiler + debug overlays | `docs/debug.md` |
+| Benchmarks & regression baselines | `docs/benchmarking.md` |
+| Test layers, no-screenshot rule | `docs/testing.md` |
+| Getting started / build & run | `docs/getting-started.md` |
+| Core types & crate APIs | `crates/*/src/*.rs` (module docs at the top) |

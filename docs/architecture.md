@@ -23,6 +23,11 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 
 Only steps 4-5 cross the core/backend boundary, and they cross via `DrawList`.
 
+`draw_scene` depends on `draw_render` on purpose: `draw_render` is the
+backend-neutral IR (no backend/browser deps) and the Paint step
+(Scene -> DrawList) lives in the scene. This does not weaken backend
+replaceability.
+
 ## Coordinates
 
 Logical pixels are the core unit. Browser device pixel ratio (DPR) is handled
@@ -43,7 +48,10 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 - Stage 5 — Canvas 2D backend + WASM [done]
 - Stage 6 — `Control` / layout / input [done]
 - Stage 7 — reusable component demo [done]
-- Stage 8 — second backend validation (`draw_backend_recording`) [done]
+- Stage 8 — second backend validation (`draw_backend_recording`) [done]. A
+  native macOS Core Graphics backend + `macos_demo` was implemented and removed
+  by request (not worth the added complexity); do not reintroduce it without an
+  explicit ask.
 - Stage 9 — `wgpu` backend (`draw_backend_wgpu`, offscreen + pixel readback) [done]
 - Stage 10 — performance inspection (`draw_profile`) + debug overlay
   (`draw_debug_ui`) [done]
