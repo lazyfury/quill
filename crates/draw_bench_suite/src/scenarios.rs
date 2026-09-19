@@ -5,9 +5,9 @@
 //! ids a routine needs to mutate. No randomness, no I/O: two calls to the same
 //! builder produce identical structure.
 
-use draw_app::{Component, Flex, Label, Panel, VBox};
 use draw_core::{Color, NodeId, Size, Vec2, ViewportSize};
 use draw_scene::{SceneTree, Visual};
+use draw_widgets::{Component, Flex, Label, Panel, VBox};
 
 /// Entity counts every scenario is run at, to expose scaling curves.
 pub const SIZES: [usize; 3] = [100, 1_000, 10_000];
@@ -113,7 +113,7 @@ impl UiFixture {
     }
 
     pub fn hit_test(&self, position: Vec2) -> Option<NodeId> {
-        draw_app::hit_test(&self.tree, position)
+        draw_ui::hit_test(&self.tree, position)
     }
 
     pub fn paint(&self, ctx: &mut draw_render::PaintContext) {

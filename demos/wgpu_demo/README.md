@@ -21,7 +21,7 @@ cargo run -p wgpu_demo --release
 
 - A three-column, macOS-style notes app built from `draw_components` components on the
   `draw_ui` core:
-  - **sidebar** (220px): traffic lights, app title, search placeholder, nav
+  - **sidebar** (220px): app icon + title, search placeholder, nav
     rows with selection, version badge,
   - **content list** (324px): header, note rows with thumbnail placeholders,
     selection highlight and an accent bar,
@@ -42,6 +42,10 @@ resize, scale and overlay toggles, then blocks on `ControlFlow::Wait`. There is
 no idle redraw loop, so a stationary window uses ~0% CPU. Overlays (debug /
 performance) refresh when you interact or move the pointer rather than every
 frame.
+
+The native window frame is selected at startup: `--transparent-titlebar`
+(default on macOS; sidebar-only safe area for the traffic lights),
+`--native-titlebar` or `--hidden-titlebar` (borderless).
 
 The demo measures text with the backend's actual loaded font
 (`WgpuBackend::text_metrics`), so wrapping and advances stay in sync with what
@@ -82,6 +86,9 @@ Switch at runtime with **f**, or start in pixel mode with `--pixel-font`.
 | `--no-profiler` / `--no-profile` | | Disable the profiler (the panel shows placeholders) |
 | `--pixel-font` / `--pixel` | | Use the built-in pixel font instead of a system font |
 | `--system-font` / `--smooth-font` | on | Use a system font (falls back to pixel if none loads) |
+| `--native-titlebar` / `--titlebar` | | Keep the native window title bar as-is |
+| `--hidden-titlebar` / `--borderless` / `--no-decorations` | | Remove the native title bar entirely (`with_decorations(false)`) |
+| `--transparent-titlebar` / `--macos-titlebar` | on (macOS) | Keep the traffic lights, hide the title bar background/text; the sidebar reserves a top safe area for the lights (no effect elsewhere) |
 | `-h`, `--help` | | Print help and exit |
 | `-V`, `--version` | | Print the version and exit |
 
@@ -99,7 +106,18 @@ cargo run -p wgpu_demo --release -- --debug-ui --performance
 
 # window only, no overlays and no audit cost
 cargo run -p wgpu_demo --release -- --no-debug-ui --no-profiler
+
+# borderless window (no native title bar or window controls)
+cargo run -p wgpu_demo --release -- --hidden-titlebar
+
+# default on macOS: keep the traffic lights but hide the title bar background/text
+cargo run -p wgpu_demo --release -- --transparent-titlebar
 ```
+
+> The default is `--transparent-titlebar` (macOS traffic lights kept). The shared
+> app reserves a top **safe area on the sidebar only** for them; the list and
+> detail panes are not padded. On non-macOS platforms the flag is a no-op and no
+> safe area is reserved.
 
 ## Component debug drawing
 

@@ -1,17 +1,18 @@
-//! `draw_ui` — layout and paint for backend-neutral UI controls.
+//! `draw_ui` — layout, paint and input for backend-neutral UI controls.
 //!
-//! This crate owns exactly two stages of the pipeline:
+//! This crate owns three stages of the pipeline:
 //!
 //! - **Layout** ([`layout()`]) resolves absolute rectangles from anchors/offsets;
 //!   flex and grid containers size and arrange their children.
 //! - **Paint** ([`paint`]) emits a backend-neutral `draw_render::DrawList`.
+//! - **Input** ([`hit_test`] / [`handle_input`] / [`route_input`]) hit-tests
+//!   controls and runs the `_input -> world -> GUI -> _unhandled_input` order.
 //!
 //! Control data ([`ControlData`], [`Widget`], [`NodeDecor`]) lives on the
 //! [`SceneTree`] node's extension slot, and the text measurer / GUI interaction
 //! state / layout cache live on the root node. The theme is a value passed to
-//! component constructors. Everything else — building components, routing
-//! input, and submitting the resulting `DrawList` to a backend — lives in
-//! `draw_app`.
+//! component constructors. Building components lives in `draw_widgets`;
+//! submitting the resulting `DrawList` to a backend is the host's job.
 //!
 //! ```ignore
 //! use draw_ui as ui;
@@ -29,6 +30,7 @@ pub const CRATE: &str = "draw_ui";
 mod control;
 mod debug;
 mod decor;
+mod input;
 pub mod layout;
 mod paint;
 mod ui;
@@ -41,6 +43,10 @@ pub use control::{
 pub use debug::DebugDrawOptions;
 pub use decor::{
     dynamic_surface_decor, foreground_decor, surface_decor, DecorRef, InteractState, NodeDecor,
+};
+pub use input::{
+    focused, handle_input, hit_test, hovered, hovered_cursor, hovered_is_button, is_interactive,
+    route_input,
 };
 pub use layout::{
     Align, AlignContent, ApproxTextMeasurer, ContentSize, FixedWidthTextMeasurer, FlexDirection,
@@ -85,7 +91,7 @@ pub fn last_arranged_nodes(tree: &SceneTree) -> usize {
 
 /// Marks `id` (and its ancestors) as needing layout.
 ///
-/// The construction layer (`draw_app`) calls this after mutating a control's
+/// The construction layer (`draw_widgets`) calls this after mutating a control's
 /// layout inputs directly through [`SceneTree::data_mut`].
 pub fn mark_dirty(tree: &mut SceneTree, id: NodeId) {
     Ui.mark_dirty(tree, id)

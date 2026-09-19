@@ -15,7 +15,7 @@ fn build(theme: Theme) -> SceneTree {
     let tree_root = tree.root();
     let root = tree.add_child(
         tree_root,
-        draw_app::Flex::column().mouse_filter(draw_ui::MouseFilter::Ignore),
+        draw_widgets::Flex::column().mouse_filter(draw_ui::MouseFilter::Ignore),
     );
 
     let card = tree.add_child(

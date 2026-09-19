@@ -65,7 +65,7 @@ Components compose into one node tree. Attach a component with
 constructors, never stored on the tree.
 
 ```rust
-use draw_app::{Button, Component, Flex, Label, Panel, VBox};
+use draw_widgets::{Button, Component, Flex, Label, Panel, VBox};
 use draw_core::{Size, ViewportSize};
 use draw_scene::SceneTree;
 use draw_theme::Theme;
@@ -92,7 +92,7 @@ tree.add_child(
 draw_ui::layout(&mut tree, ViewportSize::new(Size::new(800.0, 600.0)));
 
 // Pointer/keyboard input (backend-neutral):
-draw_app::route_input(
+draw_ui::route_input(
     &mut tree,
     &draw_core::InputEvent::PointerDown {
         position: draw_core::Vec2::new(100.0, 100.0),

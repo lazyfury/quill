@@ -255,12 +255,12 @@ dependencies = [
 name = "component_demo"
 version = "0.1.0"
 dependencies = [
- "draw_app",
  "draw_core",
  "draw_render",
  "draw_scene",
  "draw_ui",
  "draw_wasm",
+ "draw_widgets",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -339,7 +339,6 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 name = "demo_app"
 version = "0.1.0"
 dependencies = [
- "draw_app",
  "draw_backend_recording",
  "draw_components",
  "draw_core",
@@ -347,6 +346,7 @@ dependencies = [
  "draw_scene",
  "draw_theme",
  "draw_ui",
+ "draw_widgets",
 ]
 
 [[package]]
@@ -384,18 +384,6 @@ name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
-
-[[package]]
-name = "draw_app"
-version = "0.1.0"
-dependencies = [
- "draw_backend_recording",
- "draw_core",
- "draw_render",
- "draw_scene",
- "draw_theme",
- "draw_ui",
-]
 
 [[package]]
 name = "draw_backend_canvas"
@@ -443,25 +431,25 @@ version = "0.1.0"
 name = "draw_bench_suite"
 version = "0.1.0"
 dependencies = [
- "draw_app",
  "draw_bench",
  "draw_core",
  "draw_render",
  "draw_scene",
  "draw_ui",
+ "draw_widgets",
 ]
 
 [[package]]
 name = "draw_components"
 version = "0.1.0"
 dependencies = [
- "draw_app",
  "draw_backend_recording",
  "draw_core",
  "draw_render",
  "draw_scene",
  "draw_theme",
  "draw_ui",
+ "draw_widgets",
 ]
 
 [[package]]
@@ -472,12 +460,12 @@ version = "0.1.0"
 name = "draw_debug_ui"
 version = "0.1.0"
 dependencies = [
- "draw_app",
  "draw_core",
  "draw_profile",
  "draw_render",
  "draw_scene",
  "draw_ui",
+ "draw_widgets",
 ]
 
 [[package]]
@@ -530,6 +518,17 @@ dependencies = [
  "js-sys",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "draw_widgets"
+version = "0.1.0"
+dependencies = [
+ "draw_backend_recording",
+ "draw_core",
+ "draw_render",
+ "draw_scene",
+ "draw_ui",
 ]
 
 [[package]]

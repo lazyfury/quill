@@ -1,23 +1,25 @@
-//! `draw_app` — the application layer on top of `draw_ui`.
+//! `draw_widgets` — node-building components on top of `draw_ui`.
 //!
-//! `draw_ui` owns layout and paint; the [`SceneTree`] owns composition. This
-//! crate supplies the pieces an application needs around them:
+//! `draw_ui` owns layout, paint and input; the [`SceneTree`] owns composition.
+//! This crate supplies the construction layer an application uses to build UI:
 //!
 //! - **Components** — the [`Component`] trait plus [`Flex`], [`Panel`],
 //!   [`Label`], [`Button`] and [`Grid`]. Components compose with `.child()`
 //!   and attach to the scene with
 //!   [`SceneTree::add_child`](draw_scene::SceneTree::add_child).
-//! - **Input** — [`hit_test`] / [`handle_input`] / [`route_input`] run the GUI
-//!   hit-test and the `_input -> world -> GUI -> _unhandled_input` order.
-//! - **Runtime** — [`App`] binds a tree and submits a frame to a
-//!   [`RenderBackend`](draw_render::RenderBackend); layout/paint live in
-//!   `draw_ui`.
+//! - **Mutation helpers** — [`update_control`] / [`set_text`] /
+//!   [`set_on_click`] / [`set_on_drag`] / [`set_cursor_provider`] for hosts that
+//!   animate a single node after construction.
+//!
+//! Input routing and frame submission are not owned here: hosts run
+//! `draw_ui::route_input` and submit the painted `DrawList` to a
+//! [`RenderBackend`](draw_render::RenderBackend).
 //!
 //! The theme is a plain value: components receive concrete colors, and nothing
 //! reads a theme from the tree.
 //!
 //! ```ignore
-//! use draw_app::{Flex, Label};
+//! use draw_widgets::{Flex, Label};
 //! use draw_scene::SceneTree;
 //!
 //! let mut tree = SceneTree::new();
@@ -26,21 +28,14 @@
 //! ```
 
 /// Crate name, kept for lightweight smoke checks.
-pub const CRATE: &str = "draw_app";
+pub const CRATE: &str = "draw_widgets";
 
-mod app;
 mod component;
-mod input;
 
-pub use app::App;
 pub use component::{
     apply_spec, control_mut, set_cursor_provider, set_on_click, set_on_drag, set_text,
     update_control, Button, ChildFn, Column, Component, Flex, Grid, HBox, Label, Panel, Row, Spec,
     VBox,
-};
-pub use input::{
-    focused, handle_input, hit_test, hovered, hovered_cursor, hovered_is_button, is_interactive,
-    route_input,
 };
 
 use draw_core::NodeId;
@@ -70,6 +65,7 @@ mod tests {
         Cursor, Edges, EventResult, InputEvent, PointerButton, Rect, Size, Vec2, ViewportSize,
     };
     use draw_scene::Visual;
+    use draw_ui::{focused, handle_input, hovered_cursor, route_input};
     use draw_ui::{MouseFilter, SizeBasis};
 
     fn viewport(w: f32, h: f32) -> ViewportSize {

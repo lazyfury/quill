@@ -4,6 +4,19 @@
 //! The result is a pure value ([`Options`]) so parsing is unit-testable without
 //! opening a window.
 
+/// How the native window frame (title bar) is handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TitlebarMode {
+    /// Keep the OS title bar as-is.
+    Native,
+    /// Remove the OS title bar entirely, including the window controls.
+    Hidden,
+    /// macOS (default): keep the traffic lights but remove the title bar
+    /// background/text. Falls back to the native frame on other platforms.
+    #[default]
+    Transparent,
+}
+
 /// Runtime options derived from the command line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Options {
@@ -15,6 +28,8 @@ pub struct Options {
     pub profiler: bool,
     /// Start with the built-in pixel font instead of a system font.
     pub pixel_font: bool,
+    /// Native title bar handling.
+    pub titlebar: TitlebarMode,
 }
 
 impl Default for Options {
@@ -24,6 +39,7 @@ impl Default for Options {
             performance: false,
             profiler: true,
             pixel_font: false,
+            titlebar: TitlebarMode::Transparent,
         }
     }
 }
@@ -55,6 +71,13 @@ OPTIONS:
         --no-profiler     Disable the profiler (the panel shows placeholders)
         --pixel-font      Use the built-in pixel font instead of a system font
         --system-font     Use a system font (default; falls back to pixel)
+        --native-titlebar Keep the native window title bar as-is
+        --hidden-titlebar Remove the native title bar entirely (`with_decorations(false)`)
+        --transparent-titlebar
+                          macOS (default): keep the traffic lights, hide the
+                          title bar background and title text; the sidebar
+                          reserves a top safe area for them (no effect on other
+                          platforms)
     -h, --help            Print this help
     -V, --version         Print the version
 
@@ -84,6 +107,13 @@ where
             "--no-profiler" | "--no-profile" => options.profiler = false,
             "--pixel-font" | "--pixel" => options.pixel_font = true,
             "--system-font" | "--smooth-font" => options.pixel_font = false,
+            "--native-titlebar" | "--titlebar" => options.titlebar = TitlebarMode::Native,
+            "--hidden-titlebar" | "--borderless" | "--no-decorations" => {
+                options.titlebar = TitlebarMode::Hidden
+            }
+            "--transparent-titlebar" | "--macos-titlebar" => {
+                options.titlebar = TitlebarMode::Transparent
+            }
             "-h" | "--help" => return Ok(Command::Help),
             "-V" | "--version" => return Ok(Command::Version),
             other => return Err(format!("unrecognized argument '{other}'")),
@@ -116,6 +146,7 @@ mod tests {
                 performance: false,
                 profiler: true,
                 pixel_font: false,
+                titlebar: TitlebarMode::Transparent,
             }
         );
     }
@@ -143,6 +174,35 @@ mod tests {
         assert!(!options(&["--no-profile"]).profiler);
         assert!(options(&["--pixel-font"]).pixel_font);
         assert!(!options(&["--pixel-font", "--system-font"]).pixel_font);
+    }
+
+    #[test]
+    fn titlebar_flags_select_the_window_frame() {
+        // Plan B (transparent title bar) is the default.
+        assert_eq!(options(&[]).titlebar, TitlebarMode::Transparent);
+        assert_eq!(
+            options(&["--transparent-titlebar"]).titlebar,
+            TitlebarMode::Transparent
+        );
+        assert_eq!(
+            options(&["--macos-titlebar"]).titlebar,
+            TitlebarMode::Transparent
+        );
+        assert_eq!(
+            options(&["--hidden-titlebar"]).titlebar,
+            TitlebarMode::Hidden
+        );
+        assert_eq!(options(&["--borderless"]).titlebar, TitlebarMode::Hidden);
+        assert_eq!(
+            options(&["--native-titlebar"]).titlebar,
+            TitlebarMode::Native
+        );
+        assert_eq!(options(&["--titlebar"]).titlebar, TitlebarMode::Native);
+        // Last flag wins, and every mode can be selected explicitly.
+        assert_eq!(
+            options(&["--hidden-titlebar", "--native-titlebar"]).titlebar,
+            TitlebarMode::Native
+        );
     }
 
     #[test]

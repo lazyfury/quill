@@ -197,7 +197,7 @@ This is the largest refactor; split it.
   **Component-native (Stage 25.10/25.11):** the `View`/`ViewExt`/`Modify`/
   `BuildContext` layer and the `add_*`/`mount`/`insert` free functions were
   deleted. `draw_scene` gained `SceneChild` + `SceneTree::add_child(parent, c)`,
-  and `draw_app::Component` now carries a `Spec` and exposes the modifiers
+  and `draw_widgets::Component` now carries a `Spec` and exposes the modifiers
   (`child`, `background`, `surface`, `dynamic_background`, `foreground`,
   `on_click`, `grow`, `min_size`, …) as methods. `draw_components` components
   take the `Theme` as a plain `Copy` value; **the theme is no longer stored on
@@ -245,7 +245,7 @@ engine has no dependency on UI and an app without a HUD never needs
 GUI drags use pointer capture (`GuiState.dragging` + `Control.drag_callback`):
 on `PointerDown` a node with a drag callback captures the pointer, `PointerMove`
 is routed to it as a delta (even outside its rect) and `PointerUp` releases it.
-`draw_app::{set_on_drag}` and `Component::on_drag` expose it; `ResizeHandle`
+`draw_widgets::{set_on_drag}` and `Component::on_drag` expose it; `ResizeHandle`
 uses it for split-view resizing.
 `draw_core` gained `InputEvent::Wheel` and `InputState` (held buttons/keys +
 pointer position). Multi-touch / gamepad remain future work; GUI focus/hover

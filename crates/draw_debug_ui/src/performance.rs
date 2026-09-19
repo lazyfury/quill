@@ -1,8 +1,8 @@
-use draw_app::{Component, Flex, Label, Panel, VBox};
 use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, ViewportSize};
 use draw_profile::{InspectionReport, Phase, Profiler, Severity};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
+use draw_widgets::{Component, Flex, Label, Panel, VBox};
 
 /// Which viewport corner the overlay panel is pinned to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -299,34 +299,34 @@ impl PerformanceOverlay {
     /// Routes an input event through the overlay. Closed overlays ignore input.
     pub fn handle_input(&mut self, event: &InputEvent) -> EventResult {
         if self.open {
-            draw_app::handle_input(&mut self.tree, event)
+            draw_ui::handle_input(&mut self.tree, event)
         } else {
             EventResult::Ignored
         }
     }
 
     fn apply(&mut self, text: &OverlayText) {
-        draw_app::set_text(&mut self.tree, self.rows.title, text.title.clone());
-        draw_app::set_text(&mut self.tree, self.rows.fps, text.fps.clone());
-        draw_app::set_text(&mut self.tree, self.rows.frame, text.frame.clone());
-        draw_app::set_text(&mut self.tree, self.rows.profiler, text.profiler.clone());
-        draw_app::set_text(
+        draw_widgets::set_text(&mut self.tree, self.rows.title, text.title.clone());
+        draw_widgets::set_text(&mut self.tree, self.rows.fps, text.fps.clone());
+        draw_widgets::set_text(&mut self.tree, self.rows.frame, text.frame.clone());
+        draw_widgets::set_text(&mut self.tree, self.rows.profiler, text.profiler.clone());
+        draw_widgets::set_text(
             &mut self.tree,
             self.rows.update_layout,
             text.update_layout.clone(),
         );
-        draw_app::set_text(
+        draw_widgets::set_text(
             &mut self.tree,
             self.rows.paint_render,
             text.paint_render.clone(),
         );
-        draw_app::set_text(&mut self.tree, self.rows.commands, text.commands.clone());
-        draw_app::set_text(&mut self.tree, self.rows.entities, text.entities.clone());
-        draw_app::set_text(&mut self.tree, self.rows.findings, text.findings.clone());
+        draw_widgets::set_text(&mut self.tree, self.rows.commands, text.commands.clone());
+        draw_widgets::set_text(&mut self.tree, self.rows.entities, text.entities.clone());
+        draw_widgets::set_text(&mut self.tree, self.rows.findings, text.findings.clone());
         for (id, row) in self.rows.finding_rows.iter().zip(&text.finding_rows) {
-            draw_app::set_text(&mut self.tree, *id, row.clone());
+            draw_widgets::set_text(&mut self.tree, *id, row.clone());
         }
-        draw_app::set_text(&mut self.tree, self.rows.shortcuts, text.shortcuts.clone());
+        draw_widgets::set_text(&mut self.tree, self.rows.shortcuts, text.shortcuts.clone());
     }
 }
 

@@ -16,7 +16,9 @@
 //!
 //! Flags: `--debug-ui` and `--performance` show the component-bounds and
 //! performance overlays (both off by default); `--profiler` controls stats
-//! collection (default on); `--help` lists everything.
+//! collection (default on); `--transparent-titlebar` (default on macOS; keeps
+//! the traffic lights with a sidebar-only safe area), `--native-titlebar` and
+//! `--hidden-titlebar` choose the window frame; `--help` lists everything.
 //!
 //! This is the only place that owns a window/event loop; the backend itself
 //! stays window-agnostic and is also exercised headlessly in its own tests. The

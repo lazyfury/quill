@@ -22,11 +22,11 @@ mod demo {
     use wasm_bindgen::prelude::*;
     use web_sys::CanvasRenderingContext2d;
 
-    use draw_app::{Button, Component, Label, Panel, VBox};
     use draw_core::{Color, Edges, NodeId, Rect, Size, Vec2, ViewportSize};
     use draw_render::{Paint, PaintContext, TextAlign};
     use draw_scene::{SceneTree, Visual};
     use draw_wasm::{App, CanvasTextMeasurer};
+    use draw_widgets::{Button, Component, Label, Panel, VBox};
 
     const BACKGROUND: Color = Color::new(0.09, 0.10, 0.13, 1.0);
     const ACCENT: Color = Color::new(0.30, 0.62, 0.98, 1.0);
@@ -140,7 +140,7 @@ mod demo {
         }
 
         fn cursor(&self) -> draw_core::Cursor {
-            draw_app::hovered_cursor(&self.tree)
+            draw_ui::hovered_cursor(&self.tree)
         }
 
         fn update(&mut self, viewport: ViewportSize) {
@@ -157,7 +157,7 @@ mod demo {
             self.tree.update();
 
             // Reflect state -> UI, then lay out (resize-aware).
-            draw_app::set_text(
+            draw_widgets::set_text(
                 &mut self.tree,
                 self.status,
                 format!("Status: Clicked {} times", self.clicks.get()),
@@ -194,7 +194,7 @@ mod demo {
         }
 
         fn event(&mut self, event: &draw_core::InputEvent) -> draw_core::EventResult {
-            let result = draw_app::route_input(&mut self.tree, event);
+            let result = draw_ui::route_input(&mut self.tree, event);
             self.report_probe();
             result
         }

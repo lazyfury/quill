@@ -65,12 +65,12 @@ The crate split is deliberate: `draw_ui` is the UI runtime **and** the styling
 primitives (`SurfaceStyle`, `fill_rounded_rect`/`inset`/`surface`, `Tone`,
 `SurfaceTone`, and the `surface_decor`/`dynamic_surface_decor`/
 `foreground_decor` factories), while `draw_components` contains **only component
-builders**. Components implement `draw_app::Component`, receive the `Theme` as a
+builders**. Components implement `draw_widgets::Component`, receive the `Theme` as a
 `Copy` value, and attach their chrome to their own node. Hosts build one tree
 and use a single paint/input pass:
 
 ```rust
-use draw_app::{Component, Flex};
+use draw_widgets::{Component, Flex};
 use draw_components::{Card, Checkbox, Text};
 use draw_scene::SceneTree;
 use draw_theme::{space, Theme, Tone};
@@ -86,7 +86,7 @@ tree.add_child(root, Card::new(theme).gap(space::MD)
 
 draw_ui::layout(&mut tree, viewport);
 draw_ui::paint(&tree, &mut ctx);          // surfaces + content + marks, in tree order
-draw_app::route_input(&mut tree, &event); // dispatches component clicks
+draw_ui::route_input(&mut tree, &event); // dispatches component clicks
 ```
 
 The theme is a `Copy` value passed to constructors; nothing reads it from the
@@ -110,7 +110,7 @@ circles into rounded surfaces without double-blending translucent fills.
 
 ### Interactions
 
-Components register clicks with `draw_app::set_on_click(tree, node, ..)` or the
+Components register clicks with `draw_widgets::set_on_click(tree, node, ..)` or the
 `Component::on_click` builder; a hit on any
 descendant walks up to the nearest ancestor callback. Hover/pressed/focused
 state lives in the core and `Ui::state_for(node)` inherits it from ancestors,
@@ -155,7 +155,7 @@ Every `Component` supports the same modifiers as a method: `grow`, `min_size`,
 `anchors`/`offsets`, `background`/`surface`/`dynamic_background`, `foreground`,
 `on_click`, `mouse_filter` and `child`.
 
-Extend the library by implementing `draw_app::Component` (see
+Extend the library by implementing `draw_widgets::Component` (see
 `docs/components.md` for the full `spec`/`widget` walkthrough).
 
 ## Overlays

@@ -10,17 +10,18 @@ functions over `&SceneTree` / `&mut SceneTree` — there is no `Ui` object. The
 theme is a plain value passed to component constructors; it is never stored on
 the tree.
 
-`draw_app` owns the app-facing trait and the layout primitives (`Flex`, `Panel`,
-`Label`, `Button`, `Grid`, `VBox`, `HBox`, `Column`, `Row`). `draw_components`
-adds the themed library (`Text`, `Card`, `Button`, `Checkbox`, `Switch`,
-`ResizeHandle`, …).
+`draw_widgets` owns the host-facing `Component` trait and the layout primitives
+(`Flex`, `Panel`, `Label`, `Button`, `Grid`, `VBox`, `HBox`, `Column`, `Row`).
+`draw_components` adds the themed library (`Text`, `Card`, `Button`, `Checkbox`,
+`Switch`, `ResizeHandle`, …). Input routing lives in `draw_ui` alongside layout
+and paint.
 
 ## Create & compose components
 
 Attach primitives with `add_child`; compose a subtree with `.child(..)`:
 
 ```rust
-use draw_app::{Button, Component, Flex, Label, Panel, VBox};
+use draw_widgets::{Button, Component, Flex, Label, Panel, VBox};
 use draw_scene::SceneTree;
 
 let mut tree = SceneTree::new();
@@ -94,7 +95,7 @@ tree.add_child(
 `Flex`:
 
 ```rust
-use draw_app::Flex;
+use draw_widgets::Flex;
 use draw_ui::{Align, Justify};
 
 let row = tree.add_child(
@@ -137,7 +138,7 @@ one child.
 ### Grid
 
 ```rust
-use draw_app::Grid;
+use draw_widgets::Grid;
 use draw_ui::{Align, AlignContent, GridPlacement, Track};
 
 let grid = tree.add_child(
@@ -151,7 +152,7 @@ let grid = tree.add_child(
 );
 
 // explicit cell placement via the released context id
-draw_app::update_control(&mut tree, cell, |data| {
+draw_widgets::update_control(&mut tree, cell, |data| {
     data.layout.grid = GridPlacement::new(1, 0).column_span(2);
 });
 ```
@@ -213,7 +214,7 @@ reuses a per-control cache of wrapped/clipped lines until its text, font, width,
 ```rust
 use draw_core::{EventResult, InputEvent, PointerButton};
 
-let result: EventResult = draw_app::handle_input(
+let result: EventResult = draw_ui::handle_input(
     &mut tree,
     &InputEvent::PointerDown {
         position: draw_core::Vec2::new(100.0, 100.0),
@@ -221,8 +222,8 @@ let result: EventResult = draw_app::handle_input(
     },
 );
 
-draw_app::set_on_click(&mut tree, button, || { /* ... */ }); // or Button::on_click builder
-let count = draw_app::click_count(&tree, button);
+draw_widgets::set_on_click(&mut tree, button, || { /* ... */ }); // or Button::on_click builder
+let count = draw_widgets::click_count(&tree, button);
 ```
 
 Hit testing returns the topmost control under a point, honoring `MouseFilter`
@@ -232,7 +233,7 @@ focused button. MVP does target dispatch; capture/bubble is a future extension.
 ### Drag / resize
 
 A node can own a pointer drag with `Component::on_drag` (or
-`draw_app::set_on_drag`). While held, the node captures the pointer: every
+`draw_widgets::set_on_drag`). While held, the node captures the pointer: every
 `PointerMove` is routed to it (even outside its rect) as a delta in logical
 pixels, and `PointerUp` releases it. The callback receives a `DragPhase`
 (`Start`/`Move`/`End`) plus the delta, so a component can react to the start and
@@ -264,7 +265,7 @@ For a cursor that depends on the component's own state, use
 hovered): `ResizeHandle` returns `Grabbing` while dragging and the resize cursor
 otherwise.
 
-`draw_app::hovered_cursor(&tree)` returns the hovered control's cursor (nearest
+`draw_ui::hovered_cursor(&tree)` returns the hovered control's cursor (nearest
 ancestor that set one, dynamic provider first), falling back to `Pointer` for
 anything with a click/drag callback. The cursor *value* is backend-neutral; only
 the final application is platform code: hosts map it onto winit `CursorIcon`
@@ -283,11 +284,11 @@ let list = ctx.into_draw_list();
 
 ## Extend with a custom component
 
-Implement `draw_app::Component` for your own builder and attach it with
+Implement `draw_widgets::Component` for your own builder and attach it with
 `add_child`:
 
 ```rust
-use draw_app::{Component, Flex, Spec};
+use draw_widgets::{Component, Flex, Spec};
 use draw_core::{Color, NodeId};
 use draw_scene::SceneTree;
 use draw_ui::Widget;
@@ -317,7 +318,7 @@ impl Component for Badge {
     }
 }
 
-draw_app::impl_scene_child!(Badge);
+draw_widgets::impl_scene_child!(Badge);
 ```
 
 The default `build` creates the control, installs `widget()`, and applies the

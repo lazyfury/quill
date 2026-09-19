@@ -1,17 +1,17 @@
 //! The crate-internal UI implementation namespace.
 //!
-//! `draw_ui` owns layout and paint only. Every `Control`'s drawing/layout
+//! `draw_ui` owns layout, paint and input. Every `Control`'s drawing/layout
 //! runtime — layout data and [`Widget`] — lives in the [`SceneTree`] node's
 //! extension slot ([`Control`]); the text measurer, GUI interaction state and
 //! layout cache live in the root node's [`UiRootState`]. The theme is not
 //! stored here: it is a value passed to component constructors. Application
-//! concerns (construction, input routing, backend submission) live in
-//! `draw_app`.
+//! concerns (construction, backend submission) live in `draw_widgets`.
 //!
 //! The logic is split so each file stays small:
 //!
 //! - [`layout`] — resolving absolute rectangles.
 //! - [`paint`] — emitting the backend-neutral `DrawList`.
+//! - `input` (crate root) — hit testing and the GUI input stage.
 
 mod layout;
 mod paint;

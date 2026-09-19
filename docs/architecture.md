@@ -119,7 +119,7 @@ logical size plus the world -> screen `canvas_transform`.)
 - Stage 25 — unified scene + component API [in progress]: one `SceneTree` owns
   world and UI. `draw_scene::{Viewport, Camera2D, CanvasLayer}` drive the world
   and layer UI in viewport coordinates. Components are values built with
-  `SceneTree::add_child`; every `draw_app::Component` carries a `Spec` and
+  `SceneTree::add_child`; every `draw_widgets::Component` carries a `Spec` and
   supports `.child()`/`.background()`/`.grow()` natively (no `View`/`ViewExt`
   layer). The theme is a `Copy` value passed to constructors — it is no longer
   stored on the tree; the text measurer still lives on the root.

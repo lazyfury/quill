@@ -1,9 +1,9 @@
 //! Text components.
 
-use draw_app::{Component, Spec};
 use draw_core::Color;
 use draw_theme::{TextSize, Theme, Tone};
 use draw_ui::{TextOptions, Widget};
+use draw_widgets::{Component, Spec};
 
 /// A single block of text with a semantic size and color.
 ///
@@ -129,4 +129,4 @@ impl Component for Text {
     }
 }
 
-draw_app::impl_scene_child!(Text);
+draw_widgets::impl_scene_child!(Text);

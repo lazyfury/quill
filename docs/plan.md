@@ -59,16 +59,16 @@ audited by `draw_profile`'s inspector, or it is not "done".
 - Font weights are not modeled (no weight axis yet) — add `FontWeight` tokens
   when the backends can render them.
 
-## Component layer (`draw_app` / `draw_components`)
+## Component layer (`draw_widgets` / `draw_components`)
 
 Components are the public construction API: attach with `SceneTree::add_child`,
 compose with `.child(..)`, and mutate nodes with `Component` modifiers
-(`grow`, `min_size`, `background`, `foreground`, `on_click`, …). `draw_app` owns
+(`grow`, `min_size`, `background`, `foreground`, `on_click`, …). `draw_widgets` owns
 `Component` + `Spec` and the layout primitives; `draw_components` owns the
 themed library. Remaining polish, in priority order:
 
 1. **Reactive text bindings** — add `Text::dynamic(|| …)` (a text source on
-   labels) so `update()` stops calling `draw_app::set_text`; the runtime
+   labels) so `update()` stops calling `draw_widgets::set_text`; the runtime
    re-evaluates the closure at layout/paint.
 2. **Explicit rect anchors** — allow a popover/menu to anchor to a raw `Rect` or
    pointer position (context menus), not only a laid-out `NodeId`.
@@ -99,6 +99,21 @@ free functions over the tree, and every per-control runtime value
 The layout cache, GUI interaction state and text measurer live on the root; the
 **theme is not stored on the tree**. See `docs/godot-migration.md` Phase 4.
 
+## Core hardening (design-review follow-ups)
+
+Findings from a design review of `draw_core` / `draw_render` / `draw_scene` /
+`draw_ui` / `draw_widgets`. All fixes keep the core backend-neutral; land them in
+priority order and add native tests.
+
+| # | Item | Severity | Where |
+|---|---|---|---|
+| 1 | Extension slot is **single-type**: `Node::set_data` replaces the one `Box<dyn Any>`, so storing app data on a `Control` node silently destroys its `Control` runtime, and a node cannot hold both. Make the slot type-keyed (`HashMap<TypeId, Box<dyn Any>>`) or give `Control` a dedicated field. | high | `draw_scene/src/node.rs:369`, `tree.rs:176` |
+| 2 | `SceneTree::paint` includes **every** canvas item with a `Visual`, not just `Node2D`; a `Control` with a `Visual` would be painted twice (scene + `draw_ui`). Filter by node kind / ownership. | medium | `draw_scene/src/paint.rs:66` |
+| 3 | **Resource lifecycle is not in the IR contract**: `RenderBackend` has no texture registration; each backend registers privately (e.g. Canvas `register_image`). Document it as a backend extension point, and consider a minimal `register_texture` contract. | medium | `draw_render/src/backend.rs`, `texture.rs` |
+| 4 | `DrawCommand::DrawText` owns a `String` (one allocation per text command per frame). Revisit (`Rc<str>`/interned text) only if it shows in the benchmarks. | low | `draw_render/src/command.rs` |
+| 5 | Stale docs: `draw_scene` crate doc claims it must not depend on `draw_render` (it does, by design); `Overlays` module doc/example still says it owns a `Ui` and calls `app.ui.*`. | low (docs) | `draw_scene/src/lib.rs:4`, `draw_components/src/overlay/mod.rs:1` |
+| 6 | Naming: cross-link `draw_core::ViewportSize` vs `draw_scene::Viewport` docs; clarify that the internal zero-sized `draw_ui` `Ui` namespace is not a public object. | low | `draw_core`, `draw_ui/src/ui/mod.rs` |
+
 ## Demo (`demos/demo_app`)
 
 - Light/dark toggle in the sidebar.
@@ -119,18 +134,32 @@ The layout cache, GUI interaction state and text measurer live on the root; the
 
 ## Done
 
+- Split the old `draw_app` crate into a clean consumer-facing API: the
+  **construction layer** is now `draw_widgets` (`Component`/`Spec`/`Flex`/
+  `Panel`/`Label`/`Button`/`Grid`, `impl_scene_child!`, mutation helpers), and
+  **input routing** moved into `draw_ui` (`hit_test` / `handle_input` /
+  `route_input` / `hovered` / `hovered_cursor` / `focused` / `is_interactive`),
+  next to the `ControlData` it operates on. `draw_widgets` dropped the unused
+  `draw_theme` dependency; hosts now build with `draw_widgets` and route input
+  through `draw_ui`.
+- Removed the unused `draw_app::App` runtime: it duplicated the host's frame
+  loop and its `render` never painted world (`Node2D`) visuals. Frame submission
+  now lives with the host (`draw_ui::layout`/`paint` + `draw_scene` paint ->
+  `RenderBackend`), which is what every demo already did. See the review item
+  "Core hardening".
+
 - `Line` primitive: `DrawCommand::Line { from, to, paint, width }` +
   `PaintContext::draw_line`, implemented in Canvas (`moveTo`/`lineTo`/`stroke`),
   wgpu (thin quad) and recording. `Divider`/column separators now draw a real
   line instead of a filled rect; the profiler audits line geometry.
 - Component-native composition (Stage 25): `SceneTree::add_child` is the single
-  attachment point and every `draw_app::Component` supports `.child()` and the
+  attachment point and every `draw_widgets::Component` supports `.child()` and the
   other modifiers directly. The `View`/`ViewExt`/`BuildContext`/`Modify` layer
-  was deleted; `draw_app` no longer exposes `add_*`/`mount` free functions.
+  was deleted; `draw_widgets` no longer exposes `add_*`/`mount` free functions.
   `demo_app`, `Overlays` popover content and the debug overlay use the new API.
 - Decorator-based chrome, no `Kit` (Stage 23): components attach
   `draw_ui::NodeDecor` (surface / foreground) and register clicks with
-  `draw_app::set_on_click`. A single `draw_ui::paint` / `draw_app::handle_input`
+  `draw_widgets::set_on_click`. A single `draw_ui::paint` / `draw_ui::handle_input`
   runs everything. The theme is a value passed to constructors.
 - Overlay layer (`draw_components::Overlays`): a generic floating layer with `confirm`,
   `popover`, `tips` and `message` built on a pure placement module (flip + clamp),

@@ -64,6 +64,12 @@ impl Demo {
             .set_text_measurer(Rc::new(BackendTextMeasurer { metrics }));
     }
 
+    /// Reserves extra top padding on the sidebar for a transparent title bar
+    /// (macOS traffic lights). See [`DemoApp::set_titlebar_inset`].
+    pub fn set_titlebar_inset(&mut self, inset: f32) {
+        self.app.set_titlebar_inset(inset);
+    }
+
     /// Advances the animation and updates text for the new viewport.
     ///
     /// UI layout is deliberately *not* performed here: the host times it as a

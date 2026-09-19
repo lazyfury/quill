@@ -30,12 +30,12 @@ mod placement;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use draw_app::{Component, Flex, Label};
 use draw_core::{Color, Edges, EventResult, InputEvent, Key, NodeId, Size, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
 use draw_theme::{radius, space, SurfaceLevel, TextSize, Theme, Tone};
 use draw_ui::{Align, Justify, MouseFilter};
+use draw_widgets::{Component, Flex, Label};
 
 use crate::Button;
 use draw_ui::SurfaceStyle;
@@ -392,7 +392,7 @@ impl Overlays {
     /// Call after the host's own `Ui::layout`.
     pub fn layout(&mut self, host_tree: &SceneTree, viewport: ViewportSize) {
         // Tooltips live only while their target (or a descendant) is hovered.
-        let hovered = draw_app::hovered(host_tree);
+        let hovered = draw_ui::hovered(host_tree);
         let stale: Vec<OverlayId> = self
             .entries
             .iter()
@@ -438,8 +438,8 @@ impl Overlays {
                 MARGIN,
             );
             if draw_ui::control(&self.tree, root).map(|control| control.rect) != Some(rect) {
-                draw_app::update_control(&mut self.tree, root, |d| d.anchors = Edges::ZERO);
-                draw_app::update_control(&mut self.tree, root, |d| {
+                draw_widgets::update_control(&mut self.tree, root, |d| d.anchors = Edges::ZERO);
+                draw_widgets::update_control(&mut self.tree, root, |d| {
                     d.offsets = Edges::new(rect.left(), rect.top(), rect.right(), rect.bottom())
                 });
                 moved = true;
@@ -494,7 +494,7 @@ impl Overlays {
         };
 
         if let InputEvent::PointerDown { position, .. } = event {
-            if draw_app::hit_test(&self.tree, *position).is_none() {
+            if draw_ui::hit_test(&self.tree, *position).is_none() {
                 if let Some(entry) = self
                     .entries
                     .iter()
@@ -507,7 +507,7 @@ impl Overlays {
             }
         }
 
-        let ui_result = draw_app::handle_input(&mut self.tree, event);
+        let ui_result = draw_ui::handle_input(&mut self.tree, event);
         self.process_actions();
 
         // `Ui::handle_input` reports `Handled` for every `PointerUp`, so pointer
@@ -515,8 +515,7 @@ impl Overlays {
         let consumed = match pointer {
             Some(position) => {
                 modal
-                    || (draw_app::hit_test(&self.tree, position).is_some()
-                        && ui_result.is_handled())
+                    || (draw_ui::hit_test(&self.tree, position).is_some() && ui_result.is_handled())
             }
             None => modal || ui_result.is_handled(),
         };

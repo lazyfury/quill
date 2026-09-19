@@ -52,18 +52,18 @@ draw_core            (no draw_* deps)
 draw_theme   -> draw_core
 draw_scene    -> draw_core, draw_render
 draw_ui         -> draw_core, draw_scene, draw_render
-draw_app        -> draw_core, draw_scene, draw_render, draw_ui, draw_theme
-draw_components -> draw_core, draw_app, draw_ui, draw_render, draw_theme
+draw_widgets        -> draw_core, draw_scene, draw_render, draw_ui
+draw_components -> draw_core, draw_widgets, draw_scene, draw_ui, draw_render, draw_theme
 draw_render   -> draw_core
 draw_profile  -> draw_core, draw_render
-draw_debug_ui -> draw_core, draw_scene, draw_render, draw_ui, draw_app, draw_profile
+draw_debug_ui -> draw_core, draw_scene, draw_render, draw_ui, draw_widgets, draw_profile
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core, draw_ui
 draw_bench    (std only, no draw_* deps)
-draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui, draw_app
-demo_app      -> draw_core, draw_render, draw_scene, draw_ui, draw_app,
+draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui, draw_widgets
+demo_app      -> draw_core, draw_render, draw_scene, draw_ui, draw_widgets,
                  draw_theme, draw_components   (no backend)
-component_demo -> draw_core, draw_render, draw_scene, draw_ui, draw_app, draw_wasm
+component_demo -> draw_core, draw_render, draw_scene, draw_ui, draw_widgets, draw_wasm
 web_demo      -> draw_core, draw_scene, demo_app, draw_wasm
 wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, demo_app,
                  draw_backend_wgpu, draw_profile, draw_debug_ui, winit
@@ -184,19 +184,19 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       (done), 6 `draw_game` capabilities, 7 native continuous loop, 8
       observability/tests/docs.
       **Stage 25.10/25.11 (component-native API):** `draw_scene::SceneChild` +
-      `SceneTree::add_child`; `draw_app::Component` carries a `Spec` and exposes
+      `SceneTree::add_child`; `draw_widgets::Component` carries a `Spec` and exposes
       modifiers as methods; `draw_components` components take the `Theme` as a
       `Copy` value; the theme is no longer stored on the tree.
       **Stage 25.12 (`Line` primitive):** `DrawCommand::Line { from, to, paint,
       width }` + `PaintContext::draw_line`, implemented in Canvas / wgpu /
       recording; `Divider` and column separators draw a real line.
       **Stage 25.13 (drag + resize):** `GuiState.dragging` / `Control.drag_callback`
-      with pointer capture in `draw_app::handle_input`; `Component::on_drag`
-      (`DragPhase::{Start,Move,End}` + delta) / `draw_app::set_on_drag`;
+      with pointer capture in `draw_ui::handle_input`; `Component::on_drag`
+      (`DragPhase::{Start,Move,End}` + delta) / `draw_widgets::set_on_drag`;
       `draw_components::ResizeHandle` (a divider-styled gutter that resizes a
       target pane's flex basis). `draw_core::Cursor` + `ControlData.cursor` +
       `Component::dynamic_cursor` (per-control provider) +
-      `draw_app::hovered_cursor`; hosts map it (winit `CursorIcon`, canvas CSS
+      `draw_ui::hovered_cursor`; hosts map it (winit `CursorIcon`, canvas CSS
       `cursor`). `demo_app`'s sidebar and list gutters are both draggable.
 
 ## Per-stage gate (must run)

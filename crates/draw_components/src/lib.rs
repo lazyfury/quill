@@ -1,6 +1,6 @@
-//! `draw_components` — a themed component library for `draw_app`.
+//! `draw_components` — a themed component library for `draw_widgets`.
 //!
-//! Components implement [`draw_app::Component`], receive the active [`Theme`] as
+//! Components implement [`draw_widgets::Component`], receive the active [`Theme`] as
 //! a value, and attach their chrome with the styling primitives from `draw_ui`
 //! (`SurfaceStyle`, `Tone`, a foreground/surface decorator). There is no runtime
 //! object, no theme on the tree and no second paint pass:
@@ -45,6 +45,6 @@ pub use components::{
 };
 pub use overlay::{OverlayId, Overlays, Placement};
 
-pub use draw_app::{Component, Flex, Grid, Label, Panel, Spec};
 pub use draw_render::CornerRadii;
 pub use draw_theme::{self as theme, SurfaceTone, Theme, Tone};
+pub use draw_widgets::{Component, Flex, Grid, Label, Panel, Spec};

@@ -13,10 +13,17 @@ use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
+#[cfg(target_os = "macos")]
+use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{CursorIcon, Window, WindowId};
 
-use crate::cli::Options;
+use crate::cli::{Options, TitlebarMode};
 use crate::demo::Demo;
+
+/// macOS transparent-title-bar safe area: the sidebar reserves this many logical
+/// pixels of extra top padding so its content clears the traffic lights.
+#[cfg(target_os = "macos")]
+const TITLEBAR_SAFE_AREA: f32 = 28.0;
 
 /// Runs the demo until the window is closed.
 pub fn run(options: Options) {
@@ -50,6 +57,8 @@ struct App {
     debug: DebugOverlay,
     /// Performance panel, toggled with F4 / p.
     perf: PerformanceOverlay,
+    /// Native window frame (title bar) mode chosen on the command line.
+    titlebar: TitlebarMode,
 }
 
 impl App {
@@ -82,6 +91,7 @@ impl App {
             report: InspectionReport::new(),
             debug,
             perf,
+            titlebar: options.titlebar,
         }
     }
 
@@ -90,9 +100,31 @@ impl App {
         if self.window.is_some() {
             return;
         }
-        let attributes = Window::default_attributes()
+        let mut attributes = Window::default_attributes()
             .with_title("quill — Notes")
             .with_inner_size(LogicalSize::new(1200.0, 780.0));
+        attributes = match self.titlebar {
+            // Keep the OS frame as-is.
+            TitlebarMode::Native => attributes,
+            // Remove the native title bar entirely (with the traffic lights).
+            TitlebarMode::Hidden => attributes.with_decorations(false),
+            // macOS: keep the traffic lights, drop the title bar background/text.
+            TitlebarMode::Transparent => {
+                #[cfg(target_os = "macos")]
+                {
+                    attributes
+                        .with_titlebar_transparent(true)
+                        .with_fullsize_content_view(true)
+                        .with_title_hidden(true)
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    // Transparent title bars are macOS-only; keep the native frame
+                    // (no safe area is reserved).
+                    attributes
+                }
+            }
+        };
         let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
 
         let surface = self
@@ -143,6 +175,13 @@ impl App {
             eprintln!("font setup failed, using fallback: {error}");
         }
         self.demo.set_text_metrics(backend.text_metrics());
+
+        // With a transparent macOS title bar the content fills the title-bar
+        // area, so reserve a top safe area on the sidebar for the traffic lights.
+        #[cfg(target_os = "macos")]
+        if self.titlebar == TitlebarMode::Transparent {
+            self.demo.set_titlebar_inset(TITLEBAR_SAFE_AREA);
+        }
 
         self.window = Some(window);
         self.surface = Some(surface);

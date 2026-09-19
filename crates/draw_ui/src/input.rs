@@ -1,12 +1,15 @@
 //! GUI hit testing, event dispatch and the backend-neutral input router.
 //!
-//! This is the application-side stage of the pipeline: `draw_ui` owns the
-//! control data and layout, while `draw_app` owns the interaction state and the
-//! `_input -> world -> GUI -> _unhandled_input` order.
+//! Owns the interaction stage of the pipeline over the control data and the
+//! viewport GUI state: hit testing, the `_gui_input` stage, and the
+//! `_input -> world -> GUI -> _unhandled_input` order hosts run through
+//! [`route_input`].
 
 use draw_core::{Cursor, EventResult, InputEvent, Key, NodeId, PointerButton, Vec2};
 use draw_scene::SceneTree;
-use draw_ui::{Control, MouseFilter, Widget};
+
+use crate::control::{Control, MouseFilter};
+use crate::widget::Widget;
 
 /// Controls whose parent is not itself a control (the UI roots).
 fn root_controls(tree: &SceneTree) -> Vec<NodeId> {
@@ -71,15 +74,15 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
         InputEvent::PointerMove { position } => {
             // Pointer capture: while dragging, the owning node receives every
             // move (even outside its rect) and hover is not re-evaluated.
-            if let Some(dragging) = draw_ui::gui_state_of(tree).and_then(|state| state.dragging) {
+            if let Some(dragging) = crate::gui_state_of(tree).and_then(|state| state.dragging) {
                 let delta = *position
-                    - draw_ui::gui_state_of(tree).map_or(Vec2::ZERO, |state| state.drag_last);
-                draw_ui::gui_state_mut(tree).drag_last = *position;
+                    - crate::gui_state_of(tree).map_or(Vec2::ZERO, |state| state.drag_last);
+                crate::gui_state_mut(tree).drag_last = *position;
                 if let Some(callback) = tree
                     .data::<Control>(dragging)
                     .and_then(|control| control.drag_callback.clone())
                 {
-                    (callback.borrow_mut())(tree, draw_ui::DragPhase::Move, delta);
+                    (callback.borrow_mut())(tree, crate::DragPhase::Move, delta);
                 }
                 return EventResult::Handled;
             }
@@ -104,7 +107,7 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
             // A drag handle (or an ancestor) captures the pointer on down.
             if let Some(drag) = hit.and_then(|id| nearest_with_drag(tree, id)) {
                 {
-                    let state = draw_ui::gui_state_mut(tree);
+                    let state = crate::gui_state_mut(tree);
                     state.focused = Some(drag);
                     state.dragging = Some(drag);
                     state.pressed = Some(drag);
@@ -114,13 +117,13 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
                     .data::<Control>(drag)
                     .and_then(|control| control.drag_callback.clone())
                 {
-                    (callback.borrow_mut())(tree, draw_ui::DragPhase::Start, Vec2::ZERO);
+                    (callback.borrow_mut())(tree, crate::DragPhase::Start, Vec2::ZERO);
                 }
                 return EventResult::Handled;
             }
-            draw_ui::gui_state_mut(tree).focused = hit;
+            crate::gui_state_mut(tree).focused = hit;
             if let Some(id) = hit {
-                draw_ui::gui_state_mut(tree).pressed = Some(id);
+                crate::gui_state_mut(tree).pressed = Some(id);
                 if let Some(control) = tree.data_mut::<Control>(id) {
                     if let Widget::Button(button) = &mut control.widget {
                         button.state.pressed = true;
@@ -135,20 +138,20 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
             position,
             button: PointerButton::Left,
         } => {
-            if let Some(dragging) = draw_ui::gui_state_of(tree).and_then(|state| state.dragging) {
+            if let Some(dragging) = crate::gui_state_of(tree).and_then(|state| state.dragging) {
                 if let Some(callback) = tree
                     .data::<Control>(dragging)
                     .and_then(|control| control.drag_callback.clone())
                 {
-                    (callback.borrow_mut())(tree, draw_ui::DragPhase::End, Vec2::ZERO);
+                    (callback.borrow_mut())(tree, crate::DragPhase::End, Vec2::ZERO);
                 }
-                let state = draw_ui::gui_state_mut(tree);
+                let state = crate::gui_state_mut(tree);
                 state.dragging = None;
                 state.pressed = None;
                 return EventResult::Handled;
             }
             let hit = hit_test(tree, *position);
-            let pressed = draw_ui::gui_state_of(tree).and_then(|state| state.pressed);
+            let pressed = crate::gui_state_of(tree).and_then(|state| state.pressed);
             if let Some(pressed) = pressed {
                 if let Some(control) = tree.data_mut::<Control>(pressed) {
                     if let Widget::Button(button) = &mut control.widget {
@@ -159,11 +162,11 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
                     activate(tree, pressed);
                 }
             }
-            draw_ui::gui_state_mut(tree).pressed = None;
+            crate::gui_state_mut(tree).pressed = None;
             EventResult::Handled
         }
         InputEvent::KeyDown { key } if matches!(*key, Key::Enter | Key::Space) => {
-            let focused = draw_ui::gui_state_of(tree).and_then(|state| state.focused);
+            let focused = crate::gui_state_of(tree).and_then(|state| state.focused);
             match focused {
                 Some(focused)
                     if tree
@@ -234,7 +237,7 @@ fn nearest_with_drag(tree: &SceneTree, id: NodeId) -> Option<NodeId> {
 }
 
 fn set_hover(tree: &mut SceneTree, hit: Option<NodeId>) {
-    let old = draw_ui::gui_state_of(tree).and_then(|state| state.hovered);
+    let old = crate::gui_state_of(tree).and_then(|state| state.hovered);
     if old == hit {
         return;
     }
@@ -252,14 +255,14 @@ fn set_hover(tree: &mut SceneTree, hit: Option<NodeId>) {
             }
         }
     }
-    draw_ui::gui_state_mut(tree).hovered = hit;
+    crate::gui_state_mut(tree).hovered = hit;
 }
 
 // -- queries -----------------------------------------------------------------
 
 /// The node currently under the pointer.
 pub fn hovered(tree: &SceneTree) -> Option<NodeId> {
-    draw_ui::gui_state_of(tree).and_then(|state| state.hovered)
+    crate::gui_state_of(tree).and_then(|state| state.hovered)
 }
 
 /// Cursor the host should show for the current pointer position.
@@ -307,7 +310,7 @@ pub fn hovered_is_button(tree: &SceneTree) -> bool {
 
 /// The focused node, from the viewport GUI state.
 pub fn focused(tree: &SceneTree) -> Option<NodeId> {
-    draw_ui::gui_state_of(tree).and_then(|state| state.focused)
+    crate::gui_state_of(tree).and_then(|state| state.focused)
 }
 
 /// Whether `id` or any ancestor has a click callback.

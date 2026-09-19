@@ -1,9 +1,9 @@
 //! Themed buttons.
 
-use draw_app::{Component, Label, Spec};
 use draw_core::{Color, Edges, Size};
 use draw_theme::{control, radius, TextSize, Theme};
 use draw_ui::{Align, Justify, SurfaceStyle, TextOptions, Widget};
+use draw_widgets::{Component, Label, Spec};
 
 /// Visual weight of a button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -160,4 +160,4 @@ impl Component for Button {
     }
 }
 
-draw_app::impl_scene_child!(Button);
+draw_widgets::impl_scene_child!(Button);

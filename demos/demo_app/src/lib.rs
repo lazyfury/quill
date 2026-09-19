@@ -1,5 +1,5 @@
 //! Shared, backend-neutral demo application: a three-column, macOS-style notes
-//! app built from `draw_components` components on the `draw_app` runtime.
+//! app built from `draw_components` components on the `draw_widgets` runtime.
 //!
 //! Layout is the classic macOS split view:
 //!
@@ -7,7 +7,7 @@
 //! ┌──────────┬────────────────┬──────────────────────────────┐
 //! │ sidebar  │  content list  │  detail                      │
 //! │ 220px    │  324px         │  fills the rest              │
-//! │ traffic  │  header        │  toolbar / hero / body       │
+//! │ app icon │  header        │  toolbar / hero / body       │
 //! │ nav      │  note rows     │  actions                     │
 //! └──────────┴────────────────┴──────────────────────────────┘
 //! ```
@@ -29,7 +29,6 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use draw_app::{Column, Component, Flex, Label, Panel, Row};
 use draw_components::{Badge, Button, Checkbox, Divider, Overlays, ResizeHandle, Switch, Text};
 use draw_core::{
     Color, Cursor, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize,
@@ -41,6 +40,7 @@ use draw_ui::{
     fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Justify, MouseFilter, SizeBasis,
     SurfaceStyle, TextMeasurer, TextOptions,
 };
+use draw_widgets::{Column, Component, Flex, Label, Panel, Row};
 
 /// Sidebar width in logical pixels.
 pub const SIDEBAR_WIDTH: f32 = 220.0;
@@ -48,6 +48,8 @@ pub const SIDEBAR_WIDTH: f32 = 220.0;
 pub const LIST_WIDTH: f32 = 324.0;
 /// Width of a static column separator (a real 1px line in the split view).
 pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// Top padding of the sidebar before any title-bar safe area is added.
+const SIDEBAR_PADDING_TOP: f32 = space::MD;
 /// Pointer hit area of the sidebar resize gutter.
 pub const RESIZE_GUTTER: f32 = 6.0;
 /// Bounds the sidebar can be resized to.
@@ -149,6 +151,8 @@ pub struct DemoApp {
     overlays: Overlays,
     delete_requested: Rc<Cell<bool>>,
     deleted: Rc<Cell<bool>>,
+    /// Extra top padding reserved on the sidebar to clear a transparent title bar.
+    titlebar_inset: f32,
     viewport: ViewportSize,
 }
 
@@ -242,6 +246,7 @@ impl DemoApp {
             list_width,
             delete_requested,
             deleted: Rc::new(Cell::new(false)),
+            titlebar_inset: 0.0,
             viewport: ViewportSize::new(Size::new(1100.0, 720.0)),
         }
     }
@@ -257,6 +262,30 @@ impl DemoApp {
     pub fn set_text_measurer(&mut self, measurer: Rc<dyn TextMeasurer>) {
         draw_ui::set_text_measurer(&mut self.tree, measurer.clone());
         self.overlays.set_text_measurer(measurer);
+    }
+
+    /// Reserves `inset` extra logical pixels of top padding on the **sidebar
+    /// only**, so its content clears a transparent native title bar (e.g. the
+    /// macOS traffic lights). The other panes are left untouched. Zero (the
+    /// default) means no safe area, which is what browser/WASM hosts want.
+    pub fn set_titlebar_inset(&mut self, inset: f32) {
+        let inset = inset.max(0.0);
+        if (self.titlebar_inset - inset).abs() <= f32::EPSILON {
+            return;
+        }
+        self.titlebar_inset = inset;
+        if let Some(control) = draw_widgets::control_mut(&mut self.tree, self.sidebar) {
+            if let draw_ui::Widget::Flex(flex) = &mut control.widget {
+                flex.padding.top = SIDEBAR_PADDING_TOP + inset;
+            }
+        }
+        draw_ui::mark_dirty(&mut self.tree, self.sidebar);
+    }
+
+    /// Extra top padding currently reserved on the sidebar (0 unless a
+    /// transparent title bar requested a safe area).
+    pub fn titlebar_inset(&self) -> f32 {
+        self.titlebar_inset
     }
 
     pub fn overlays(&self) -> &Overlays {
@@ -356,10 +385,10 @@ impl DemoApp {
 
         let index = self.selected.get().min(NOTES.len() - 1);
         let note = &NOTES[index];
-        draw_app::set_text(&mut self.tree, self.detail_title, note.title);
-        draw_app::set_text(&mut self.tree, self.detail_body, note.body);
-        draw_app::set_text(&mut self.tree, self.detail_tag, note.tag);
-        draw_app::set_text(
+        draw_widgets::set_text(&mut self.tree, self.detail_title, note.title);
+        draw_widgets::set_text(&mut self.tree, self.detail_body, note.body);
+        draw_widgets::set_text(&mut self.tree, self.detail_tag, note.tag);
+        draw_widgets::set_text(
             &mut self.tree,
             self.detail_meta,
             format!("Edited {} · {}", note.modified, note.tag),
@@ -393,7 +422,7 @@ impl DemoApp {
         if self.overlays.handle_input(event).is_handled() {
             return EventResult::Handled;
         }
-        draw_app::route_input(&mut self.tree, event)
+        draw_ui::route_input(&mut self.tree, event)
     }
 
     /// Controls in the demo UI.
@@ -404,12 +433,12 @@ impl DemoApp {
     /// Whether the pointer is over anything clickable (a themed component or
     /// core button). Hosts use this for cursor feedback.
     pub fn pointer_over_clickable(&self) -> bool {
-        draw_app::hovered(&self.tree).is_some_and(|id| draw_app::is_interactive(&self.tree, id))
+        draw_ui::hovered(&self.tree).is_some_and(|id| draw_ui::is_interactive(&self.tree, id))
     }
 
     /// Cursor the host should show for the current pointer position.
     pub fn cursor(&self) -> Cursor {
-        draw_app::hovered_cursor(&self.tree)
+        draw_ui::hovered_cursor(&self.tree)
     }
 }
 
@@ -500,36 +529,15 @@ fn build_sidebar(
         root,
         Column::new()
             .gap(space::MD)
-            .padding(Edges::new(space::LG, space::MD, space::MD, space::MD))
+            .padding(Edges::new(
+                space::LG,
+                SIDEBAR_PADDING_TOP,
+                space::MD,
+                space::MD,
+            ))
             .basis(SizeBasis::Px(width.get()))
             .shrink(0.0)
             .surface(SurfaceStyle::new(theme.palette.surface)),
-    );
-
-    tree.add_child(
-        sidebar,
-        Row::new()
-            .gap(space::XS)
-            .min_size(0.0, 12.0)
-            .foreground(move |ctx, rect, _| {
-                let radius = 5.0;
-                let step = radius * 2.0 + 6.0;
-                let y = rect.center().y;
-                for (index, color) in [
-                    theme.palette.error,
-                    theme.palette.warning,
-                    theme.palette.success,
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    ctx.fill_circle(
-                        Vec2::new(rect.left() + radius + index as f32 * step, y),
-                        radius,
-                        color,
-                    );
-                }
-            }),
     );
 
     tree.add_child(
@@ -902,6 +910,40 @@ mod tests {
                 "row {item:?} escapes list {list:?}"
             );
         }
+    }
+
+    #[test]
+    fn titlebar_inset_pads_the_sidebar_only() {
+        let mut app = laid_out(1100.0, 720.0);
+        assert_eq!(app.titlebar_inset(), 0.0);
+
+        let list_row = app.list_rows()[0];
+        let list_top_before = rect(&app, list_row).top();
+
+        app.set_titlebar_inset(28.0);
+        app.layout(app.viewport());
+        assert_eq!(app.titlebar_inset(), 28.0);
+
+        // The sidebar's own padding grew by the safe area...
+        let draw_ui::Widget::Flex(flex) =
+            draw_ui::widget(app.tree(), app.sidebar()).expect("sidebar")
+        else {
+            panic!("sidebar is a flex container");
+        };
+        assert!((flex.padding.top - (space::MD + 28.0)).abs() < 1e-3);
+
+        // ...while the other panes keep their top edge.
+        assert!((rect(&app, list_row).top() - list_top_before).abs() < 1e-3);
+
+        // Setting it to zero again restores the base padding.
+        app.set_titlebar_inset(0.0);
+        app.layout(app.viewport());
+        let draw_ui::Widget::Flex(flex) =
+            draw_ui::widget(app.tree(), app.sidebar()).expect("sidebar")
+        else {
+            panic!("sidebar is a flex container");
+        };
+        assert!((flex.padding.top - space::MD).abs() < 1e-3);
     }
 
     #[test]
