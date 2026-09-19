@@ -1,6 +1,6 @@
 use super::*;
-use crate::node::NodeKind;
-use draw_core::Vec2;
+use crate::node::{AnchorMode, CanvasLayerData, NodeKind};
+use draw_core::{Transform2D, Vec2};
 use std::f32::consts::FRAC_PI_2;
 
 const EPS: f32 = 1e-5;
@@ -20,7 +20,8 @@ fn root_and_children() {
     let mut tree = SceneTree::new();
     let root = tree.root();
     assert_eq!(tree.node(root).name(), "root");
-    assert_eq!(tree.node(root).kind(), NodeKind::Node);
+    assert_eq!(tree.node(root).kind(), NodeKind::Viewport);
+    assert!(tree.node(root).viewport().is_some());
     assert!(!tree.node(root).is_canvas_item());
     assert_eq!(tree.node_count(), 1);
 
@@ -218,5 +219,409 @@ fn reparent_moves_subtree_and_rejects_cycles() {
     assert!(approx(
         tree.world_transform(child).unwrap().origin,
         Vec2::new(8.0, 0.0)
+    ));
+}
+
+// -- Stage 25.1 (Phase 1): extension slot + canvas layers + cameras --------
+
+#[derive(Debug, PartialEq)]
+struct Counter(u32);
+
+#[derive(Debug, PartialEq)]
+struct Label(String);
+
+#[test]
+fn node_data_slot_round_trips_and_type_checks() {
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+    let a = tree.add_node(root, "A");
+
+    assert!(!tree.node(a).has_data::<Counter>());
+    assert_eq!(tree.node(a).data::<Counter>(), None);
+    assert_eq!(tree.node_mut(a).data_mut::<Counter>(), None);
+    assert_eq!(tree.node_mut(a).take_data::<Counter>(), None);
+
+    tree.node_mut(a).set_data(Counter(3));
+    assert!(tree.node(a).has_data::<Counter>());
+    assert!(!tree.node(a).has_data::<Label>());
+    assert_eq!(tree.node(a).data::<Counter>(), Some(&Counter(3)));
+    // Wrong-type downcast is a `None`, not a panic.
+    assert_eq!(tree.node(a).data::<Label>(), None);
+
+    tree.node_mut(a).data_mut::<Counter>().unwrap().0 = 9;
+    assert_eq!(tree.node(a).data::<Counter>(), Some(&Counter(9)));
+
+    let taken = tree.node_mut(a).take_data::<Counter>();
+    assert_eq!(taken, Some(Counter(9)));
+    assert!(!tree.node(a).has_data::<Counter>());
+}
+
+#[test]
+fn node_data_is_independent_per_node() {
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+    let a = tree.add_node(root, "A");
+    let b = tree.add_node(root, "B");
+
+    tree.node_mut(a).set_data(Counter(1));
+    tree.node_mut(b).set_data(Label("b".into()));
+
+    assert_eq!(tree.node(a).data::<Counter>(), Some(&Counter(1)));
+    assert!(!tree.node(a).has_data::<Label>());
+    assert_eq!(tree.node(b).data::<Label>().unwrap().0, "b");
+    assert!(!tree.node(b).has_data::<Counter>());
+
+    // Setting overwrites the previous value regardless of its type.
+    tree.node_mut(a).set_data(Label("a".into()));
+    assert!(!tree.node(a).has_data::<Counter>());
+    assert!(tree.node(a).has_data::<Label>());
+
+    tree.node_mut(a).clear_data();
+    assert!(!tree.node(a).has_data::<Label>());
+    assert!(tree.node(b).has_data::<Label>());
+}
+
+#[test]
+fn add_canvas_layer_and_camera_kinds() {
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+
+    let layer = tree.add_canvas_layer(root, "Layer");
+    assert_eq!(tree.node(layer).kind(), NodeKind::CanvasLayer);
+    // A CanvasLayer is not a canvas item; its children are.
+    assert!(!tree.node(layer).is_canvas_item());
+    assert_eq!(
+        tree.node(layer).canvas_layer(),
+        Some(&CanvasLayerData::default())
+    );
+    assert_eq!(tree.node(layer).camera_2d(), None);
+    assert_eq!(tree.canvas_layer_data(layer).unwrap().layer, 1);
+
+    let camera = tree.add_camera_2d(root, "Camera");
+    assert_eq!(tree.node(camera).kind(), NodeKind::Camera2D);
+    // Camera2D implies a canvas item (it has a local transform).
+    assert!(tree.node(camera).is_canvas_item());
+    assert_eq!(tree.node(camera).camera_2d().unwrap().zoom, Vec2::ONE);
+    assert_eq!(tree.node(camera).canvas_layer(), None);
+
+    let plain = tree.add_node(root, "Plain");
+    assert_eq!(tree.canvas_layer_data(plain), None);
+    assert_eq!(tree.camera_2d_data(plain), None);
+}
+
+#[test]
+fn canvas_layer_setters() {
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+    let layer = tree.add_canvas_layer(root, "Layer");
+
+    assert!(tree.set_canvas_layer(layer, 7));
+    assert!(tree.set_canvas_layer_follow_viewport(layer, true));
+    let xform = Transform2D::from_translation(Vec2::new(3.0, 4.0));
+    assert!(tree.set_canvas_layer_transform(layer, xform));
+    let data = tree.canvas_layer_data(layer).unwrap();
+    assert_eq!(data.layer, 7);
+    assert!(data.follow_viewport);
+    assert_eq!(data.transform, xform);
+
+    // Non-layer nodes reject layer setters.
+    let world = tree.add_node2d(root, "World");
+    assert!(!tree.set_canvas_layer(world, 2));
+    assert!(!tree.set_canvas_layer_transform(world, xform));
+    assert!(!tree.set_canvas_layer_follow_viewport(world, true));
+}
+
+#[test]
+fn camera_setters() {
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+    let camera = tree.add_camera_2d(root, "Camera");
+
+    assert!(tree.set_camera_current(camera, true));
+    assert!(tree.set_camera_enabled(camera, false));
+    assert!(tree.set_camera_zoom(camera, Vec2::new(2.0, 2.0)));
+    assert!(tree.set_camera_offset(camera, Vec2::new(1.0, -1.0)));
+    let data = tree.camera_2d_data(camera).unwrap();
+    assert!(data.current);
+    assert!(!data.enabled);
+    assert_eq!(data.zoom, Vec2::new(2.0, 2.0));
+    assert_eq!(data.offset, Vec2::new(1.0, -1.0));
+
+    let plain = tree.add_node(root, "Plain");
+    assert!(!tree.set_camera_current(plain, true));
+    assert!(!tree.set_camera_enabled(plain, true));
+    assert!(!tree.set_camera_zoom(plain, Vec2::ONE));
+    assert!(!tree.set_camera_offset(plain, Vec2::ZERO));
+}
+
+#[test]
+fn canvas_layer_of_resolves_nearest_ancestor() {
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+    let world = tree.add_node2d(root, "World");
+
+    // No layer anywhere: default world canvas.
+    assert_eq!(tree.canvas_layer_of(world), None);
+    assert_eq!(tree.canvas_layer_of(root), None);
+
+    let outer = tree.add_canvas_layer(root, "Outer");
+    assert_eq!(tree.canvas_layer_of(outer), None);
+
+    let inner = tree.add_canvas_layer(outer, "Inner");
+    tree.set_canvas_layer(outer, 10);
+    tree.set_canvas_layer(inner, 20);
+
+    let ui = tree.add_control(inner, "Ui");
+    let plain = tree.add_node(inner, "Plain");
+    let deep = tree.add_node2d(plain, "Deep");
+
+    // Nearest ancestor wins, even through non-canvas intermediaries.
+    assert_eq!(tree.canvas_layer_of(ui).unwrap().0, inner);
+    assert_eq!(tree.canvas_layer_of(deep).unwrap().0, inner);
+    assert_eq!(tree.canvas_layer_of(deep).unwrap().1.layer, 20);
+    assert_eq!(tree.canvas_layer_of(plain).unwrap().0, inner);
+
+    // The layer node itself is not affected by itself.
+    assert_eq!(tree.canvas_layer_of(inner).unwrap().0, outer);
+    assert_eq!(tree.canvas_layer_of(inner).unwrap().1.layer, 10);
+}
+
+#[test]
+fn canvas_layer_of_survives_reparent() {
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+    let layer = tree.add_canvas_layer(root, "Layer");
+    let world = tree.add_node2d(root, "World");
+    let node = tree.add_node2d(world, "Node");
+
+    assert_eq!(tree.canvas_layer_of(node), None);
+    assert!(tree.reparent(node, layer));
+    assert_eq!(tree.canvas_layer_of(node).unwrap().0, layer);
+    assert!(tree.reparent(node, world));
+    assert_eq!(tree.canvas_layer_of(node), None);
+}
+
+#[test]
+fn canvas_layer_default_transform_is_identity() {
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+    let layer = tree.add_canvas_layer(root, "Layer");
+    let data = tree.canvas_layer_data(layer).unwrap();
+    assert_eq!(data.transform, Transform2D::IDENTITY);
+}
+
+// -- Stage 25.2 (Phase 2): viewport + camera + view transforms -------------
+
+fn camera_scene(size: Vec2, camera_pos: Vec2) -> (SceneTree, NodeId) {
+    let mut tree = SceneTree::new();
+    tree.set_viewport_size(draw_core::Size::new(size.x, size.y));
+    let root = tree.root();
+    let camera = tree.add_camera_2d(root, "Camera");
+    tree.set_camera_current(camera, true);
+    tree.set_position(camera, camera_pos);
+    tree.update();
+    (tree, camera)
+}
+
+#[test]
+fn no_camera_leaves_identity_transform() {
+    let mut tree = SceneTree::new();
+    tree.set_viewport_size(draw_core::Size::new(100.0, 100.0));
+    tree.update();
+    assert_eq!(tree.canvas_transform(), Transform2D::IDENTITY);
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(3.0, 4.0)),
+        Vec2::new(3.0, 4.0)
+    ));
+    assert!(approx(
+        tree.screen_to_world(Vec2::new(3.0, 4.0)),
+        Vec2::new(3.0, 4.0)
+    ));
+}
+
+#[test]
+fn current_camera_centers_on_its_position() {
+    // 100x100 viewport, camera centered at world (50,50).
+    let (mut tree, camera) = camera_scene(Vec2::new(100.0, 100.0), Vec2::new(50.0, 50.0));
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(50.0, 50.0)),
+        Vec2::new(50.0, 50.0)
+    ));
+    // Camera moves +10 in x: the world point tracks the camera so it stays
+    // centered; a fixed world point shifts -10 on screen.
+    tree.set_position(camera, Vec2::new(60.0, 50.0));
+    tree.update();
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(60.0, 50.0)),
+        Vec2::new(50.0, 50.0)
+    ));
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(50.0, 50.0)),
+        Vec2::new(40.0, 50.0)
+    ));
+}
+
+#[test]
+fn camera_zoom_scales_around_center() {
+    let mut tree = SceneTree::new();
+    tree.set_viewport_size(draw_core::Size::new(100.0, 100.0));
+    let root = tree.root();
+    let camera = tree.add_camera_2d(root, "Camera");
+    tree.set_camera_current(camera, true);
+    tree.set_position(camera, Vec2::new(50.0, 50.0));
+    tree.set_camera_zoom(camera, Vec2::new(2.0, 2.0));
+    tree.update();
+
+    // Center maps to center; 25 world units away maps 50 screen units away.
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(50.0, 50.0)),
+        Vec2::new(50.0, 50.0)
+    ));
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(75.0, 50.0)),
+        Vec2::new(100.0, 50.0)
+    ));
+}
+
+#[test]
+fn camera_anchor_fixed_top_left() {
+    let mut tree = SceneTree::new();
+    tree.set_viewport_size(draw_core::Size::new(100.0, 100.0));
+    let root = tree.root();
+    let camera = tree.add_camera_2d(root, "Camera");
+    tree.set_camera_current(camera, true);
+    tree.set_position(camera, Vec2::new(10.0, 20.0));
+    tree.set_camera_anchor_mode(camera, AnchorMode::FixedTopLeft);
+    tree.update();
+
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(10.0, 20.0)),
+        Vec2::new(0.0, 0.0)
+    ));
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(20.0, 30.0)),
+        Vec2::new(10.0, 10.0)
+    ));
+}
+
+#[test]
+fn camera_offset_shifts_the_view() {
+    let mut tree = SceneTree::new();
+    tree.set_viewport_size(draw_core::Size::new(100.0, 100.0));
+    let root = tree.root();
+    let camera = tree.add_camera_2d(root, "Camera");
+    tree.set_camera_current(camera, true);
+    tree.set_position(camera, Vec2::new(50.0, 50.0));
+    tree.set_camera_offset(camera, Vec2::new(5.0, 0.0));
+    tree.update();
+    // Offset shifts the camera's screen rect: world center lands at 50 - 5.
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(50.0, 50.0)),
+        Vec2::new(45.0, 50.0)
+    ));
+}
+
+#[test]
+fn disabled_or_non_current_cameras_are_ignored() {
+    let mut tree = SceneTree::new();
+    tree.set_viewport_size(draw_core::Size::new(100.0, 100.0));
+    let root = tree.root();
+    let camera = tree.add_camera_2d(root, "Camera");
+    tree.set_position(camera, Vec2::new(50.0, 50.0));
+    tree.set_camera_current(camera, true);
+    tree.set_camera_enabled(camera, false);
+    tree.update();
+    assert_eq!(tree.canvas_transform(), Transform2D::IDENTITY);
+
+    tree.set_camera_enabled(camera, true);
+    tree.set_camera_current(camera, false);
+    tree.update();
+    assert_eq!(tree.canvas_transform(), Transform2D::IDENTITY);
+}
+
+#[test]
+fn screen_to_world_inverts_world_to_screen() {
+    let (tree, _) = camera_scene(Vec2::new(128.0, 96.0), Vec2::new(40.0, -10.0));
+    let world = Vec2::new(123.0, 45.0);
+    let screen = tree.world_to_screen(world);
+    assert!(approx(tree.screen_to_world(screen), world));
+    assert_eq!(tree.viewport().size(), draw_core::Size::new(128.0, 96.0));
+}
+
+#[test]
+fn viewport_transform_composes_camera_and_world() {
+    let mut tree = SceneTree::new();
+    tree.set_viewport_size(draw_core::Size::new(100.0, 100.0));
+    let root = tree.root();
+    // Camera at (10,10) with the default drag-center anchor.
+    let camera = tree.add_camera_2d(root, "Camera");
+    tree.set_camera_current(camera, true);
+    tree.set_position(camera, Vec2::new(10.0, 10.0));
+    let node = tree.add_node2d(root, "Node");
+    tree.set_position(node, Vec2::new(5.0, 5.0));
+    tree.update();
+
+    // canvas_transform = translate(50 - 10) = +40; world (5,5) -> screen (45,45).
+    assert!(approx(
+        tree.viewport_transform(node).unwrap().origin,
+        Vec2::new(45.0, 45.0)
+    ));
+}
+
+#[test]
+fn canvas_transforms_are_layer_aware() {
+    let mut tree = SceneTree::new();
+    tree.set_viewport_size(draw_core::Size::new(100.0, 100.0));
+    let root = tree.root();
+    // Camera at (0,0) drag-center => canvas_transform = translate(50, 50).
+    let camera = tree.add_camera_2d(root, "Camera");
+    tree.set_camera_current(camera, true);
+    tree.set_position(camera, Vec2::new(0.0, 0.0));
+
+    let world = tree.add_node2d(root, "World");
+    let layer = tree.add_canvas_layer(root, "Ui");
+    let layer_transform = Transform2D::from_translation(Vec2::new(7.0, -3.0));
+    tree.set_canvas_layer_transform(layer, layer_transform);
+    let ui = tree.add_node2d(layer, "UiNode");
+    tree.set_position(ui, Vec2::new(1.0, 2.0));
+    tree.update();
+
+    // Default canvas uses the camera transform.
+    assert!(approx(
+        tree.canvas_transform_of(world).origin,
+        Vec2::new(50.0, 50.0)
+    ));
+    // A layer ignores the camera unless follow_viewport is set.
+    assert_eq!(tree.canvas_transform_of(ui), layer_transform);
+    assert!(approx(
+        tree.viewport_transform(ui).unwrap().origin,
+        Vec2::new(8.0, -1.0)
+    ));
+
+    // follow_viewport composes camera * layer after the camera changes.
+    tree.set_canvas_layer_follow_viewport(layer, true);
+    tree.update();
+    let expected = tree.canvas_transform() * layer_transform;
+    assert_eq!(tree.canvas_transform_of(ui), expected);
+}
+
+#[test]
+fn camera_zigzag_transform_updates_each_frame() {
+    let (mut tree, camera) = camera_scene(Vec2::new(200.0, 100.0), Vec2::new(100.0, 50.0));
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(100.0, 50.0)),
+        Vec2::new(100.0, 50.0)
+    ));
+    tree.set_position(camera, Vec2::new(0.0, 0.0));
+    tree.update();
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(0.0, 0.0)),
+        Vec2::new(100.0, 50.0)
+    ));
+    tree.set_position(camera, Vec2::new(200.0, 100.0));
+    tree.update();
+    assert!(approx(
+        tree.world_to_screen(Vec2::new(200.0, 100.0)),
+        Vec2::new(100.0, 50.0)
     ));
 }

@@ -8,7 +8,7 @@
 
 use core::convert::Infallible;
 
-use draw_core::Viewport;
+use draw_core::ViewportSize;
 use draw_render::{DrawList, RenderBackend};
 
 /// Counts submitted commands and frames, retaining nothing.
@@ -37,7 +37,7 @@ impl SinkBackend {
 impl RenderBackend for SinkBackend {
     type Error = Infallible;
 
-    fn begin_frame(&mut self, _viewport: Viewport) -> Result<(), Infallible> {
+    fn begin_frame(&mut self, _viewport: ViewportSize) -> Result<(), Infallible> {
         self.commands = 0;
         Ok(())
     }

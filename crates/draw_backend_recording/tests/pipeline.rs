@@ -1,7 +1,7 @@
 //! End-to-end headless pipeline test: `Scene -> DrawList -> RecordingBackend`.
 
 use draw_backend_recording::{CommandAsserts, RecordingBackend};
-use draw_core::{Color, Size, Transform2D, Vec2, Viewport};
+use draw_core::{Color, Size, Transform2D, Vec2, ViewportSize};
 use draw_render::{DrawCommand, Paint, PaintContext, RenderBackend};
 use draw_scene::{SceneTree, Visual};
 
@@ -42,7 +42,7 @@ fn scene_to_recording_backend_pipeline() {
     ) * Transform2D::from_translation(Vec2::new(5.0, 0.0));
 
     let mut backend = RecordingBackend::new();
-    let viewport = Viewport::new(Size::new(800.0, 600.0));
+    let viewport = ViewportSize::new(Size::new(800.0, 600.0));
     backend.begin_frame(viewport).unwrap();
     backend.submit(&list).unwrap();
     backend.end_frame().unwrap();
@@ -70,9 +70,9 @@ fn scene_to_recording_backend_pipeline() {
 fn visibility_gates_recording_across_frames() {
     let mut tree = build_scene();
     let mut backend = RecordingBackend::new();
-    let viewport = Viewport::new(Size::new(100.0, 100.0));
+    let viewport = ViewportSize::new(Size::new(100.0, 100.0));
 
-    // frame 0: visible, 1 circle emitted
+    // frame 0: visible; one item emits Save + SetTransform + Fill + Restore.
     let mut ctx = PaintContext::new();
     tree.paint(&mut ctx);
     backend.begin_frame(viewport).unwrap();

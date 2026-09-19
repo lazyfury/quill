@@ -35,8 +35,10 @@ only at the backend/WASM edge and never enters core business logic.
 
 Finalized conventions (Stage 1): origin top-left, `+X` right, `+Y` down,
 rotations in radians (positive from `+X` toward `+Y`), rectangles axis-aligned
-with half-open membership `[min, max)`. `Viewport` stores logical size only;
-`Viewport::device_size(scale)` derives device pixels without storing DPR.
+with half-open membership `[min, max)`. `ViewportSize` stores logical size
+only; `ViewportSize::device_size(scale)` derives device pixels without storing
+DPR. (The scene-level `draw_scene::Viewport` is a separate render context:
+logical size plus the world -> screen `canvas_transform`.)
 
 ## Implementation stages
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use draw_backend_wgpu::{wgpu, FontConfig, FontMode, WgpuBackend};
-use draw_core::{InputEvent, Key, PointerButton, Size, Vec2, Viewport};
+use draw_core::{InputEvent, Key, PointerButton, Size, Vec2, ViewportSize};
 use draw_debug_ui::{DebugOverlay, PerformanceOverlay};
 use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Profiler, StageTimes};
 use draw_render::{PaintContext, RenderBackend};
@@ -246,7 +246,7 @@ impl App {
             config.width as f32 / self.scale_factor as f32,
             config.height as f32 / self.scale_factor as f32,
         );
-        let viewport = Viewport::new(logical);
+        let viewport = ViewportSize::new(logical);
 
         // -- timed pipeline phases ----------------------------------------
         let frame_start = Instant::now();
@@ -265,7 +265,7 @@ impl App {
         let mut ctx = PaintContext::new();
         self.demo.paint(&mut ctx);
         // 1) component debug bounds, drawn on top of the app UI.
-        self.debug.paint(self.demo.ui(), &mut ctx);
+        self.debug.paint(self.demo.tree(), &mut ctx);
         // 2) performance panel, drawn last so it stays readable.
         self.perf.update(&self.profiler, &self.report, viewport);
         self.perf.paint(&mut ctx);

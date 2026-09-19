@@ -1,6 +1,6 @@
 # Godot-style migration
 
-Status: **Stage 25 — planning approved, implementation not started.**
+Status: **Stage 25.9 (Phase 4g) complete — Phase 6 next.**
 
 Goal: turn quill from "a UI toolkit that also has a scene tree" into a
 **2D-first scene engine** modeled on Godot, where a single `SceneTree` owns both
@@ -76,7 +76,7 @@ engine data.
 Open design point: `Node` is currently `Clone`. A `Box<dyn Any>` needs a clone
 strategy (`Rc`/`Arc`) or dropping `Clone`. Decide before coding.
 
-### Phase 2 — `Viewport` + `Camera2D` + view transforms
+### Phase 2 — `Viewport` + `Camera2D` + view transforms (DONE, Stage 25.2)
 
 - Logical `Viewport`: `size`, `canvas_transform`, input-routing entry.
 - `Camera2D`: `current`, `zoom`, `offset`, `anchor_mode` (limits / smoothing
@@ -88,7 +88,16 @@ strategy (`Rc`/`Arc`) or dropping `Clone`. Decide before coding.
 - `SceneTree::paint` emits `Save -> SetTransform(canvas_transform * world) -> ...`.
 - Exit: headless tests for follow, zoom, coordinate round-trips.
 
-### Phase 3 — `CanvasLayer` + layered painting
+Landed as `draw_scene::{Viewport, Camera2DData, AnchorMode}`, the tree root is
+now `NodeKind::Viewport` (name `root`, Godot `RootViewport`), and
+`draw_core::Viewport` was renamed to `draw_core::ViewportSize`. Camera math is a
+direct port of the transform-relevant part of Godot
+`Camera2D::get_camera_transform` (no limits / drag / rotation / smoothing):
+`zoom_scale = 1/zoom`, `screen_offset = center ? size/2 * zoom_scale : 0`,
+`canvas_transform = affine_inverse(scale(zoom_scale) with origin camera_pos -
+ screen_offset + offset)`.
+
+### Phase 3 — `CanvasLayer` + layered painting (DONE, Stage 25.3)
 
 - `CanvasLayer { layer: i32, transform: Transform2D, follow_viewport: bool }`.
 - On traversal, pick the effective transform per item: default canvas uses
@@ -99,11 +108,22 @@ strategy (`Rc`/`Arc`) or dropping `Clone`. Decide before coding.
 - Exit: moving the camera changes world commands but **not** the UI command
   sequence (golden test).
 
+Landed: `SceneTree::canvas_transform_of` implements Godot
+`CanvasItem::get_canvas_transform` (nearest `CanvasLayer` final transform, else
+the root viewport transform); `canvas_layer_final_transform` implements Godot
+`CanvasLayer::get_final_transform` (`follow_viewport` composes the camera, scale
+not modeled yet); `viewport_transform` is layer-aware. `SceneTree::paint` now
+batches visible canvas items into layer groups sorted ascending by `layer`
+(stable for ties), emitting `Save -> SetTransform(group) -> [per item:
+Save -> SetTransform(effective * world) -> draw -> Restore] -> Restore`. The
+golden test `canvas_layer_ignores_camera` asserts moving the camera changes the
+world SetTransforms but leaves the UI group's transforms identical.
+
 ### Phase 4 — `Control` into the single tree + viewport-coordinate layout
 
 This is the largest refactor; split it.
 
-- **4a** — `draw_ui` stops owning a `SceneTree`; it borrows one.
+- **4a** — `draw_ui` stops owning a `SceneTree`; it borrows one. **(DONE, Stage 25.4a)**
   ```rust
   impl Ui {
       pub fn mount(&mut self, tree: &mut SceneTree, parent: NodeId, view: impl View);
@@ -114,14 +134,81 @@ This is the largest refactor; split it.
   ```
   `Ui` keeps only the environment: `Theme`, `TextMeasurer`, hover/pressed/focus,
   caches.
+
+  Landed: `Ui` no longer owns a tree. It keeps the environment, the per-control
+  layout data (`ControlData`/`Widget`), interaction state and caches, plus a
+  cached `parent_of`/`children_of` index so property setters and interaction
+  state stay tree-free. All build and traversal entry points take the tree:
+  `add_*`/`insert`, `mount`, `layout`, `paint`, `paint_debug`, `hit_test`,
+  `handle_input`. `Component::mount(self, ui, tree, parent)`, `BuildContext`
+  carries `&mut Ui` + `&mut SceneTree`, and `ViewExt`/`Modify` thread both.
+  
+  Compatibility: `UiHost` owns a `SceneTree` + root control and re-exposes the
+  old convenience API; `draw_components`' `Overlays`, `draw_debug_ui` and the
+  demos use it (pending 4c). `Ui::layout` takes `&SceneTree` + `ViewportSize`
+  (the tree identifies UI roots; the viewport rect is the layer rect) rather
+  than `Rect`.
+
 - **4b** — move `ControlData` onto the `Node` extension slot; keep
   `draw_components` / `ViewExt` / `Overlays` compiling with the new signatures.
-- **4c** — migrate `demo_app`, `web_demo`, `component_demo`, `wgpu_demo`.
-- Retain a compatibility layer (`Ui::new()` owning a tree) during 4a-4c.
-- Exit: existing `draw_ui` / `demo_app` tests pass under the new signatures; UI
-  and `Node2D` coexist in one tree.
+  **(DONE, Stage 25.4b)**
 
-### Phase 5 — unified lifecycle and input routing
+  `ControlData` now lives in the node's generic `data` slot (`Node::set_data` /
+  `data::<ControlData>`), the first real engine type to use the Phase 1
+  extension point. `Ui::register_control` writes it on insert, `set_*` mutate it
+  in place (`with_control`), and `control`/`paint`/`input` read it from the tree.
+  `Ui` keeps only `widgets`/`callbacks`/`decorations` plus the `parent_of` /
+  `children_of` structural index. `Ui::layout` takes `&mut SceneTree` (it writes
+  resolved rects back) and uses a transient scratch copy of each control's data
+  for the measure/arrange pass, then writes the result back to the slots.
+
+  **Extended (Stage 25.6, Phase 4d):** the remaining per-node state moved onto
+  the tree too. `ControlData` + `Widget` + click callback + decorations +
+  `layout_dirty` now form one `draw_ui::Control` bundle stored in the node's
+  extension slot; pointer hover/press/focus ownership lives in a `GuiState` on
+  the root node. `Ui` retains only the environment (theme, text measurer) and
+  layout caches (`order_cache`/`text_cache`/`measure_cache` + validity
+  counters), with no per-node `HashMap`s, no interaction pointers and no dirty
+  set. `draw_ui` still has no state that `draw_scene` would need to know about —
+  the tree is the single source of truth.
+
+  **Finalized (Stage 25.7, Phase 4e):** the layout cache and pass counters
+  (`valid`/`viewport`/`count`/`last_arranged` + the order/text/measure maps)
+  moved into a `LayoutCache` behind a `RefCell` inside a `UiRootState` on the
+  root node. `Ui` is now exactly `{ theme, text_measurer }` — a pure
+  environment. One `Ui` can therefore drive more than one tree, and the tree
+  owns all UI state.
+
+  **Zero-sized (Stage 25.8, Phase 4f):** `theme` and `text_measurer` joined
+  `UiRootState` too, so `Ui` is now a zero-sized API handle (`pub struct Ui;`)
+  and the root node owns *all* UI state. `ui.theme(tree)` /
+  `ui.set_theme(tree, …)` and `ui.set_text_measurer(tree, …)` read and write the
+  root state; layout/paint read the measurer from there. No globals/singletons
+  are used, and one environment handle can drive several trees.
+
+  **Free functions (Stage 25.9, Phase 4g):** the `Ui` / `UiHost` types were
+  removed entirely. `draw_ui` now exposes free functions over the tree
+  (`ui::add_label(&mut tree, …)`, `ui::layout(&mut tree, vp)`,
+  `ui::paint(&tree, ctx)`, `ui::route_input(&mut tree, ev)`, …); `Component::mount`
+  and `BuildContext` carry only the tree, and demos hold just a `SceneTree`.
+  `docs/` examples use this style.
+- **4c** — migrate `demo_app`, `web_demo`, `component_demo`, `wgpu_demo` to the
+  borrowed API (the demos currently use the `UiHost` compatibility host).
+  **(DONE, Stage 25.4c)**
+
+  `DemoApp` now owns a `SceneTree` + borrowed `Ui`; the `wgpu_demo` and
+  `web_demo` hosts drive it through `ui()`/`tree()`. `component_demo` uses
+  **one** tree for the rotated `Node2D` and the UI panel (the Phase 4 exit
+  demonstration). `Overlays::layout` took the borrowed host (`&Ui` +
+  `&SceneTree`); `DebugOverlay::paint` takes `&Ui` + `&SceneTree`. `UiHost`
+  remains available and is still used by the overlay layer's owned sub-UI and by
+  the unit tests.
+- Retain a compatibility layer (`UiHost`) during 4a-4c. **(in place)**
+- Exit: existing `draw_ui` / `demo_app` tests pass under the new signatures; UI
+  and `Node2D` coexist in one tree. **(met: `demo_app` migrated, `component_demo`
+  shares one tree, borrowed-API test in `draw_ui`)**
+
+### Phase 5 — unified lifecycle and input routing (DONE, Stage 25.5)
 
 - `SceneTree::process(dt)` dispatches per-node `process(dt)`.
 - Input routing (order to be confirmed against Godot source):
@@ -130,6 +217,22 @@ This is the largest refactor; split it.
 - Input completion: wheel, held key/button state, focus, hover, multi-touch,
   gamepad (later).
 - Exit: headless tests for cross-layer picking, focus, handled propagation.
+
+Landed: `Node` gained `process` / `_input` / `_input_event` /
+`_unhandled_input` callbacks with `SceneTree::set_*` and a `SceneTree::process(dt)`
+tick. `SceneTree::handle_input` runs capture (tree order) then the world pick
+(`pick_world`: topmost visible canvas item under the pointer, honoring camera
+and `CanvasLayer` transforms, only nodes with an `_input_event` handler).
+`Ui::route_input(tree, event)` chains `_input` -> world -> GUI ->
+`_unhandled_input` (Godot `Viewport::push_input` order confirmed from source).
+Routing is **owned by `draw_scene`**: `SceneTree::route_input` runs the full
+order for UI-less games, and `SceneTree::route_input_with(&mut dyn GuiInput, …)`
+inserts a GUI stage. `draw_ui::Ui` implements `draw_scene::GuiInput`, so the
+engine has no dependency on UI and an app without a HUD never needs
+`draw_ui`.
+`draw_core` gained `InputEvent::Wheel` and `InputState` (held buttons/keys +
+pointer position). Multi-touch / gamepad remain future work; GUI focus/hover
+were already in `Ui` and a cross-layer focus test was added.
 
 ### Phase 6 — game capabilities (new crate `draw_game`)
 
@@ -187,10 +290,10 @@ Phase 5-6 are the second batch.
 
 ## Decisions (LOCKED, confirmed)
 
-1. **`Viewport` naming.** `draw_core::Viewport` is only a size + DPR helper.
-   Rename it to `draw_core::ViewportSize` and give the new scene-level
-   render-context node the name `Viewport` (root instance `RootViewport`).
-   The rename lands in Phase 2, not Phase 1.
+1. **`Viewport` naming (DONE in Stage 25.2).** `draw_core::Viewport` is only a
+   size + DPR helper. Renamed to `draw_core::ViewportSize`; the new scene-level
+   render-context node is `draw_scene::Viewport` (root instance the tree root,
+   Godot `RootViewport`).
 2. **Tree access from `Ui`.** Pass `&mut SceneTree` explicitly to
    `mount` / `layout` / `paint` / `handle_input`. Prefer explicit borrowing over
    `Rc<RefCell<SceneTree>>`.
@@ -276,15 +379,59 @@ Do not guess these; confirm from the Godot tree (downloaded by the user).
 | Q5 | How `Camera2D` writes the canvas transform (`anchor_mode`, `zoom`, `offset`, limits, smoothing) and when `current` takes effect. | `scene/2d/camera_2d.cpp` |
 | Q6 | Are `Control` and `Node2D` mixed under one parent allowed? How do `Container`s treat non-`Control` children? Must a UI subtree be pure `Control`? | `scene/gui/container.cpp`, `scene/gui/control.cpp`, `scene/2d/node_2d.cpp` |
 
-Q1/Q3/Q4/Q6 matter for Phases 2-5; **Phase 1 is unblocked** and only relies on
-Godot's node/CanvasItem structure, which is already settled.
+Q1/Q3/Q4/Q6 matter for Phases 2-5. Phase 1 landed in Stage 25.1. Q1 is now
+resolved from the source (see below); Q3, Q4, Q6 are still open.
+
+### Findings from the Godot tree
+
+- **Q3 (`Control` anchorable rect).** `Control::get_parent_anchorable_rect`
+  resolves against the parent canvas item's anchorable rect (`Control` rect,
+  else a `CanvasItem`'s), falling back to the viewport visible rect when there
+  is no parent canvas item. Anchors therefore resolve against the nearest
+  ancestor `Control`, or the viewport. Containers only consider `Control`
+  children (`Container::_sort_children` skips non-`Control` children), so a
+  mixed subtree is legal but UI containers ignore `Node2D` children — matching
+  our `children_of`/control registry.
+- **Q4 (GUI pick order).** `Viewport::gui_find_control` iterates `gui.roots`
+  **back-to-front** (topmost last); `_gui_find_control_at_pos` recurses children
+  back-to-front and returns the topmost visible control whose point test hits
+  and whose `mouse_filter != IGNORE`. `_gui_call_input` then bubbles from the hit
+  control up `get_parent_item`, consuming pointer events on `MOUSE_FILTER_STOP`
+  (except scroll events with `force_pass_scroll_events`) and continuing on
+  `PASS`. `Viewport::push_input` order is `_input` -> `_gui_input_event` ->
+  `_unhandled_input`, exactly what `Ui::route_input` implements.
+
+- **Q5 (Camera2D transform).** `Camera2D::get_camera_transform` builds a camera
+  transform `T = scale(1/zoom)` with origin
+  `camera_pos - anchor_offset + offset`, where
+  `anchor_offset = anchor_mode == DRAG_CENTER ? screen_size * 0.5 * (1/zoom) : 0`,
+  then returns `T.affine_inverse()` as the viewport `canvas_transform`. Negative
+  zoom is allowed (mirror) but zero is rejected; limits/drag/rotation/smoothing
+  wrap this core. Stage 25.2 ports the core only.
+
+- **Q1 (CanvasLayer vs `canvas_transform`).** A `CanvasLayer` does **not**
+  compose with `Viewport.canvas_transform` by default: its effective transform
+  is its own (`CanvasLayer::get_final_transform` returns `transform` unless
+  `follow_viewport_enabled`, in which case it is
+  `viewport.get_canvas_transform() * scale(follow_viewport_scale) * transform`).
+  A canvas item's canvas transform is `canvas_layer->get_final_transform()` if it
+  has a layer, else `viewport.get_canvas_transform()`; a nested canvas item with
+  no layer inherits its parent's (`CanvasItem::get_canvas_transform`). This is
+  exactly the Phase 2/3 model: UI under a layer ignores the camera unless asked.
+  Note Godot caches the resolved `canvas_layer` pointer on enter-tree, so the
+  layer is structural, not re-resolved per frame.
 
 ---
 
-## Stage 25.1 — executable plan (Phase 1)
+## Stage 25.1 — Phase 1 (DONE)
 
-Scope: generalize `draw_scene` so a single tree can host world nodes, canvas
-layers and engine/UI data. **No rendering or coordinate change yet.**
+Status: **landed.** `draw_scene` gained a generic per-node extension slot, the
+`CanvasLayer` / `Camera2D` node kinds with their dedicated data, and
+`SceneTree::canvas_layer_of`. `Node` / `SceneTree` dropped `Clone` (the slot is
+`Box<dyn Any>`); `Node: Debug` is manual. No rendering or coordinate change.
+See the stage report for the file/test summary.
+
+Original executable plan below (kept for reference).
 
 ### Deliverables
 

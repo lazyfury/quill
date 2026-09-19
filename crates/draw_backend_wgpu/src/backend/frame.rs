@@ -18,7 +18,7 @@ impl WgpuBackend {
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
-        viewport: Viewport,
+        viewport: ViewportSize,
     ) -> Result<(), WgpuError> {
         let width = width.max(1);
         let height = height.max(1);
@@ -53,7 +53,7 @@ impl WgpuBackend {
     /// Resets per-frame staging and validates the lifecycle.
     pub(super) fn start_frame(
         &mut self,
-        viewport: Viewport,
+        viewport: ViewportSize,
         width: u32,
         height: u32,
     ) -> Result<(), WgpuError> {

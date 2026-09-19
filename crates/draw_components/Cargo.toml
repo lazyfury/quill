@@ -7,7 +7,9 @@ license.workspace = true
 
 [dependencies]
 draw_core.workspace = true
+draw_scene.workspace = true
 draw_ui.workspace = true
+draw_app.workspace = true
 draw_render.workspace = true
 draw_theme.workspace = true
 

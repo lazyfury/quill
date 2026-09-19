@@ -14,12 +14,18 @@
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_scene";
 
+mod input;
 mod node;
 mod paint;
 mod tree;
+mod viewport;
 
-pub use node::{CanvasItem, DirtyFlags, Node, NodeKind, Visual};
+pub use input::GuiInput;
+pub use node::{
+    AnchorMode, Camera2DData, CanvasItem, CanvasLayerData, DirtyFlags, Node, NodeKind, Visual,
+};
 pub use tree::{PreorderIter, SceneTree};
+pub use viewport::Viewport;
 
 #[cfg(test)]
 mod tests {

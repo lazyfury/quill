@@ -8,7 +8,7 @@
 //! than fail, so the rest of the workspace still builds and tests.
 
 use draw_backend_wgpu::{wgpu, FontConfig, FontMode, PixelBuffer, WgpuBackend, PIXEL_GLYPH_RATIO};
-use draw_core::{Color, Rect, Size, Vec2, Viewport};
+use draw_core::{Color, Rect, Size, Vec2, ViewportSize};
 use draw_render::{CornerRadii, Paint, PaintContext, RenderBackend, TextAlign, TextureId};
 
 /// Attempts to create a backend; `None` means "skip, no GPU adapter".
@@ -22,11 +22,11 @@ fn backend() -> Option<WgpuBackend> {
     }
 }
 
-fn viewport(width: f32, height: f32) -> Viewport {
-    Viewport::new(Size::new(width, height))
+fn viewport(width: f32, height: f32) -> ViewportSize {
+    ViewportSize::new(Size::new(width, height))
 }
 
-fn render(backend: &mut WgpuBackend, ctx: PaintContext, viewport: Viewport) -> PixelBuffer {
+fn render(backend: &mut WgpuBackend, ctx: PaintContext, viewport: ViewportSize) -> PixelBuffer {
     backend.begin_frame(viewport).unwrap();
     backend.submit(&ctx.into_draw_list()).unwrap();
     backend.end_frame().unwrap();

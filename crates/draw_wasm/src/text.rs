@@ -20,7 +20,7 @@ use web_sys::CanvasRenderingContext2d;
 ///
 /// Construct one from the context the backend renders with (the runner hands it
 /// to [`App::attach_context`](crate::App::attach_context)) and install it with
-/// [`Ui::set_text_measurer`](draw_ui::Ui::set_text_measurer).
+/// [`draw_ui::set_text_measurer`](draw_ui::set_text_measurer).
 pub struct CanvasTextMeasurer {
     ctx: CanvasRenderingContext2d,
     advances: RefCell<HashMap<(u32, u32), f32>>,

@@ -35,7 +35,7 @@ pub trait NodeDecor {
     fn paint_front(&self, _ctx: &mut PaintContext, _rect: Rect, _state: InteractState) {}
 }
 
-/// A shared handle to a decorator, as stored by [`Ui::add_decor`](crate::Ui::add_decor).
+/// A shared handle to a decorator, as stored by [`add_decor`](crate::add_decor).
 pub type DecorRef = Rc<dyn NodeDecor>;
 
 type SurfaceResolve = Box<dyn Fn(&Theme, InteractState) -> SurfaceStyle>;

@@ -163,14 +163,20 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       children; `demo_app` and the overlay popover content are built as view
       trees.
       Recorded in `docs/design-system.md`.
-- [ ] Stage 25 — Godot-style unified scene (planning approved; implementation
-      not started). One `SceneTree` for world + UI, `Viewport`/`Camera2D` driving
-      the world, and UI under a `CanvasLayer` in viewport coordinates. Full
+- [ ] Stage 25 — Godot-style unified scene (planning approved; Phases 1-5 and
+      the full UI-state migration complete, Phase 6 next). One `SceneTree` for
+      world + UI, `Viewport`/`Camera2D` driving the world, and UI under a
+      `CanvasLayer` in viewport coordinates; every node owns its own state and
+      `draw_ui` is a set of free functions over the tree (no `Ui` object). Full
       phase plan, target architecture, decisions and open questions:
       `docs/godot-migration.md`. Phases: 1 `draw_scene` extension point +
-      layers, 2 `Viewport`/`Camera2D`, 3 `CanvasLayer` painting, 4 `Control` into
-      the single tree, 5 unified lifecycle/input, 6 `draw_game` capabilities,
-      7 native continuous loop, 8 observability/tests/docs.
+      layers (done), 2 `Viewport`/`Camera2D` (done), 3 `CanvasLayer` painting
+      (done), 4 unified tree: 4a `Ui` borrows the tree, 4b `ControlData` onto
+      the node slot, 4c migrate demos, 4d all control runtime + GUI state onto
+      nodes, 4e layout cache onto the root, 4f theme + measurer onto the root,
+      4g remove `Ui`/`UiHost` in favor of free functions (done), 5 unified
+      lifecycle/input (done), 6 `draw_game` capabilities, 7 native continuous
+      loop, 8 observability/tests/docs.
 
 ## Per-stage gate (must run)
 

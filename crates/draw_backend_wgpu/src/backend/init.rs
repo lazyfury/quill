@@ -154,7 +154,7 @@ impl WgpuBackend {
             offscreen: None,
             frame: None,
             in_frame: false,
-            viewport: Viewport::default(),
+            viewport: ViewportSize::default(),
             scale_factor: 1.0,
             clear: Color::TRANSPARENT,
             device_width: 1.0,

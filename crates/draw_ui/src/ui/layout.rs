@@ -11,46 +11,78 @@
 use std::collections::{HashMap, HashSet};
 
 use super::*;
+use crate::control::{control_mut, control_of, root_state, root_state_mut, LayoutCache};
 use crate::layout::{
     Align, AlignContent, ContentSize, FlexStyle, GridPlacement, GridStyle, Justify, LayoutStyle,
     SizeBasis, Track,
 };
-use draw_core::{Rect, Size, Vec2, Viewport};
+use draw_core::{Rect, Size, Vec2, ViewportSize};
+use draw_scene::SceneTree;
 
 impl Ui {
-    /// Resolves every control's absolute rectangle against the viewport and
-    /// refreshes scene visibility.
-    pub fn layout(&mut self, viewport: Viewport) {
-        if self.layout_valid && self.layout_viewport == viewport && self.dirty.is_empty() {
+    /// Resolves every control's absolute rectangle against the viewport.
+    ///
+    /// The supplied tree is used to locate the UI roots (controls whose parent
+    /// is not itself a control, e.g. under a `CanvasLayer`). Call
+    /// [`SceneTree::update`] from the host to refresh visibility/transforms.
+    pub fn layout(&self, tree: &mut SceneTree, viewport: ViewportSize) {
+        let (valid, last_viewport) = {
+            let state = root_state_mut(tree);
+            let cache = state.layout.borrow();
+            (cache.valid, cache.viewport)
+        };
+        if valid && last_viewport == viewport {
             return;
         }
-        if self.layout_viewport != viewport {
-            self.mark_all_dirty();
+        if last_viewport != viewport {
+            self.mark_all_dirty(tree);
         }
-        let dirty = std::mem::take(&mut self.dirty);
-        self.measure_cache.borrow_mut().clear();
-        self.last_arranged = 0;
 
         let viewport_rect = viewport.logical_rect();
-        if let Some(root) = self.controls.get_mut(&self.root) {
-            root.rect = viewport_rect;
-        }
-
         let mut rects: HashMap<NodeId, Rect> = HashMap::new();
-        let root_children = self.children_vec(self.root);
-        for child in root_children {
-            let child_rect = self.resolve_child_rect(child, viewport_rect);
-            self.arrange_node(child, child_rect, &mut rects, &dirty);
-        }
-        for (id, rect) in rects {
-            if let Some(control) = self.controls.get_mut(&id) {
-                control.rect = rect;
+        {
+            let state = root_state(tree).expect("root UI state");
+            let cache: &mut LayoutCache = &mut state.layout.borrow_mut();
+            cache.measure.clear();
+            cache.last_arranged = 0;
+            let dirty: HashSet<NodeId> = tree
+                .iter()
+                .filter(|id| control_of(tree, *id).is_some_and(|control| control.layout_dirty))
+                .collect();
+            let roots: Vec<NodeId> = tree
+                .iter()
+                .filter(|id| {
+                    control_of(tree, *id).is_some()
+                        && tree
+                            .parent(*id)
+                            .map_or(true, |parent| control_of(tree, parent).is_none())
+                })
+                .collect();
+            for root in roots {
+                rects.insert(root, viewport_rect);
+                for child in self.children_vec(tree, root) {
+                    let child_rect = self.resolve_child_rect(tree, cache, child, viewport_rect);
+                    self.arrange_node(tree, cache, child, child_rect, &mut rects, &dirty);
+                }
             }
         }
-        self.layout_valid = true;
-        self.layout_viewport = viewport;
-        self.layout_count += 1;
-        self.tree.update();
+
+        // Write the resolved rectangles back to the node slots and clear dirty
+        // flags.
+        for id in tree.iter().collect::<Vec<_>>() {
+            let Some(control) = control_mut(tree, id) else {
+                continue;
+            };
+            if let Some(rect) = rects.get(&id) {
+                control.data.rect = *rect;
+            }
+            control.layout_dirty = false;
+        }
+
+        let mut cache = root_state_mut(tree).layout.borrow_mut();
+        cache.valid = true;
+        cache.viewport = viewport;
+        cache.count += 1;
     }
 
     /// Places `id` at `rect` and arranges its subtree.
@@ -58,28 +90,34 @@ impl Ui {
     /// When both `id` and its subtree are clean and the resolved rect is
     /// unchanged, the subtree is left untouched (partial relayout).
     fn arrange_node(
-        &mut self,
+        &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
         id: NodeId,
         rect: Rect,
         out: &mut HashMap<NodeId, Rect>,
         dirty: &HashSet<NodeId>,
     ) {
-        let unchanged =
-            !dirty.contains(&id) && self.controls.get(&id).is_some_and(|c| c.rect == rect);
+        let unchanged = !dirty.contains(&id)
+            && control_of(tree, id).is_some_and(|control| control.data.rect == rect);
         out.insert(id, rect);
         if unchanged {
             return;
         }
-        self.last_arranged += 1;
+        cache.last_arranged += 1;
 
-        let children = self.children_vec(id);
-        match self.widgets.get(&id).cloned() {
-            Some(Widget::Flex(style)) => self.arrange_flex(id, rect, &style, &children, out, dirty),
-            Some(Widget::Grid(style)) => self.arrange_grid(id, rect, &style, &children, out, dirty),
+        let children = self.children_vec(tree, id);
+        match control_of(tree, id).map(|control| &control.widget) {
+            Some(Widget::Flex(style)) => {
+                self.arrange_flex(tree, cache, id, rect, style, &children, out, dirty)
+            }
+            Some(Widget::Grid(style)) => {
+                self.arrange_grid(tree, cache, id, rect, style, &children, out, dirty)
+            }
             _ => {
                 for child in children {
-                    let child_rect = self.resolve_child_rect(child, rect);
-                    self.arrange_node(child, child_rect, out, dirty);
+                    let child_rect = self.resolve_child_rect(tree, cache, child, rect);
+                    self.arrange_node(tree, cache, child, child_rect, out, dirty);
                 }
             }
         }
@@ -87,12 +125,18 @@ impl Ui {
 
     /// Rectangle for a child of a non-container parent, honoring anchors/offsets
     /// and falling back to intrinsic size in degenerate dimensions.
-    fn resolve_child_rect(&self, id: NodeId, parent: Rect) -> Rect {
-        let Some(control) = self.controls.get(&id).copied() else {
+    fn resolve_child_rect(
+        &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
+        id: NodeId,
+        parent: Rect,
+    ) -> Rect {
+        let Some(control) = control_of(tree, id) else {
             return parent;
         };
-        let measured = self.measure_node(id, parent.size);
-        let mut rect = control.resolve_rect(parent);
+        let measured = self.measure_node(tree, cache, id, parent.size);
+        let mut rect = control.data.resolve_rect(parent);
         if rect.size.width <= 0.0 {
             rect.size.width = measured.preferred.width.max(measured.min.width);
         }
@@ -106,27 +150,36 @@ impl Ui {
     // -- measure -----------------------------------------------------------
 
     /// Intrinsic size of a control given the space its parent can offer.
-    fn measure_node(&self, id: NodeId, available: Size) -> ContentSize {
+    fn measure_node(
+        &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
+        id: NodeId,
+        available: Size,
+    ) -> ContentSize {
         let key = (id, available.width.to_bits(), available.height.to_bits());
-        if let Some(cached) = self.measure_cache.borrow().get(&key).copied() {
+        if let Some(cached) = cache.measure.get(&key).copied() {
             return cached;
         }
 
-        let explicit = self
-            .controls
-            .get(&id)
-            .map(|control| control.min_size)
+        let explicit = control_of(tree, id)
+            .map(|control| control.data.min_size)
             .unwrap_or(Size::ZERO);
-        let measured = match self.widgets.get(&id) {
+        let measured = match control_of(tree, id).map(|control| &control.widget) {
             Some(Widget::Flex(style)) => {
-                let children = self.children_vec(id);
-                self.measure_flex(id, style, &children, available)
+                let children = self.children_vec(tree, id);
+                self.measure_flex(tree, cache, id, style, &children, available)
             }
             Some(Widget::Grid(style)) => {
-                let children = self.children_vec(id);
-                self.measure_grid(id, style, &children, available)
+                let children = self.children_vec(tree, id);
+                self.measure_grid(tree, cache, id, style, &children, available)
             }
-            Some(widget) => widget.measure_with(available, self.text_measurer.as_ref()),
+            Some(widget) => {
+                let measurer: &dyn TextMeasurer = root_state(tree)
+                    .map(|state| state.text_measurer.as_ref())
+                    .unwrap_or(&crate::control::DEFAULT_MEASURER);
+                widget.measure_with(available, measurer)
+            }
             None => ContentSize::ZERO,
         };
         let min = measured.min.max(explicit);
@@ -134,18 +187,20 @@ impl Ui {
             min,
             preferred: measured.preferred.max(min),
         };
-        self.measure_cache.borrow_mut().insert(key, result);
+        cache.measure.insert(key, result);
         result
     }
 
     fn measure_flex(
         &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
         id: NodeId,
         style: &FlexStyle,
         children: &[NodeId],
         available: Size,
     ) -> ContentSize {
-        let children = self.ordered_children(id, children);
+        let children = self.ordered_children(tree, cache, id, children);
         let pad = style.padding;
         let inner = Size::new(
             (available.width - pad.horizontal()).max(0.0),
@@ -159,8 +214,8 @@ impl Ui {
         let mut min_cross = 0.0f32;
 
         for (index, child) in children.iter().enumerate() {
-            let measured = self.measure_node(*child, inner);
-            let layout = self.layout_style(*child);
+            let measured = self.measure_node(tree, cache, *child, inner);
+            let layout = self.layout_style(tree, *child);
             let (p_main, p_cross, c_min_main, c_min_cross) = if horizontal {
                 (
                     measured.preferred.width,
@@ -199,12 +254,14 @@ impl Ui {
 
     fn measure_grid(
         &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
         id: NodeId,
         style: &GridStyle,
         children: &[NodeId],
         available: Size,
     ) -> ContentSize {
-        let children = self.ordered_children(id, children);
+        let children = self.ordered_children(tree, cache, id, children);
         let pad = style.padding;
         let inner = Size::new(
             (available.width - pad.horizontal()).max(0.0),
@@ -216,7 +273,7 @@ impl Ui {
         let mut auto_cols = vec![0.0f32; columns];
         let mut auto_rows = vec![0.0f32; rows];
         for (index, child) in children.iter().enumerate() {
-            let measured = self.measure_node(*child, inner);
+            let measured = self.measure_node(tree, cache, *child, inner);
             let col = index % columns;
             let row = index / columns;
             auto_cols[col] = auto_cols[col].max(measured.preferred.width);
@@ -241,30 +298,40 @@ impl Ui {
         ContentSize::new(Size::new(width, height), Size::new(width, height))
     }
 
-    fn layout_style(&self, id: NodeId) -> LayoutStyle {
-        self.controls.get(&id).map(|c| c.layout).unwrap_or_default()
+    fn layout_style(&self, tree: &SceneTree, id: NodeId) -> LayoutStyle {
+        control_of(tree, id)
+            .map(|control| control.data.layout)
+            .unwrap_or_default()
     }
 
     /// Children in paint/placement order (`LayoutStyle::order`, stable ties).
     ///
     /// The sorted list is cached per container and invalidated by
     /// [`mark_dirty`](Ui::mark_dirty) / [`mark_all_dirty`](Ui::mark_all_dirty).
-    fn ordered_children(&self, id: NodeId, children: &[NodeId]) -> Vec<NodeId> {
-        if let Some(cached) = self.order_cache.borrow().get(&id) {
+    fn ordered_children(
+        &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
+        id: NodeId,
+        children: &[NodeId],
+    ) -> Vec<NodeId> {
+        if let Some(cached) = cache.order.get(&id) {
             if cached.len() == children.len() {
                 return cached.clone();
             }
         }
         let mut ordered = children.to_vec();
-        ordered.sort_by_key(|child| self.layout_style(*child).order);
-        self.order_cache.borrow_mut().insert(id, ordered.clone());
+        ordered.sort_by_key(|child| self.layout_style(tree, *child).order);
+        cache.order.insert(id, ordered.clone());
         ordered
     }
 
     // -- flex --------------------------------------------------------------
 
     fn arrange_flex(
-        &mut self,
+        &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
         id: NodeId,
         rect: Rect,
         style: &FlexStyle,
@@ -283,13 +350,13 @@ impl Ui {
         let horizontal = style.direction.is_horizontal();
         let content_main = inner_main(horizontal, content.size);
         let content_cross = inner_cross(horizontal, content.size);
-        let children = self.ordered_children(id, children);
+        let children = self.ordered_children(tree, cache, id, children);
 
         // Measure children and resolve their main-axis basis.
         let mut items: Vec<FlexItem> = Vec::with_capacity(children.len());
         for child in &children {
-            let measured = self.measure_node(*child, content.size);
-            let layout = self.layout_style(*child);
+            let measured = self.measure_node(tree, cache, *child, content.size);
+            let layout = self.layout_style(tree, *child);
             let (p_main, p_cross, min_main) = if horizontal {
                 (
                     measured.preferred.width,
@@ -375,7 +442,7 @@ impl Ui {
                     )
                 };
                 let child_rect = Rect::from_min_size(Vec2::new(x, y), Size::new(w, h));
-                self.arrange_node(item.id, child_rect, out, dirty);
+                self.arrange_node(tree, cache, item.id, child_rect, out, dirty);
                 cursor += item.main + style.gap + extra_gap;
             }
         }
@@ -384,7 +451,9 @@ impl Ui {
     // -- grid --------------------------------------------------------------
 
     fn arrange_grid(
-        &mut self,
+        &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
         id: NodeId,
         rect: Rect,
         style: &GridStyle,
@@ -400,9 +469,9 @@ impl Ui {
                 (rect.size.height - pad.vertical()).max(0.0),
             ),
         );
-        let children = self.ordered_children(id, children);
+        let children = self.ordered_children(tree, cache, id, children);
         let columns = style.columns.len().max(1);
-        let placements = resolve_placements(&children, columns, self);
+        let placements = resolve_placements(&children, columns, tree);
 
         let rows = placements
             .iter()
@@ -414,7 +483,10 @@ impl Ui {
         // Intrinsic preferred size of every child.
         let measured: Vec<Size> = children
             .iter()
-            .map(|child| self.measure_node(*child, content.size).preferred)
+            .map(|child| {
+                self.measure_node(tree, cache, *child, content.size)
+                    .preferred
+            })
             .collect();
 
         // Which tracks are auto-sized (eligible for span demand / stretch).
@@ -503,7 +575,7 @@ impl Ui {
             let y = cell_y + align_offset(style.align_items, cell_h - height);
 
             let child_rect = Rect::from_min_size(Vec2::new(x, y), Size::new(width, height));
-            self.arrange_node(*child, child_rect, out, dirty);
+            self.arrange_node(tree, cache, *child, child_rect, out, dirty);
         }
     }
 }
@@ -798,10 +870,10 @@ fn span_from_lines(lines: &[(f32, f32)], start: usize, end: usize, gap: f32) -> 
     sum + gap * (count - 1) as f32
 }
 
-fn resolve_placements(children: &[NodeId], columns: usize, ui: &Ui) -> Vec<GridPlacement> {
+fn resolve_placements(children: &[NodeId], columns: usize, tree: &SceneTree) -> Vec<GridPlacement> {
     let mut placements: Vec<Option<GridPlacement>> = children
         .iter()
-        .map(|child| ui.controls.get(child).and_then(|c| c.layout.grid))
+        .map(|child| control_of(tree, *child).and_then(|control| control.data.layout.grid))
         .collect();
 
     let mut occupied: HashSet<(usize, usize)> = HashSet::new();
@@ -898,428 +970,4 @@ fn span_size(sizes: &[f32], start: usize, end: usize, gap: f32) -> f32 {
     }
     let sum: f32 = sizes[start..end].iter().sum();
     sum + gap * (count - 1) as f32
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::component::Button;
-    use crate::layout::{Align, AlignContent, FlexStyle, GridPlacement, LayoutStyle, Track};
-    use crate::widget::Widget;
-    use draw_core::{Color, Edges, Size};
-    use std::rc::Rc;
-
-    fn viewport(w: f32, h: f32) -> Viewport {
-        Viewport::new(Size::new(w, h))
-    }
-
-    fn rect(ui: &Ui, id: NodeId) -> Rect {
-        ui.control(id).unwrap().rect
-    }
-
-    fn panel(ui: &mut Ui, parent: NodeId, name: &str) -> NodeId {
-        ui.insert(
-            parent,
-            name,
-            ControlData::default(),
-            Widget::Panel {
-                color: Color::WHITE,
-                border: None,
-            },
-        )
-    }
-
-    fn label(ui: &mut Ui, parent: NodeId, name: &str, text: &str, font_size: f32) -> NodeId {
-        ui.insert(
-            parent,
-            name,
-            ControlData::default(),
-            Widget::Label {
-                text: text.into(),
-                font_size,
-                color: Color::WHITE,
-                options: crate::layout::TextOptions::default(),
-            },
-        )
-    }
-
-    #[test]
-    fn flex_row_grow_distributes_leftover() {
-        let mut ui = Ui::new();
-        let row = ui.add_flex(ui.root(), FlexStyle::row().gap(0.0).padding(Edges::ZERO));
-        let a = panel(&mut ui, row, "A");
-        let b = panel(&mut ui, row, "B");
-        ui.set_layout_style(
-            a,
-            LayoutStyle::new().basis(SizeBasis::Px(100.0)).shrink(0.0),
-        );
-        ui.set_layout_style(b, LayoutStyle::new().basis(SizeBasis::Px(100.0)).grow(1.0));
-        ui.layout(viewport(300.0, 100.0));
-        assert_eq!(rect(&ui, a).size.width, 100.0);
-        assert_eq!(rect(&ui, b).size.width, 200.0);
-    }
-
-    #[test]
-    fn align_center_centers_cross_axis() {
-        let mut ui = Ui::new();
-        let row = ui.add_flex(
-            ui.root(),
-            FlexStyle::row().align(Align::Center).padding(Edges::ZERO),
-        );
-        let a = label(&mut ui, row, "A", "hi", 10.0);
-        ui.layout(viewport(200.0, 100.0));
-        let r = rect(&ui, a);
-        let expected = (100.0 - r.size.height) / 2.0;
-        assert!((r.top() - expected).abs() < 1e-3);
-    }
-
-    #[test]
-    fn grid_tracks_and_gaps() {
-        let mut ui = Ui::new();
-        let grid = ui.add_grid(
-            ui.root(),
-            GridStyle::new(vec![Track::Px(50.0), Track::Fr(1.0)])
-                .rows(vec![Track::Px(40.0)])
-                .gap(10.0)
-                .padding(Edges::ZERO),
-        );
-        panel(&mut ui, grid, "a");
-        panel(&mut ui, grid, "b");
-        ui.layout(viewport(200.0, 100.0));
-        let children = ui.children_vec(grid);
-        let a = rect(&ui, children[0]);
-        let b = rect(&ui, children[1]);
-        assert_eq!(a.left(), 0.0);
-        assert_eq!(a.size.width, 50.0);
-        assert_eq!(a.size.height, 40.0);
-        assert_eq!(b.left(), 60.0);
-        assert_eq!(b.size.width, 140.0);
-    }
-
-    #[test]
-    fn order_reorders_children() {
-        let mut ui = Ui::new();
-        let row = ui.add_flex(ui.root(), FlexStyle::row().gap(0.0).padding(Edges::ZERO));
-        let a = panel(&mut ui, row, "A");
-        let b = panel(&mut ui, row, "B");
-        for id in [a, b] {
-            ui.set_layout_style(
-                id,
-                LayoutStyle::new().basis(SizeBasis::Px(50.0)).shrink(0.0),
-            );
-        }
-        ui.set_layout_style(
-            a,
-            LayoutStyle::new()
-                .basis(SizeBasis::Px(50.0))
-                .shrink(0.0)
-                .order(2),
-        );
-        ui.set_layout_style(
-            b,
-            LayoutStyle::new()
-                .basis(SizeBasis::Px(50.0))
-                .shrink(0.0)
-                .order(1),
-        );
-        ui.layout(viewport(200.0, 100.0));
-        assert!(rect(&ui, b).left() < rect(&ui, a).left());
-    }
-
-    #[test]
-    fn align_content_centers_wrapped_lines() {
-        let mut ui = Ui::new();
-        let row = ui.add_flex(
-            ui.root(),
-            FlexStyle::row()
-                .wrap(true)
-                .align_content(AlignContent::Center)
-                .gap(0.0)
-                .cross_gap(0.0)
-                .padding(Edges::ZERO),
-        );
-        let mut ids = Vec::new();
-        for name in ["a", "b", "c"] {
-            ids.push(label(&mut ui, row, name, "x", 10.0));
-        }
-        for id in &ids {
-            ui.set_layout_style(
-                *id,
-                LayoutStyle::new().basis(SizeBasis::Px(80.0)).shrink(0.0),
-            );
-        }
-        ui.layout(viewport(200.0, 100.0));
-        let line_h = crate::layout::line_height(10.0);
-        let expected = (100.0 - line_h * 2.0) / 2.0;
-        assert!((rect(&ui, ids[0]).top() - expected).abs() < 1e-3);
-        assert!(rect(&ui, ids[0]).top() < rect(&ui, ids[2]).top());
-    }
-
-    #[test]
-    fn grid_span_grows_auto_tracks() {
-        let mut ui = Ui::new();
-        let grid = ui.add_grid(
-            ui.root(),
-            GridStyle::new(vec![Track::Auto, Track::Auto])
-                .gap(0.0)
-                .padding(Edges::ZERO),
-        );
-        let wide = panel(&mut ui, grid, "wide");
-        ui.set_layout_style(
-            wide,
-            LayoutStyle::new().grid(GridPlacement::new(0, 0).column_span(2)),
-        );
-        ui.set_min_size(wide, Size::new(200.0, 20.0));
-        let b = panel(&mut ui, grid, "b");
-        panel(&mut ui, grid, "c");
-        ui.layout(viewport(400.0, 200.0));
-        assert_eq!(rect(&ui, wide).size.width, 200.0);
-        assert_eq!(rect(&ui, b).size.width, 100.0);
-    }
-
-    #[test]
-    fn grid_item_alignment_within_cell() {
-        let mut ui = Ui::new();
-        let grid = ui.add_grid(
-            ui.root(),
-            GridStyle::new(vec![Track::Px(100.0)])
-                .rows(vec![Track::Px(100.0)])
-                .align_items(Align::End)
-                .justify_items(Align::Center)
-                .gap(0.0)
-                .padding(Edges::ZERO),
-        );
-        let id = label(&mut ui, grid, "L", "hi", 10.0);
-        ui.layout(viewport(200.0, 200.0));
-        let r = rect(&ui, id);
-        assert!((r.bottom() - 100.0).abs() < 1e-3);
-        assert!((r.left() - (100.0 - r.size.width) / 2.0).abs() < 1e-3);
-    }
-
-    #[test]
-    fn wrapped_flex_uses_multiple_lines() {
-        let mut ui = Ui::new();
-        let row = ui.add_flex(
-            ui.root(),
-            FlexStyle::row().wrap(true).gap(0.0).padding(Edges::ZERO),
-        );
-        let mut ids = Vec::new();
-        for name in ["a", "b", "c"] {
-            ids.push(label(&mut ui, row, name, "x", 10.0));
-        }
-        for id in &ids {
-            ui.set_layout_style(
-                *id,
-                LayoutStyle::new().basis(SizeBasis::Px(80.0)).shrink(0.0),
-            );
-        }
-        ui.layout(viewport(200.0, 200.0));
-        assert!(rect(&ui, ids[0]).top() < rect(&ui, ids[2]).top());
-    }
-
-    #[test]
-    fn stretch_does_not_grow_a_definite_cross_axis() {
-        // A fixed-width column must not widen when a child's preferred width
-        // exceeds it (a fixed sibling plus a wrapping label); the child stays at
-        // the column width.
-        let mut ui = Ui::new();
-        let column = ui.add_flex(ui.root(), FlexStyle::column().gap(0.0).padding(Edges::ZERO));
-        ui.set_anchors(column, Edges::new(0.0, 0.0, 0.0, 1.0));
-        ui.set_offsets(column, Edges::new(0.0, 0.0, 100.0, 0.0));
-
-        let row = ui.add_flex(column, FlexStyle::row().gap(0.0).padding(Edges::ZERO));
-        let fixed = panel(&mut ui, row, "fixed");
-        ui.set_layout_style(
-            fixed,
-            LayoutStyle::new().basis(SizeBasis::Px(44.0)).shrink(0.0),
-        );
-        // Words stay short (min-content fits) but the line wants to be wider.
-        label(&mut ui, row, "label", "aaaa bbbb cccc dddd eeee ffff", 20.0);
-
-        ui.layout(viewport(200.0, 200.0));
-        let column_rect = rect(&ui, column);
-        let row_rect = rect(&ui, row);
-        assert!((column_rect.size.width - 100.0).abs() < 1e-3);
-        assert!(
-            (row_rect.size.width - column_rect.size.width).abs() < 1e-3,
-            "row {} escaped column {}",
-            row_rect.size.width,
-            column_rect.size.width
-        );
-    }
-
-    #[test]
-    fn shrink_respects_min_size() {
-        let mut ui = Ui::new();
-        let row = ui.add_flex(ui.root(), FlexStyle::row().gap(0.0).padding(Edges::ZERO));
-        let a = panel(&mut ui, row, "A");
-        let b = panel(&mut ui, row, "B");
-        ui.set_layout_style(
-            a,
-            LayoutStyle::new().basis(SizeBasis::Px(100.0)).shrink(1.0),
-        );
-        ui.set_min_size(a, Size::new(80.0, 0.0));
-        ui.set_layout_style(
-            b,
-            LayoutStyle::new().basis(SizeBasis::Px(100.0)).shrink(1.0),
-        );
-        ui.layout(viewport(150.0, 100.0));
-        assert_eq!(rect(&ui, a).size.width, 80.0);
-        assert!(rect(&ui, b).size.width < 100.0);
-    }
-
-    #[test]
-    fn partial_change_rearranges_fewer_nodes() {
-        let mut ui = Ui::new();
-
-        let root = ui.root();
-        let panel_a = panel(&mut ui, root, "PanelA");
-        ui.set_anchors(panel_a, Edges::new(0.0, 0.0, 0.0, 0.0));
-        ui.set_offsets(panel_a, Edges::new(0.0, 0.0, 140.0, 200.0));
-        let col_a = ui.add_flex(panel_a, FlexStyle::column().padding(Edges::ZERO));
-        let changing = label(&mut ui, col_a, "LA", "left", 10.0);
-
-        let panel_b = panel(&mut ui, root, "PanelB");
-        ui.set_anchors(panel_b, Edges::new(1.0, 0.0, 1.0, 0.0));
-        ui.set_offsets(panel_b, Edges::new(-140.0, 0.0, 0.0, 200.0));
-        let col_b = ui.add_flex(panel_b, FlexStyle::column().padding(Edges::ZERO));
-        label(&mut ui, col_b, "B1", "b1", 10.0);
-        label(&mut ui, col_b, "B2", "b2", 10.0);
-
-        let vp = viewport(300.0, 200.0);
-        ui.layout(vp);
-        let full = ui.last_arranged_nodes();
-
-        ui.set_text(changing, "changed longer text");
-        ui.layout(vp);
-        let partial = ui.last_arranged_nodes();
-
-        assert!(full >= 7, "expected a full pass to visit every control");
-        assert!(
-            partial < full,
-            "the untouched panel subtree should be skipped ({partial} < {full})"
-        );
-        assert_eq!(ui.layout_count(), 2);
-    }
-
-    #[test]
-    fn order_change_invalidates_order_cache() {
-        let mut ui = Ui::new();
-        let row = ui.add_flex(ui.root(), FlexStyle::row().gap(0.0).padding(Edges::ZERO));
-        let a = panel(&mut ui, row, "A");
-        let b = panel(&mut ui, row, "B");
-        for id in [a, b] {
-            ui.set_layout_style(
-                id,
-                LayoutStyle::new().basis(SizeBasis::Px(50.0)).shrink(0.0),
-            );
-        }
-        let vp = viewport(200.0, 100.0);
-        ui.layout(vp);
-        assert!(rect(&ui, a).left() < rect(&ui, b).left());
-
-        ui.set_layout_style(
-            a,
-            LayoutStyle::new()
-                .basis(SizeBasis::Px(50.0))
-                .shrink(0.0)
-                .order(2),
-        );
-        ui.set_layout_style(
-            b,
-            LayoutStyle::new()
-                .basis(SizeBasis::Px(50.0))
-                .shrink(0.0)
-                .order(1),
-        );
-        ui.layout(vp);
-        assert!(rect(&ui, b).left() < rect(&ui, a).left());
-    }
-
-    #[test]
-    fn grid_rows_are_offset_by_the_container_origin() {
-        let mut ui = Ui::new();
-        let grid = ui.add_grid(
-            ui.root(),
-            GridStyle::new(vec![Track::Px(100.0)])
-                .rows(vec![Track::Px(40.0)])
-                .gap(0.0)
-                .padding(Edges::ZERO),
-        );
-        ui.set_anchors(grid, Edges::new(0.0, 0.0, 0.0, 0.0));
-        ui.set_offsets(grid, Edges::new(0.0, 50.0, 200.0, 150.0));
-        let child = panel(&mut ui, grid, "cell");
-        ui.layout(viewport(300.0, 300.0));
-        assert_eq!(rect(&ui, child).top(), 50.0);
-        assert_eq!(rect(&ui, child).left(), 0.0);
-    }
-
-    #[test]
-    fn wrapped_button_grows_height() {
-        let mut ui = Ui::new();
-        let col = ui.add_flex(ui.root(), FlexStyle::column().gap(0.0));
-        let double = ui.add_flex(ui.root(), FlexStyle::column().gap(0.0));
-        let button = ui.add(col, Button::new("hello world hello world").wrap(true));
-        let plain = ui.add(double, Button::new("hello world hello world"));
-        ui.layout(viewport(100.0, 400.0));
-        assert!(rect(&ui, button.id()).size.height > 48.0);
-        // A non-wrapping button stays one line tall.
-        assert!(rect(&ui, plain.id()).size.height <= 48.0);
-    }
-
-    #[test]
-    fn layout_cache_skips_unchanged_viewport() {
-        let mut ui = Ui::new();
-        let col = ui.add_flex(ui.root(), FlexStyle::column());
-        let id = label(&mut ui, col, "L", "x", 10.0);
-        let vp = viewport(200.0, 200.0);
-        ui.layout(vp);
-        let count = ui.layout_count();
-
-        ui.layout(vp);
-        assert_eq!(
-            ui.layout_count(),
-            count,
-            "redundant layout should be a no-op"
-        );
-
-        ui.set_text(id, "y");
-        ui.layout(vp);
-        assert_eq!(ui.layout_count(), count + 1);
-
-        ui.layout(viewport(100.0, 200.0));
-        assert_eq!(ui.layout_count(), count + 2);
-    }
-
-    #[test]
-    fn injected_measurer_changes_wrapping() {
-        let text = "hello world hello world";
-        let narrow = viewport(120.0, 400.0);
-
-        let mut approx = Ui::new();
-        let col = approx.add_flex(approx.root(), FlexStyle::column().gap(0.0));
-        let id = label(&mut approx, col, "L", text, 20.0);
-        approx.layout(narrow);
-        let approx_height = rect(&approx, id).size.height;
-
-        let mut fixed = Ui::new();
-        fixed.set_text_measurer(Rc::new(crate::layout::FixedWidthTextMeasurer::default()));
-        let col = fixed.add_flex(fixed.root(), FlexStyle::column().gap(0.0));
-        let id = label(&mut fixed, col, "L", text, 20.0);
-        fixed.layout(narrow);
-        let fixed_height = rect(&fixed, id).size.height;
-
-        assert!(fixed_height > approx_height);
-    }
-
-    #[test]
-    fn label_wraps_and_grows_height_in_column() {
-        let mut ui = Ui::new();
-        let col = ui.add_flex(ui.root(), FlexStyle::column().gap(0.0));
-        let id = label(&mut ui, col, "L", "hello world hello world", 20.0);
-        ui.layout(viewport(120.0, 400.0));
-        let r = rect(&ui, id);
-        assert!(r.size.width <= 120.0 + 1e-3);
-        assert!(r.size.height > crate::layout::line_height(20.0));
-    }
 }

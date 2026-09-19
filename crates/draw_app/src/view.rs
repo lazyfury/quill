@@ -1,10 +1,10 @@
 //! Declarative view layer: compose UI as a tree of values, not as statements
-//! against a mutable `Ui`.
+//! against the scene tree.
 //!
 //! ```ignore
-//! use draw_ui::{BuildContext, Column, Label, View, ViewExt};
+//! use draw_app as ui;
 //!
-//! ui.mount(root, Column::new().gap(12.0).padding(16.0)
+//! ui::mount(&mut tree, root, Column::new().gap(12.0).padding(16.0)
 //!     .child(Label::new("Settings").font_size(20.0))
 //!     .child(Label::new("Verbose").grow(1.0).min_size(0.0, 40.0)));
 //! ```
@@ -17,14 +17,14 @@
 //! without changes.
 
 use draw_core::{Edges, NodeId, Size};
+use draw_scene::SceneTree;
 use draw_theme::Theme;
 
-use crate::decor::{dynamic_surface_decor, foreground_decor, surface_decor, InteractState};
-use crate::layout::{LayoutStyle, SizeBasis};
-use crate::paint::SurfaceStyle;
-use crate::ui::Ui;
-use crate::widget::Widget;
-use crate::{Component, MouseFilter};
+use draw_ui::{dynamic_surface_decor, foreground_decor, surface_decor};
+use draw_ui::{ControlData, InteractState, MouseFilter, SurfaceStyle, Widget};
+
+use crate::build::insert;
+use crate::Component;
 
 /// A boxed child builder, so heterogeneous children can be collected.
 pub type Child = Box<dyn FnOnce(&mut BuildContext) -> NodeId>;
@@ -42,28 +42,27 @@ pub trait View {
 /// Every [`Component`] is a [`View`] (its `mount` is the low-level form).
 impl<T: Component> View for T {
     fn build(self, cx: &mut BuildContext) -> NodeId {
-        self.mount(cx.ui, cx.parent).id()
+        self.mount(cx.tree, cx.parent).id()
     }
 }
 
 /// The mounting context passed to [`View::build`].
 ///
-/// Carries the runtime `Ui`, the parent node to build into, and the active
-/// theme.
+/// Carries the [`SceneTree`] the node is built into and the parent node.
 pub struct BuildContext<'a> {
-    pub(crate) ui: &'a mut Ui,
+    pub(crate) tree: &'a mut SceneTree,
     pub(crate) parent: NodeId,
 }
 
 impl<'a> BuildContext<'a> {
     /// A context that builds into `parent`.
-    pub fn new(ui: &'a mut Ui, parent: NodeId) -> Self {
-        Self { ui, parent }
+    pub fn new(tree: &'a mut SceneTree, parent: NodeId) -> Self {
+        Self { tree, parent }
     }
 
-    /// The active theme.
+    /// The active theme (stored on the tree root).
     pub fn theme(&self) -> Theme {
-        self.ui.theme()
+        draw_ui::theme(self.tree)
     }
 
     /// The node this context builds into.
@@ -74,7 +73,7 @@ impl<'a> BuildContext<'a> {
     /// A context that builds into `parent` instead.
     pub fn at(&mut self, parent: NodeId) -> BuildContext<'_> {
         BuildContext {
-            ui: self.ui,
+            tree: self.tree,
             parent,
         }
     }
@@ -91,9 +90,9 @@ impl<'a> BuildContext<'a> {
         }
     }
 
-    /// Escape hatch: the underlying runtime for custom views.
-    pub fn ui(&mut self) -> &mut Ui {
-        self.ui
+    /// Escape hatch: the scene tree the view is built into.
+    pub fn tree(&mut self) -> &mut SceneTree {
+        self.tree
     }
 }
 
@@ -108,62 +107,57 @@ impl<'a> BuildContext<'a> {
 pub trait ViewExt: View + Sized {
     /// Flex grow factor.
     fn grow(self, grow: f32) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.set_flex_grow(node, grow);
+        Modify::new(self, move |tree, node| {
+            crate::update_control(tree, node, |data| data.layout.grow = grow);
         })
     }
 
     /// Flex shrink factor.
     fn shrink(self, shrink: f32) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.set_flex_shrink(node, shrink);
+        Modify::new(self, move |tree, node| {
+            crate::update_control(tree, node, |data| data.layout.shrink = shrink);
         })
     }
 
     /// Flex basis.
-    fn basis(self, basis: SizeBasis) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.set_flex_basis(node, basis);
+    fn basis(self, basis: draw_ui::layout::SizeBasis) -> Modify<Self> {
+        Modify::new(self, move |tree, node| {
+            crate::update_control(tree, node, |data| data.layout.basis = basis);
         })
     }
 
     /// Minimum size.
     fn min_size(self, width: f32, height: f32) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.set_min_size(node, Size::new(width, height));
+        Modify::new(self, move |tree, node| {
+            crate::update_control(tree, node, |data| data.min_size = Size::new(width, height));
         })
     }
 
     /// Layout order within the parent.
     fn order(self, order: i32) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            let mut style = ui
-                .control(node)
-                .map(|control| control.layout)
-                .unwrap_or_else(LayoutStyle::default);
-            style.order = order;
-            ui.set_layout_style(node, style);
+        Modify::new(self, move |tree, node| {
+            crate::update_control(tree, node, |data| data.layout.order = order);
         })
     }
 
     /// Anchor edges (`0` = parent start, `1` = parent end).
     fn anchors(self, anchors: Edges) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.set_anchors(node, anchors);
+        Modify::new(self, move |tree, node| {
+            crate::update_control(tree, node, |data| data.anchors = anchors);
         })
     }
 
     /// Offset edges, in the same order as [`Edges`].
     fn offsets(self, offsets: Edges) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.set_offsets(node, offsets);
+        Modify::new(self, move |tree, node| {
+            crate::update_control(tree, node, |data| data.offsets = offsets);
         })
     }
 
     /// A themed surface painted behind the node.
     fn background(self, style: SurfaceStyle) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.add_decor(node, surface_decor(style));
+        Modify::new(self, move |tree, node| {
+            draw_ui::add_decor(tree, node, surface_decor(style));
         })
     }
 
@@ -173,38 +167,39 @@ pub trait ViewExt: View + Sized {
         self,
         resolve: impl Fn(&Theme, InteractState) -> SurfaceStyle + 'static,
     ) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.add_decor(node, dynamic_surface_decor(ui.theme(), resolve));
+        Modify::new(self, move |tree, node| {
+            let theme = draw_ui::theme(tree);
+            draw_ui::add_decor(tree, node, dynamic_surface_decor(theme, resolve));
         })
     }
 
     /// A themed foreground painted in front of the node.
     fn foreground(
         self,
-        draw: impl Fn(&mut draw_render::PaintContext, draw_core::Rect, &Theme, crate::InteractState)
-            + 'static,
+        draw: impl Fn(&mut draw_render::PaintContext, draw_core::Rect, &Theme, InteractState) + 'static,
     ) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.add_decor(node, foreground_decor(ui.theme(), draw));
+        Modify::new(self, move |tree, node| {
+            let theme = draw_ui::theme(tree);
+            draw_ui::add_decor(tree, node, foreground_decor(theme, draw));
         })
     }
 
     /// Click callback for the node and its descendants.
     fn on_click(self, callback: impl FnMut() + 'static) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.set_on_click(node, callback);
+        Modify::new(self, move |tree, node| {
+            crate::set_on_click(tree, node, callback);
         })
     }
 
     /// Runs `f` with the node this view built (id capture / escape hatch).
     fn capture(self, f: impl FnOnce(NodeId) + 'static) -> Modify<Self> {
-        Modify::new(self, move |_ui, node| f(node))
+        Modify::new(self, move |_tree, node| f(node))
     }
 
     /// Mouse filter.
     fn mouse_filter(self, filter: MouseFilter) -> Modify<Self> {
-        Modify::new(self, move |ui, node| {
-            ui.set_mouse_filter(node, filter);
+        Modify::new(self, move |tree, node| {
+            crate::update_control(tree, node, |data| data.mouse_filter = filter);
         })
     }
 }
@@ -214,11 +209,11 @@ impl<V: View> ViewExt for V {}
 /// A view wrapped with one or more node modifiers.
 pub struct Modify<V> {
     inner: V,
-    apply: Box<dyn FnOnce(&mut Ui, NodeId)>,
+    apply: Box<dyn FnOnce(&mut SceneTree, NodeId)>,
 }
 
 impl<V> Modify<V> {
-    fn new(inner: V, apply: impl FnOnce(&mut Ui, NodeId) + 'static) -> Self {
+    fn new(inner: V, apply: impl FnOnce(&mut SceneTree, NodeId) + 'static) -> Self {
         Self {
             inner,
             apply: Box::new(apply),
@@ -226,16 +221,16 @@ impl<V> Modify<V> {
     }
 
     /// Runs another modifier after this one, keeping a single wrapper type.
-    pub fn and(self, apply: impl FnOnce(&mut Ui, NodeId) + 'static) -> Self {
+    pub fn and(self, apply: impl FnOnce(&mut SceneTree, NodeId) + 'static) -> Self {
         let Modify {
             inner,
             apply: first,
         } = self;
         Self {
             inner,
-            apply: Box::new(move |ui, node| {
-                first(ui, node);
-                apply(ui, node);
+            apply: Box::new(move |tree, node| {
+                first(tree, node);
+                apply(tree, node);
             }),
         }
     }
@@ -245,12 +240,12 @@ impl<V: View> View for Modify<V> {
     fn build(self, cx: &mut BuildContext) -> NodeId {
         let Modify { inner, apply } = self;
         let node = inner.build(cx);
-        apply(cx.ui, node);
+        apply(cx.tree, node);
         node
     }
 }
 
 /// Convenience: builds a `Widget` node directly (for custom views).
 pub fn widget(cx: &mut BuildContext, name: &'static str, widget: Widget) -> NodeId {
-    cx.ui.insert(cx.parent, name, Default::default(), widget)
+    insert(cx.tree, cx.parent, name, ControlData::default(), widget)
 }

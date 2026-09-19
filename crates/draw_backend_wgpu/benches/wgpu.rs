@@ -14,7 +14,7 @@
 
 use draw_backend_wgpu::WgpuBackend;
 use draw_bench::{black_box, finish, BenchResult, BenchRunner, RunConfig};
-use draw_core::{Color, Rect, Size, Vec2, Viewport};
+use draw_core::{Color, Rect, Size, Vec2, ViewportSize};
 use draw_render::{PaintContext, RenderBackend};
 
 /// Entity counts; readback cost dominates, so the range is modest.
@@ -30,7 +30,7 @@ fn main() {
         return;
     }
 
-    let viewport = Viewport::new(Size::new(TARGET_SIZE, TARGET_SIZE));
+    let viewport = ViewportSize::new(Size::new(TARGET_SIZE, TARGET_SIZE));
     let mut results = Vec::new();
 
     for &n in &SIZES {

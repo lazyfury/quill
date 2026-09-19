@@ -1,14 +1,14 @@
 //! Debug drawing of UI controls (yellow bounds + `name#id` labels).
 //!
 //! [`DebugDrawOptions`] is the style used by
-//! [`Ui::paint_debug`](crate::Ui::paint_debug): a yellow rectangle around every
+//! [`draw_ui::paint_debug`](crate::paint_debug): a yellow rectangle around every
 //! visible control plus a `Name #id` label pinned to its top-left corner. It
 //! emits ordinary backend-neutral [`DrawCommand`](draw_render::DrawCommand)s, so
 //! every backend can render it.
 
 use draw_core::{Color, NodeId, Vec2};
 
-/// Style for [`Ui::paint_debug`](crate::Ui::paint_debug).
+/// Style for [`draw_ui::paint_debug`](crate::paint_debug).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DebugDrawOptions {
     /// Border color (default: yellow).

@@ -2,7 +2,7 @@
 //!
 //! This crate owns the backend-neutral base types every other crate builds on:
 //! math ([`Vec2`], [`Size`], [`Rect`], [`Edges`], [`Transform2D`]), [`Color`],
-//! stable handles ([`NodeId`]) and the logical [`Viewport`] model.
+//! stable handles ([`NodeId`]) and the logical [`ViewportSize`] model.
 //!
 //! It has no dependencies outside the Rust standard library and **must never**
 //! depend on a renderer or browser API.
@@ -28,17 +28,17 @@ mod rect;
 mod size;
 mod transform;
 mod vec2;
-mod viewport;
+mod viewport_size;
 
 pub use color::Color;
 pub use edges::Edges;
 pub use id::{NodeId, NodeIdAllocator};
-pub use input::{EventResult, InputEvent, Key, PointerButton};
+pub use input::{EventResult, InputEvent, InputState, Key, PointerButton};
 pub use rect::Rect;
 pub use size::Size;
 pub use transform::Transform2D;
 pub use vec2::Vec2;
-pub use viewport::Viewport;
+pub use viewport_size::ViewportSize;
 
 #[cfg(test)]
 mod tests {

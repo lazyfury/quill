@@ -75,7 +75,7 @@ fn main() {
                 || UiFixture::new(n),
                 |fixture| {
                     let viewport = fixture.viewport;
-                    fixture.ui.layout(viewport);
+                    fixture.layout(viewport);
                 },
             ),
         );
@@ -87,7 +87,7 @@ fn main() {
                 format!("ui/hit_test/{n}"),
                 || UiFixture::new(n),
                 |fixture| {
-                    black_box(fixture.ui.hit_test(fixture.first_center));
+                    black_box(fixture.hit_test(fixture.first_center));
                 },
             ),
         );
@@ -100,7 +100,7 @@ fn main() {
                 || UiFixture::new(n),
                 |fixture| {
                     let mut ctx = PaintContext::with_capacity(fixture.ids.len() * 3 + 8);
-                    fixture.ui.paint(&mut ctx);
+                    fixture.paint(&mut ctx);
                     black_box(ctx.into_draw_list());
                 },
             ),
@@ -115,8 +115,8 @@ fn main() {
                 |(fixture, sink)| {
                     let viewport = fixture.viewport;
                     let mut ctx = PaintContext::with_capacity(fixture.ids.len() * 3 + 8);
-                    fixture.ui.layout(viewport);
-                    fixture.ui.paint(&mut ctx);
+                    fixture.layout(viewport);
+                    fixture.paint(&mut ctx);
                     let list = ctx.into_draw_list();
                     sink.begin_frame(viewport).unwrap();
                     sink.submit(&list).unwrap();

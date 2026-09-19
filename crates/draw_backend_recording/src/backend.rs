@@ -1,6 +1,6 @@
 use std::fmt;
 
-use draw_core::Viewport;
+use draw_core::ViewportSize;
 use draw_render::{DrawCommand, DrawList, RenderBackend};
 
 /// Errors from the frame lifecycle.
@@ -27,7 +27,7 @@ impl std::error::Error for RecordingError {}
 /// submitted [`DrawList`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordedFrame {
-    pub viewport: Viewport,
+    pub viewport: ViewportSize,
     pub draw_list: DrawList,
 }
 
@@ -86,7 +86,7 @@ impl RecordingBackend {
 impl RenderBackend for RecordingBackend {
     type Error = RecordingError;
 
-    fn begin_frame(&mut self, viewport: Viewport) -> Result<(), Self::Error> {
+    fn begin_frame(&mut self, viewport: ViewportSize) -> Result<(), Self::Error> {
         if self.current.is_some() {
             return Err(RecordingError::AlreadyRecording);
         }
@@ -122,8 +122,8 @@ mod tests {
     use draw_core::{Color, Rect, Size};
     use draw_render::PaintContext;
 
-    fn viewport() -> Viewport {
-        Viewport::new(Size::new(100.0, 100.0))
+    fn viewport() -> ViewportSize {
+        ViewportSize::new(Size::new(100.0, 100.0))
     }
 
     #[test]

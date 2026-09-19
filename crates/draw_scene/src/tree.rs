@@ -1,6 +1,7 @@
-use draw_core::{NodeId, NodeIdAllocator, Transform2D, Vec2};
+use draw_core::{NodeId, NodeIdAllocator, Size, Transform2D, Vec2};
 
-use crate::node::{DirtyFlags, Node, NodeKind};
+use crate::node::{AnchorMode, Camera2DData, CanvasLayerData, DirtyFlags, Node, NodeKind};
+use crate::viewport::Viewport;
 
 /// The scene tree: an arena of [`Node`]s plus parent/child links.
 ///
@@ -10,7 +11,8 @@ use crate::node::{DirtyFlags, Node, NodeKind};
 ///
 /// Child lists are kept sorted by `(z_index, creation order)`, so both
 /// iteration and drawing order are deterministic.
-#[derive(Debug, Clone)]
+///
+/// `SceneTree` is not `Clone`: [`Node`] has a non-`Clone` extension slot.
 pub struct SceneTree {
     slots: Vec<Option<Node>>,
     allocator: NodeIdAllocator,
@@ -29,7 +31,7 @@ impl SceneTree {
     pub fn new() -> Self {
         let mut allocator = NodeIdAllocator::new();
         let root = allocator.alloc();
-        let root_node = Node::new(root, "root", NodeKind::Node, 0);
+        let root_node = Node::new(root, "root", NodeKind::Viewport, 0);
         Self {
             slots: vec![Some(root_node)],
             allocator,
@@ -40,6 +42,76 @@ impl SceneTree {
 
     pub const fn root(&self) -> NodeId {
         self.root
+    }
+
+    // -- root viewport -----------------------------------------------------
+
+    /// The tree's root render context (Godot `RootViewport`).
+    pub fn viewport(&self) -> &Viewport {
+        self.node(self.root)
+            .viewport()
+            .expect("the tree root is a Viewport")
+    }
+
+    /// Mutable root render context. Prefer [`SceneTree::set_viewport_size`].
+    pub fn viewport_mut(&mut self) -> &mut Viewport {
+        self.node_mut(self.root)
+            .viewport
+            .as_mut()
+            .expect("the tree root is a Viewport")
+    }
+
+    /// Sets the logical drawing area of the root viewport.
+    pub fn set_viewport_size(&mut self, size: Size) {
+        self.viewport_mut().set_size(size);
+    }
+
+    /// World -> screen transform of the root viewport (valid after update).
+    pub fn canvas_transform(&self) -> Transform2D {
+        self.viewport().canvas_transform()
+    }
+
+    /// Maps a world-space point to screen (logical viewport) coordinates.
+    pub fn world_to_screen(&self, point: Vec2) -> Vec2 {
+        self.viewport().world_to_screen(point)
+    }
+
+    /// Maps a screen (logical viewport) point to world coordinates.
+    pub fn screen_to_world(&self, point: Vec2) -> Vec2 {
+        self.viewport().screen_to_world(point)
+    }
+
+    /// Transform from a node's local space to screen coordinates (Godot
+    /// `CanvasItem::get_global_transform_with_canvas`).
+    ///
+    /// Uses the node's effective canvas transform: its nearest `CanvasLayer`'s
+    /// final transform, or the root viewport's `canvas_transform` on the
+    /// default canvas.
+    pub fn viewport_transform(&self, id: NodeId) -> Option<Transform2D> {
+        let world = self.world_transform(id)?;
+        Some(self.canvas_transform_of(id) * world)
+    }
+
+    /// The canvas transform that applies to `id` (Godot
+    /// `CanvasItem::get_canvas_transform`): its nearest `CanvasLayer`'s final
+    /// transform, or the root viewport's `canvas_transform` on the default
+    /// canvas.
+    pub fn canvas_transform_of(&self, id: NodeId) -> Transform2D {
+        match self.canvas_layer_of(id) {
+            Some((_, data)) => self.canvas_layer_final_transform(&data),
+            None => self.canvas_transform(),
+        }
+    }
+
+    /// Godot `CanvasLayer::get_final_transform`: the layer's own transform, or
+    /// the viewport camera composed before it when `follow_viewport` is set.
+    /// (`follow_viewport_scale` is not modeled yet.)
+    fn canvas_layer_final_transform(&self, data: &CanvasLayerData) -> Transform2D {
+        if data.follow_viewport {
+            self.canvas_transform() * data.transform
+        } else {
+            data.transform
+        }
     }
 
     /// Number of live nodes, including the root.
@@ -83,6 +155,34 @@ impl SceneTree {
         self.get(id).and_then(Node::parent)
     }
 
+    // -- node extension data ----------------------------------------------
+
+    /// Reads the node's extension data as `T`, if it is set and of that type.
+    ///
+    /// This is the typed accessor behind the Phase 1 extension slot: layers
+    /// such as `draw_ui` store their runtime on the node and read it back
+    /// without `draw_scene` knowing the concrete types.
+    pub fn data<T: 'static>(&self, id: NodeId) -> Option<&T> {
+        self.get(id).and_then(Node::data)
+    }
+
+    /// Mutably borrows the node's extension data as `T`.
+    pub fn data_mut<T: 'static>(&mut self, id: NodeId) -> Option<&mut T> {
+        self.get_mut(id).and_then(Node::data_mut)
+    }
+
+    /// Stores `value` as the node's extension data, replacing any previous
+    /// value. Returns `false` if `id` is not a live node.
+    pub fn set_data<T: 'static>(&mut self, id: NodeId, value: T) -> bool {
+        match self.get_mut(id) {
+            Some(node) => {
+                node.set_data(value);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn children(&self, id: NodeId) -> Option<&[NodeId]> {
         self.get(id).map(Node::children)
     }
@@ -111,6 +211,22 @@ impl SceneTree {
     /// Panics if `parent` is not a live node.
     pub fn add_control(&mut self, parent: NodeId, name: impl Into<String>) -> NodeId {
         self.insert(parent, name, NodeKind::Control)
+    }
+
+    /// Adds a `CanvasLayer` grouping node under `parent`.
+    ///
+    /// # Panics
+    /// Panics if `parent` is not a live node.
+    pub fn add_canvas_layer(&mut self, parent: NodeId, name: impl Into<String>) -> NodeId {
+        self.insert(parent, name, NodeKind::CanvasLayer)
+    }
+
+    /// Adds a `Camera2D` canvas item under `parent`.
+    ///
+    /// # Panics
+    /// Panics if `parent` is not a live node.
+    pub fn add_camera_2d(&mut self, parent: NodeId, name: impl Into<String>) -> NodeId {
+        self.insert(parent, name, NodeKind::Camera2D)
     }
 
     fn insert(&mut self, parent: NodeId, name: impl Into<String>, kind: NodeKind) -> NodeId {
@@ -303,6 +419,136 @@ impl SceneTree {
         self.get(id).map(Node::z_index)
     }
 
+    // -- canvas layers -----------------------------------------------------
+
+    /// Returns the nearest ancestor [`NodeKind::CanvasLayer`] and its data.
+    ///
+    /// `None` means the node belongs to the default world canvas (Godot layer
+    /// `0`, affected by the viewport camera transform). The node itself is not
+    /// considered, so a `CanvasLayer` resolves to `None` while its descendants
+    /// resolve to it.
+    pub fn canvas_layer_of(&self, id: NodeId) -> Option<(NodeId, CanvasLayerData)> {
+        let mut current = self.get(id).and_then(Node::parent);
+        while let Some(pid) = current {
+            let node = self.get(pid)?;
+            if let Some(data) = node.canvas_layer() {
+                return Some((pid, *data));
+            }
+            current = node.parent();
+        }
+        None
+    }
+
+    /// Layer data for a canvas-layer node; `None` for other kinds.
+    pub fn canvas_layer_data(&self, id: NodeId) -> Option<&CanvasLayerData> {
+        self.get(id).and_then(Node::canvas_layer)
+    }
+
+    /// Mutable layer data for a canvas-layer node.
+    pub fn canvas_layer_data_mut(&mut self, id: NodeId) -> Option<&mut CanvasLayerData> {
+        self.get_mut(id).and_then(|node| node.canvas_layer.as_mut())
+    }
+
+    /// Sets the paint-order layer of a `CanvasLayer`.
+    pub fn set_canvas_layer(&mut self, id: NodeId, layer: i32) -> bool {
+        match self.canvas_layer_data_mut(id) {
+            Some(data) => {
+                data.layer = layer;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sets the canvas transform of a `CanvasLayer`.
+    pub fn set_canvas_layer_transform(&mut self, id: NodeId, transform: Transform2D) -> bool {
+        match self.canvas_layer_data_mut(id) {
+            Some(data) => {
+                data.transform = transform;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sets whether a `CanvasLayer` follows the viewport camera.
+    pub fn set_canvas_layer_follow_viewport(&mut self, id: NodeId, follow: bool) -> bool {
+        match self.canvas_layer_data_mut(id) {
+            Some(data) => {
+                data.follow_viewport = follow;
+                true
+            }
+            None => false,
+        }
+    }
+
+    // -- cameras -----------------------------------------------------------
+
+    /// Camera data for a `Camera2D` node; `None` for other kinds.
+    pub fn camera_2d_data(&self, id: NodeId) -> Option<&Camera2DData> {
+        self.get(id).and_then(Node::camera_2d)
+    }
+
+    /// Mutable camera data for a `Camera2D` node.
+    pub fn camera_2d_data_mut(&mut self, id: NodeId) -> Option<&mut Camera2DData> {
+        self.get_mut(id).and_then(|node| node.camera_2d.as_mut())
+    }
+
+    /// Marks a `Camera2D` current (or not). Returns `false` for non-camera ids.
+    pub fn set_camera_current(&mut self, id: NodeId, current: bool) -> bool {
+        match self.camera_2d_data_mut(id) {
+            Some(data) => {
+                data.current = current;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Enables/disables a `Camera2D`. Returns `false` for non-camera ids.
+    pub fn set_camera_enabled(&mut self, id: NodeId, enabled: bool) -> bool {
+        match self.camera_2d_data_mut(id) {
+            Some(data) => {
+                data.enabled = enabled;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sets a `Camera2D` zoom. Returns `false` for non-camera ids.
+    pub fn set_camera_zoom(&mut self, id: NodeId, zoom: Vec2) -> bool {
+        match self.camera_2d_data_mut(id) {
+            Some(data) => {
+                data.zoom = zoom;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sets a `Camera2D` offset. Returns `false` for non-camera ids.
+    pub fn set_camera_offset(&mut self, id: NodeId, offset: Vec2) -> bool {
+        match self.camera_2d_data_mut(id) {
+            Some(data) => {
+                data.offset = offset;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sets a `Camera2D` anchor mode. Returns `false` for non-camera ids.
+    pub fn set_camera_anchor_mode(&mut self, id: NodeId, mode: AnchorMode) -> bool {
+        match self.camera_2d_data_mut(id) {
+            Some(data) => {
+                data.anchor_mode = mode;
+                true
+            }
+            None => false,
+        }
+    }
+
     fn update_local_transform(&mut self, id: NodeId, f: impl FnOnce(&mut Transform2D)) -> bool {
         if !self.allocator.is_alive(id) {
             return false;
@@ -327,7 +573,29 @@ impl SceneTree {
     /// Returns the number of canvas items whose world transform was
     /// recomputed. A second call with no intervening changes returns `0`.
     pub fn update(&mut self) -> usize {
-        self.update_subtree(self.root, Transform2D::IDENTITY, false, true, false)
+        let recomputed = self.update_subtree(self.root, Transform2D::IDENTITY, false, true, false);
+        self.update_camera();
+        recomputed
+    }
+
+    /// Recomputes the root viewport's `canvas_transform` from the current
+    /// `Camera2D` (Godot `Camera2D::get_camera_transform`). With no current,
+    /// enabled camera the transform is the identity.
+    fn update_camera(&mut self) {
+        let camera = self.iter().find(|&id| {
+            self.get(id)
+                .and_then(Node::camera_2d)
+                .is_some_and(|c| c.current && c.enabled)
+        });
+        let transform = match camera {
+            Some(id) => {
+                let world = self.world_transform(id).unwrap_or(Transform2D::IDENTITY);
+                let data = *self.node(id).camera_2d().expect("camera has data");
+                camera_canvas_transform(world, &data, self.viewport().size())
+            }
+            None => Transform2D::IDENTITY,
+        };
+        self.viewport_mut().set_canvas_transform(transform);
     }
 
     fn update_subtree(
@@ -450,6 +718,33 @@ impl SceneTree {
         }
         false
     }
+}
+
+/// Port of the transform-relevant part of Godot `Camera2D::get_camera_transform`
+/// (no limits, drag margins, rotation or smoothing). The result maps world
+/// coordinates to screen coordinates, i.e. it is the affine inverse of the
+/// camera's world transform.
+fn camera_canvas_transform(
+    camera_world: Transform2D,
+    data: &Camera2DData,
+    screen: Size,
+) -> Transform2D {
+    if data.zoom.x == 0.0 || data.zoom.y == 0.0 {
+        return Transform2D::IDENTITY;
+    }
+    let zoom_scale = Vec2::new(1.0 / data.zoom.x, 1.0 / data.zoom.y);
+    let half = Vec2::new(screen.width, screen.height) * 0.5;
+    let screen_offset = match data.anchor_mode {
+        AnchorMode::DragCenter => Vec2::new(half.x * zoom_scale.x, half.y * zoom_scale.y),
+        AnchorMode::FixedTopLeft => Vec2::ZERO,
+    };
+    let position = camera_world.origin - screen_offset + data.offset;
+    let xform = Transform2D::new(
+        Vec2::new(zoom_scale.x, 0.0),
+        Vec2::new(0.0, zoom_scale.y),
+        position,
+    );
+    xform.inverse()
 }
 
 /// Depth-first pre-order iterator returned by [`SceneTree::iter`].

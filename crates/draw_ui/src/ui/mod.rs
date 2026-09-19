@@ -1,80 +1,37 @@
-//! The UI tree (`Ui`) and its public surface.
+//! The crate-internal UI implementation namespace.
 //!
-//! `Ui` owns a [`SceneTree`] of `Control` nodes plus per-control layout
-//! ([`ControlData`]) and behavior ([`Widget`]). The logic is split so each file
-//! stays small:
+//! `draw_ui` owns layout and paint only. Every `Control`'s drawing/layout
+//! runtime — layout data and [`Widget`] — lives in the [`SceneTree`] node's
+//! extension slot ([`Control`]); the theme, text measurer, GUI interaction
+//! state and layout cache live in the root node's [`UiRootState`]. Application
+//! concerns (construction, input routing, backend submission) live in
+//! `draw_app`.
 //!
-//! - [`build`] — adding controls and property setters.
+//! The logic is split so each file stays small:
+//!
 //! - [`layout`] — resolving absolute rectangles.
 //! - [`paint`] — emitting the backend-neutral `DrawList`.
-//! - [`input`] — hit testing and event dispatch.
 
-mod build;
-mod input;
 mod layout;
 mod paint;
 
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use draw_core::{Edges, NodeId, Viewport};
+use draw_core::NodeId;
 use draw_scene::SceneTree;
 use draw_theme::Theme;
 
-use crate::control::{ControlData, MouseFilter};
+use crate::control::{
+    control_mut, control_of, gui_state, root_state, root_state_mut, CachedText, ControlData,
+    LayoutCache,
+};
 use crate::decor::{DecorRef, InteractState};
-use crate::layout::{layout_text, ApproxTextMeasurer, ContentSize, TextMeasurer, TextOptions};
-use crate::widget::{ButtonState, Widget};
+use crate::layout::{layout_text, TextMeasurer, TextOptions};
+use crate::widget::Widget;
 
-/// Cached laid-out text for one control (paint-side).
-pub(super) struct CachedText {
-    text: String,
-    font_size_bits: u32,
-    width_bits: u32,
-    options: TextOptions,
-    lines: Rc<[String]>,
-}
-
-/// A callback invoked when a control is activated (clicked / Enter).
-pub type ClickCallback = Rc<RefCell<dyn FnMut()>>;
-
-/// The UI tree: a [`SceneTree`] of `Control` nodes plus layout, painting and
-/// input dispatch.
-///
-/// Layout is absolute: after [`Ui::layout`], each control has a resolved
-/// viewport-space [`Rect`](draw_core::Rect) in its [`ControlData`]. Painting
-/// iterates the scene tree in draw order, and input uses reverse-order hit
-/// testing.
-pub struct Ui {
-    pub(super) theme: Theme,
-    pub(super) tree: SceneTree,
-    pub(super) root: NodeId,
-    pub(super) controls: HashMap<NodeId, ControlData>,
-    pub(super) widgets: HashMap<NodeId, Widget>,
-    pub(super) callbacks: HashMap<NodeId, ClickCallback>,
-    /// Themed chrome attached per node by components (surfaces, foregrounds).
-    /// Multiple decorators compose: all behind, then content, then all front.
-    pub(super) decorations: HashMap<NodeId, Vec<DecorRef>>,
-    pub(super) hovered: Option<NodeId>,
-    pub(super) pressed: Option<NodeId>,
-    pub(super) focused: Option<NodeId>,
-    pub(super) activated: Vec<NodeId>,
-    pub(super) text_measurer: Rc<dyn TextMeasurer>,
-    pub(super) layout_valid: bool,
-    pub(super) layout_viewport: Viewport,
-    pub(super) layout_count: u64,
-    /// Nodes whose layout inputs changed (plus their ancestors).
-    pub(super) dirty: HashSet<NodeId>,
-    /// Cached child ordering per container (`LayoutStyle::order`).
-    pub(super) order_cache: RefCell<HashMap<NodeId, Vec<NodeId>>>,
-    /// Nodes arranged during the last [`layout`](Ui::layout) pass.
-    pub(super) last_arranged: usize,
-    /// Paint-side cache of wrapped/clipped lines per control.
-    pub(super) text_cache: RefCell<HashMap<NodeId, CachedText>>,
-    /// Per-pass memoization of `measure_node` results.
-    pub(super) measure_cache: RefCell<HashMap<(NodeId, u32, u32), ContentSize>>,
-}
+/// The UI layout/paint implementation namespace. Zero-sized: the theme, text
+/// measurer, control runtime and layout cache all live on the [`SceneTree`].
+pub(crate) struct Ui;
 
 impl Default for Ui {
     fn default() -> Self {
@@ -83,106 +40,61 @@ impl Default for Ui {
 }
 
 impl Ui {
-    /// Creates a UI with a root control that fills the viewport.
+    /// Creates a UI environment handle.
     pub fn new() -> Self {
-        let mut tree = SceneTree::new();
-        let tree_root = tree.root();
-        let root = tree.add_control(tree_root, "Root");
-
-        let mut controls = HashMap::new();
-        controls.insert(
-            root,
-            ControlData {
-                anchors: Edges::new(0.0, 0.0, 1.0, 1.0),
-                mouse_filter: MouseFilter::Ignore,
-                ..ControlData::default()
-            },
-        );
-
-        Self {
-            theme: Theme::default(),
-            tree,
-            root,
-            controls,
-            widgets: HashMap::new(),
-            callbacks: HashMap::new(),
-            decorations: HashMap::new(),
-            hovered: None,
-            pressed: None,
-            focused: None,
-            activated: Vec::new(),
-            text_measurer: Rc::new(ApproxTextMeasurer),
-            layout_valid: false,
-            layout_viewport: Viewport::default(),
-            layout_count: 0,
-            dirty: HashSet::new(),
-            order_cache: RefCell::new(HashMap::new()),
-            last_arranged: 0,
-            text_cache: RefCell::new(HashMap::new()),
-            measure_cache: RefCell::new(HashMap::new()),
-        }
+        Ui
     }
 
-    pub fn tree(&self) -> &SceneTree {
-        &self.tree
+    /// The active theme, read from the tree root.
+    pub fn theme(&self, tree: &SceneTree) -> Theme {
+        root_state(tree).map_or_else(Theme::default, |state| state.theme)
     }
 
-    pub fn tree_mut(&mut self) -> &mut SceneTree {
-        self.mark_all_dirty();
-        &mut self.tree
-    }
-
-    pub fn root(&self) -> NodeId {
-        self.root
-    }
-
-    /// The active theme. Components read colors/spacing from it when mounting.
-    pub fn theme(&self) -> Theme {
-        self.theme
-    }
-
-    /// Replaces the theme. Decorators created before this keep their resolved
-    /// theme, so call it before mounting components.
-    pub fn set_theme(&mut self, theme: Theme) {
-        self.theme = theme;
+    /// Replaces the theme (stored on the tree root). Decorators created before
+    /// this keep their resolved theme, so set it before mounting components.
+    pub fn set_theme(&mut self, tree: &mut SceneTree, theme: Theme) {
+        root_state_mut(tree).theme = theme;
     }
 
     /// Number of times the full measure/arrange pass has run.
-    pub fn layout_count(&self) -> u64 {
-        self.layout_count
+    pub fn layout_count(&self, tree: &SceneTree) -> u64 {
+        root_state(tree).map_or(0, |state| state.layout.borrow().count)
     }
 
-    /// Number of controls arranged during the last [`layout`](Ui::layout)
-    /// pass. Lower than `control_count()` when a change only dirtied part of
-    /// the tree.
-    pub fn last_arranged_nodes(&self) -> usize {
-        self.last_arranged
+    /// Number of controls arranged during the last [`layout`](Ui::layout) pass.
+    pub fn last_arranged_nodes(&self, tree: &SceneTree) -> usize {
+        root_state(tree).map_or(0, |state| state.layout.borrow().last_arranged)
     }
 
     /// Forces the next [`layout`](Ui::layout) call to recompute the whole tree.
-    pub fn invalidate_layout(&mut self) {
-        self.mark_all_dirty();
+    pub fn invalidate_layout(&mut self, tree: &mut SceneTree) {
+        self.mark_all_dirty(tree);
     }
 
-    /// Replaces the text measurer and invalidates layout.
-    pub fn set_text_measurer(&mut self, measurer: Rc<dyn TextMeasurer>) {
-        self.text_measurer = measurer;
-        self.text_cache.borrow_mut().clear();
-        self.mark_all_dirty();
+    /// Replaces the text measurer (stored on the tree root) and invalidates
+    /// layout.
+    pub fn set_text_measurer(&mut self, tree: &mut SceneTree, measurer: Rc<dyn TextMeasurer>) {
+        {
+            let state = root_state_mut(tree);
+            state.text_measurer = measurer;
+            state.layout.borrow_mut().text.clear();
+        }
+        self.mark_all_dirty(tree);
     }
 
     /// Lays out `text` for control `id`, reusing the cached result when the
     /// inputs are unchanged.
     pub(super) fn layout_text_cached(
         &self,
+        cache: &mut LayoutCache,
+        measurer: &dyn TextMeasurer,
         id: NodeId,
         text: &str,
         font_size: f32,
         width: f32,
         options: TextOptions,
     ) -> Rc<[String]> {
-        let mut cache = self.text_cache.borrow_mut();
-        if let Some(entry) = cache.get(&id) {
+        if let Some(entry) = cache.text.get(&id) {
             if entry.text == text
                 && entry.font_size_bits == font_size.to_bits()
                 && entry.width_bits == width.to_bits()
@@ -191,9 +103,8 @@ impl Ui {
                 return entry.lines.clone();
             }
         }
-        let lines: Rc<[String]> =
-            layout_text(self.text_measurer.as_ref(), text, font_size, width, options).into();
-        cache.insert(
+        let lines: Rc<[String]> = layout_text(measurer, text, font_size, width, options).into();
+        cache.text.insert(
             id,
             CachedText {
                 text: text.to_string(),
@@ -208,126 +119,113 @@ impl Ui {
 
     /// Marks `id` and all of its ancestors as needing layout, and drops the
     /// cached child ordering for `id` and its parent.
-    pub(super) fn mark_dirty(&mut self, id: NodeId) {
-        self.layout_valid = false;
-        self.order_cache.borrow_mut().remove(&id);
-        if let Some(parent) = self.tree.parent(id) {
-            self.order_cache.borrow_mut().remove(&parent);
+    pub(crate) fn mark_dirty(&self, tree: &mut SceneTree, id: NodeId) {
+        let parent = tree.parent(id);
+        {
+            let mut cache = root_state_mut(tree).layout.borrow_mut();
+            cache.valid = false;
+            cache.order.remove(&id);
+            if let Some(parent) = parent {
+                cache.order.remove(&parent);
+            }
         }
         let mut current = Some(id);
         while let Some(node) = current {
-            if !self.dirty.insert(node) {
-                // Ancestors are already dirty by invariant.
-                break;
+            if let Some(control) = control_mut(tree, node) {
+                if control.layout_dirty {
+                    // Ancestors are already dirty by invariant.
+                    break;
+                }
+                control.layout_dirty = true;
             }
-            current = self.tree.parent(node);
+            current = tree.parent(node);
         }
     }
 
     /// Marks the whole tree dirty (structure changed, measurer swapped, ...).
-    pub(super) fn mark_all_dirty(&mut self) {
-        self.layout_valid = false;
-        self.dirty.clear();
-        self.dirty.extend(self.controls.keys().copied());
-        self.order_cache.borrow_mut().clear();
+    pub(crate) fn mark_all_dirty(&self, tree: &mut SceneTree) {
+        {
+            let mut cache = root_state_mut(tree).layout.borrow_mut();
+            cache.valid = false;
+            cache.order.clear();
+        }
+        for id in tree.iter().collect::<Vec<_>>() {
+            if let Some(control) = control_mut(tree, id) {
+                control.layout_dirty = true;
+            }
+        }
     }
 
-    /// Number of controls in this UI (root included).
-    pub fn control_count(&self) -> usize {
-        self.controls.len()
+    /// Number of controls in this UI (root included when mounted by a host).
+    pub fn control_count(&self, tree: &SceneTree) -> usize {
+        tree.iter()
+            .filter(|id| control_of(tree, *id).is_some())
+            .count()
     }
 
-    pub fn control(&self, id: NodeId) -> Option<&ControlData> {
-        self.controls.get(&id)
+    /// Layout data for control `id`, read from the node's extension slot.
+    pub fn control<'a>(&self, tree: &'a SceneTree, id: NodeId) -> Option<&'a ControlData> {
+        control_of(tree, id).map(|control| &control.data)
     }
 
-    pub fn widget(&self, id: NodeId) -> Option<&Widget> {
-        self.widgets.get(&id)
-    }
-
-    pub fn hovered(&self) -> Option<NodeId> {
-        self.hovered
-    }
-
-    /// Whether the pointer is currently over a clickable button.
-    ///
-    /// Hosts use this to give cursor feedback (e.g. the Canvas runner sets a
-    /// `pointer` CSS cursor).
-    pub fn hovered_is_button(&self) -> bool {
-        self.hovered
-            .is_some_and(|id| self.widgets.get(&id).is_some_and(Widget::is_button))
-    }
-
-    pub fn focused(&self) -> Option<NodeId> {
-        self.focused
+    /// The control's visual widget, read from the node's extension slot.
+    pub fn widget<'a>(&self, tree: &'a SceneTree, id: NodeId) -> Option<&'a Widget> {
+        control_of(tree, id).map(|control| &control.widget)
     }
 
     /// Attaches themed chrome to `id`, painted by [`Ui::paint`] around the
-    /// control's own content. Multiple decorators compose in registration order.
-    pub fn add_decor(&mut self, id: NodeId, decor: DecorRef) {
-        if self.controls.contains_key(&id) {
-            self.decorations.entry(id).or_default().push(decor);
+    /// control's own content.
+    pub fn add_decor(&mut self, tree: &mut SceneTree, id: NodeId, decor: DecorRef) {
+        if let Some(control) = control_mut(tree, id) {
+            control.decorations.push(decor);
         }
     }
 
     /// Decorators attached to `id`, in paint order.
-    pub fn decor(&self, id: NodeId) -> &[DecorRef] {
-        self.decorations.get(&id).map(Vec::as_slice).unwrap_or(&[])
+    pub fn decor<'a>(&self, tree: &'a SceneTree, id: NodeId) -> &'a [DecorRef] {
+        control_of(tree, id)
+            .map(|control| control.decorations.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Hover/pressed/focused state of `id`, inherited from its ancestors.
-    pub fn state_for(&self, id: NodeId) -> InteractState {
+    pub fn state_for(&self, tree: &SceneTree, id: NodeId) -> InteractState {
+        let state = gui_state(tree).copied().unwrap_or_default();
         InteractState {
-            hovered: self
+            hovered: state
                 .hovered
-                .is_some_and(|node| is_self_or_ancestor(self, node, id)),
-            pressed: self
+                .is_some_and(|node| is_self_or_ancestor(tree, node, id)),
+            pressed: state
                 .pressed
-                .is_some_and(|node| is_self_or_ancestor(self, node, id)),
-            focused: self
+                .is_some_and(|node| is_self_or_ancestor(tree, node, id)),
+            focused: state
                 .focused
-                .is_some_and(|node| is_self_or_ancestor(self, node, id)),
+                .is_some_and(|node| is_self_or_ancestor(tree, node, id)),
         }
     }
 
-    /// Whether `id` or any ancestor has a click callback.
-    pub fn is_interactive(&self, id: NodeId) -> bool {
-        let mut current = Some(id);
-        while let Some(node) = current {
-            if self.callbacks.contains_key(&node) {
-                return true;
-            }
-            current = self.tree.parent(node);
-        }
-        false
-    }
-
-    pub fn button_state(&self, id: NodeId) -> Option<ButtonState> {
-        match self.widgets.get(&id) {
-            Some(Widget::Button(button)) => Some(button.state),
-            _ => None,
-        }
-    }
-
-    pub fn click_count(&self, id: NodeId) -> u32 {
-        self.button_state(id).map_or(0, |state| state.click_count)
-    }
-
-    pub(super) fn children_vec(&self, id: NodeId) -> Vec<NodeId> {
-        self.tree
-            .children(id)
-            .map(|children| children.to_vec())
+    /// Control children of `id` (non-control nodes are ignored, as in Godot
+    /// containers).
+    pub(super) fn children_vec(&self, tree: &SceneTree, id: NodeId) -> Vec<NodeId> {
+        tree.children(id)
+            .map(|children| {
+                children
+                    .iter()
+                    .copied()
+                    .filter(|child| control_of(tree, *child).is_some())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }
 
-fn is_self_or_ancestor(ui: &Ui, candidate: NodeId, node: NodeId) -> bool {
+fn is_self_or_ancestor(tree: &SceneTree, candidate: NodeId, node: NodeId) -> bool {
     let mut current = Some(candidate);
     while let Some(id) = current {
         if id == node {
             return true;
         }
-        current = ui.tree.parent(id);
+        current = tree.parent(id);
     }
     false
 }

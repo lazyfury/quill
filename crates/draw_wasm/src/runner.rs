@@ -6,7 +6,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, PointerEvent, Window};
 
 use draw_backend_canvas::Canvas2dBackend;
-use draw_core::{EventResult, InputEvent, Key, PointerButton, Size, Vec2, Viewport};
+use draw_core::{EventResult, InputEvent, Key, PointerButton, Size, Vec2, ViewportSize};
 use draw_render::{PaintContext, RenderBackend};
 
 /// Application hook driven by the WASM runner.
@@ -31,7 +31,7 @@ pub trait App {
         false
     }
 
-    fn update(&mut self, viewport: Viewport);
+    fn update(&mut self, viewport: ViewportSize);
     fn paint(&mut self, ctx: &mut PaintContext);
     fn event(&mut self, _event: &InputEvent) -> EventResult {
         EventResult::Ignored
@@ -105,7 +105,7 @@ fn render_frame<A: App>(
 
     apply_cursor(app, canvas);
 
-    let viewport = Viewport::new(logical_size(canvas, window));
+    let viewport = ViewportSize::new(logical_size(canvas, window));
     let mut app = app.borrow_mut();
     app.update(viewport);
 

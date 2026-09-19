@@ -23,9 +23,11 @@ pub const CRATE: &str = "draw_theme";
 mod palette;
 mod scale;
 mod theme;
+mod tone;
 
 pub use palette::{Palette, Semantic};
 pub use scale::{
     border, control, motion, radius, space, Border, Control, Motion, Radius, Space, TextSize,
 };
 pub use theme::{Mode, SurfaceLevel, Theme};
+pub use tone::{SurfaceTone, Tone};

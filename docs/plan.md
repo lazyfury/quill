@@ -99,11 +99,12 @@ graph and UI data lives in `Ui`'s `NodeId`-keyed maps. Priority order:
    `View` (or make it `pub(crate)`) — one construction abstraction, not three
    (`Widget` runtime / `Component` mount / `View` build).
 2. **Ownership & lifecycle** — document that `SceneTree` is the hierarchy and
-   `Ui` is the control table over it, then add `Ui::remove` that synchronously
-   drops `controls` / `widgets` / `decorations` / `callbacks` for the subtree.
-   Long term: consider moving `Widget`/`ControlData` onto `SceneTree` control
-   nodes (Godot-style single source of truth); the cost is `draw_scene` knowing
-   about widgets.
+   `Ui` is the control runtime over it, then add `Ui::remove` that synchronously
+   drops `widgets` / `decorations` / `callbacks` for the subtree. **Done
+   (Stage 25.4b):** `ControlData` now lives on the `SceneTree` node extension
+   slot (single source of truth); `Widget`/`decorations`/`callbacks` are still in
+   `Ui`. Remaining: move `Widget` onto nodes too (would make `draw_scene` know
+   about widgets) and add `Ui::remove`.
 3. **Theme** — either accept and record "`Ui` is the UI runtime and owns the
    active theme", or introduce an explicit `Environment`/`Context` inherited
    from the root so the core stays theme-free. Fix the mount-time snapshot so a

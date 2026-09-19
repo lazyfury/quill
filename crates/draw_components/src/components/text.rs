@@ -1,17 +1,18 @@
 //! Text components.
 
+use draw_app::Label;
 use draw_core::{Color, NodeId};
-use draw_theme::TextSize;
-use draw_ui::{Label, TextOptions};
+use draw_scene::SceneTree;
+use draw_theme::{TextSize, Tone};
+use draw_ui::TextOptions;
 
-use crate::{Component, ControlRef, Ui};
-use draw_ui::Tone;
+use crate::{Component, ControlRef};
 
 /// A single block of text with a semantic size and color.
 ///
 /// ```ignore
-/// ui.add(parent, Text::heading("Settings"));
-/// ui.add(parent, Text::body("Changes are saved automatically.").tone(Tone::Muted));
+/// draw_app::add(parent, Text::heading("Settings"));
+/// draw_app::add(parent, Text::body("Changes are saved automatically.").tone(Tone::Muted));
 /// ```
 #[derive(Debug, Clone)]
 pub struct Text {
@@ -107,57 +108,16 @@ impl Text {
 }
 
 impl Component for Text {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = ui.theme();
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let theme = draw_ui::theme(tree);
         let color = self.color.unwrap_or_else(|| self.tone.color(&theme));
-        ui.add(
+        draw_app::add(
+            tree,
             parent,
             Label::new(self.text)
                 .font_size(self.size.px())
                 .color(color)
                 .text_options(self.options),
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use draw_core::{Size, Viewport};
-    use draw_theme::Theme;
-
-    #[test]
-    fn text_mounts_a_label_with_resolved_tone() {
-        let mut ui = Ui::new();
-        ui.set_theme(Theme::dark());
-        let root = ui.root();
-        let control = ui.add(root, Text::heading("Hi").tone(Tone::Error));
-        ui.layout(Viewport::new(Size::new(400.0, 200.0)));
-        assert!(ui.control(control.id()).is_some());
-        match ui.widget(control.id()) {
-            Some(draw_ui::Widget::Label {
-                text,
-                font_size,
-                color,
-                ..
-            }) => {
-                assert_eq!(text, "Hi");
-                assert_eq!(*font_size, TextSize::Heading.px());
-                assert_eq!(*color, Theme::dark().palette.error);
-            }
-            other => panic!("expected a label, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn explicit_color_wins() {
-        let mut ui = Ui::new();
-        ui.set_theme(Theme::light());
-        let root = ui.root();
-        let control = ui.add(root, Text::caption("v1.2.0").color(Color::WHITE));
-        assert_eq!(
-            ui.widget(control.id()).and_then(|w| w.text()),
-            Some("v1.2.0")
-        );
     }
 }

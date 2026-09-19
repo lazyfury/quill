@@ -1,4 +1,4 @@
-use draw_core::Viewport;
+use draw_core::ViewportSize;
 
 use crate::list::DrawList;
 
@@ -13,8 +13,8 @@ pub trait RenderBackend {
     /// backends that cannot fail.
     type Error: core::fmt::Debug;
 
-    /// Starts a frame targeting the given logical [`Viewport`].
-    fn begin_frame(&mut self, viewport: Viewport) -> Result<(), Self::Error>;
+    /// Starts a frame targeting the given logical [`ViewportSize`].
+    fn begin_frame(&mut self, viewport: ViewportSize) -> Result<(), Self::Error>;
 
     /// Submits one draw list for the current frame.
     fn submit(&mut self, list: &DrawList) -> Result<(), Self::Error>;

@@ -5,14 +5,14 @@ use crate::size::Size;
 ///
 /// The viewport stores **logical pixels only**. Device pixels and browser DPR
 /// are a backend concern: given a scale factor, the backend derives the backing
-/// store size via [`Viewport::device_size`] without that factor ever entering
+/// store size via [`ViewportSize::device_size`] without that factor ever entering
 /// core logic.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Viewport {
+pub struct ViewportSize {
     logical_size: Size,
 }
 
-impl Viewport {
+impl ViewportSize {
     pub const fn new(logical_size: Size) -> Self {
         Self { logical_size }
     }
@@ -48,7 +48,7 @@ mod tests {
 
     #[test]
     fn viewport_logical_size() {
-        let vp = Viewport::new(Size::new(800.0, 600.0));
+        let vp = ViewportSize::new(Size::new(800.0, 600.0));
         assert_eq!(vp.logical_size(), Size::new(800.0, 600.0));
         assert_eq!(vp.logical_rect().max(), Vec2::new(800.0, 600.0));
         assert!(vp.logical_rect().contains(Vec2::new(799.0, 599.0)));
@@ -57,14 +57,14 @@ mod tests {
 
     #[test]
     fn device_size_uses_scale_factor() {
-        let vp = Viewport::new(Size::new(400.0, 300.0));
+        let vp = ViewportSize::new(Size::new(400.0, 300.0));
         assert_eq!(vp.device_size(2.0), Size::new(800.0, 600.0));
         assert_eq!(vp.device_size(1.0), Size::new(400.0, 300.0));
     }
 
     #[test]
     fn set_logical_size() {
-        let mut vp = Viewport::default();
+        let mut vp = ViewportSize::default();
         assert_eq!(vp.logical_size(), Size::ZERO);
         vp.set_logical_size(Size::new(10.0, 20.0));
         assert_eq!(vp.logical_size(), Size::new(10.0, 20.0));

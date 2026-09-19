@@ -1,5 +1,5 @@
 [package]
-name = "draw_debug_ui"
+name = "draw_app"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,5 +10,7 @@ draw_core.workspace = true
 draw_scene.workspace = true
 draw_render.workspace = true
 draw_ui.workspace = true
-draw_app.workspace = true
-draw_profile.workspace = true
+draw_theme.workspace = true
+
+[dev-dependencies]
+draw_backend_recording.workspace = true

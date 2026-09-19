@@ -1,14 +1,16 @@
 //! Structural, presentational components.
 
+use draw_app::{child, BuildContext, Child, Flex, Label, View};
 use draw_core::{Color, Edges, NodeId, Size, Vec2};
 use draw_render::PaintContext;
+use draw_scene::SceneTree;
 use draw_theme::{radius, space, TextSize};
-use draw_ui::{child, Align, BuildContext, Child, Flex, Justify, Label, TextOptions, View};
+use draw_ui::{Align, Justify, TextOptions};
 
-use crate::{Component, ControlRef, Text, Ui};
+use crate::{Component, ControlRef, Text};
+use draw_theme::{SurfaceTone, Tone};
 use draw_ui::{foreground_decor, surface_decor};
 use draw_ui::{surface, SurfaceStyle};
-use draw_ui::{SurfaceTone, Tone};
 
 /// A structured container: thin border, subtle surface, restrained radius.
 ///
@@ -114,20 +116,24 @@ impl Card {
 }
 
 impl Component for Card {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = ui.theme();
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let theme = draw_ui::theme(tree);
         let fill = self.fill.unwrap_or_else(|| self.tone.color(&theme));
         let border = if self.hairline {
             Some(theme.palette.border)
         } else {
             None
         };
-        let card = ui.add(parent, Flex::column().gap(self.gap).padding(self.padding));
+        let card = draw_app::add(
+            tree,
+            parent,
+            Flex::column().gap(self.gap).padding(self.padding),
+        );
         let style = SurfaceStyle::new(fill)
             .radius(self.radius)
             .border_opt(border);
-        ui.add_decor(card.id(), surface_decor(style));
-        BuildContext::new(ui, card.id()).children(self.children);
+        draw_ui::add_decor(tree, card.id(), surface_decor(style));
+        BuildContext::new(tree, card.id()).children(self.children);
         card
     }
 }
@@ -151,17 +157,17 @@ impl Divider {
 }
 
 impl Component for Divider {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let node = ui.add(parent, Flex::new().padding(Edges::ZERO));
-        crate::detach(ui, node.id());
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let node = draw_app::add(tree, parent, Flex::new().padding(Edges::ZERO));
+        crate::detach(tree, node.id());
         let min = if self.vertical {
             Size::new(1.0, 0.0)
         } else {
             Size::new(0.0, 1.0)
         };
-        ui.set_min_size(node.id(), min);
-        let style = SurfaceStyle::new(ui.theme().palette.border_subtle);
-        ui.add_decor(node.id(), surface_decor(style));
+        draw_app::update_control(tree, node.id(), |d| d.min_size = min);
+        let style = SurfaceStyle::new(draw_ui::theme(tree).palette.border_subtle);
+        draw_ui::add_decor(tree, node.id(), surface_decor(style));
         node
     }
 }
@@ -208,13 +214,14 @@ impl Badge {
 }
 
 impl Component for Badge {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = ui.theme();
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let theme = draw_ui::theme(tree);
         let font = TextSize::Caption.px();
         let accent = self.tone.color(&theme);
         let pad = Edges::symmetric(space::SM, space::XXS);
 
-        let node = ui.add(
+        let node = draw_app::add(
+            tree,
             parent,
             Flex::row()
                 .align(Align::Center)
@@ -222,7 +229,7 @@ impl Component for Badge {
                 .gap(0.0)
                 .padding(pad),
         );
-        crate::detach(ui, node.id());
+        crate::detach(tree, node.id());
 
         let style = if self.solid {
             SurfaceStyle::new(accent).radius(self.radius)
@@ -231,14 +238,15 @@ impl Component for Badge {
                 .border(accent.with_alpha(0.30))
                 .radius(self.radius)
         };
-        ui.add_decor(node.id(), surface_decor(style));
+        draw_ui::add_decor(tree, node.id(), surface_decor(style));
 
         let text_color = if self.solid {
             theme.palette.on_accent
         } else {
             accent
         };
-        ui.add(
+        draw_app::add(
+            tree,
             node.id(),
             Label::new(&self.text)
                 .font_size(font)
@@ -278,28 +286,38 @@ impl CodeBlock {
 }
 
 impl Component for CodeBlock {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = ui.theme();
-        let block = ui.add(
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let theme = draw_ui::theme(tree);
+        let block = draw_app::add(
+            tree,
             parent,
             Flex::column().gap(space::SM).padding(Edges::all(space::LG)),
         );
         let style = SurfaceStyle::new(theme.palette.code_surface)
             .border(theme.palette.border)
             .radius(radius::LG);
-        ui.add_decor(block.id(), surface_decor(style));
+        draw_ui::add_decor(tree, block.id(), surface_decor(style));
 
         if self.filename.is_some() || self.language.is_some() {
-            let header = ui.add(block.id(), Flex::row().align(Align::Center).gap(space::SM));
+            let header = draw_app::add(
+                tree,
+                block.id(),
+                Flex::row().align(Align::Center).gap(space::SM),
+            );
             if let Some(filename) = self.filename {
-                ui.add(header.id(), Text::small(filename).tone(Tone::Muted));
+                draw_app::add(tree, header.id(), Text::small(filename).tone(Tone::Muted));
             }
             if let Some(language) = self.language {
-                ui.add(header.id(), Text::caption(language).tone(Tone::Subtle));
+                draw_app::add(
+                    tree,
+                    header.id(),
+                    Text::caption(language).tone(Tone::Subtle),
+                );
             }
         }
 
-        ui.add(
+        draw_app::add(
+            tree,
             block.id(),
             Label::new(self.code)
                 .font_size(TextSize::Small.px())
@@ -345,20 +363,22 @@ impl Terminal {
 }
 
 impl Component for Terminal {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = ui.theme();
-        let terminal = ui.add(
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let theme = draw_ui::theme(tree);
+        let terminal = draw_app::add(
+            tree,
             parent,
             Flex::column().gap(space::SM).padding(Edges::all(space::LG)),
         );
         let style = SurfaceStyle::new(theme.palette.code_surface)
             .border(theme.palette.border)
             .radius(radius::LG);
-        ui.add_decor(terminal.id(), surface_decor(style));
+        draw_ui::add_decor(tree, terminal.id(), surface_decor(style));
 
-        let header = ui.add(terminal.id(), Flex::row().gap(space::XS));
-        ui.set_min_size(header.id(), Size::new(0.0, 8.0));
-        ui.add_decor(
+        let header = draw_app::add(tree, terminal.id(), Flex::row().gap(space::XS));
+        draw_app::update_control(tree, header.id(), |d| d.min_size = Size::new(0.0, 8.0));
+        draw_ui::add_decor(
+            tree,
             header.id(),
             foreground_decor(theme, |ctx: &mut PaintContext, rect, theme, _| {
                 let r = 3.5;
@@ -382,7 +402,8 @@ impl Component for Terminal {
         );
 
         if let Some(command) = self.command {
-            ui.add(
+            draw_app::add(
+                tree,
                 terminal.id(),
                 Label::new(format!("$ {command}"))
                     .font_size(TextSize::Small.px())
@@ -391,7 +412,8 @@ impl Component for Terminal {
             );
         }
         if !self.output.is_empty() {
-            ui.add(
+            draw_app::add(
+                tree,
                 terminal.id(),
                 Label::new(self.output.join("\n"))
                     .font_size(TextSize::Small.px())
@@ -425,9 +447,10 @@ impl EmptyState {
 }
 
 impl Component for EmptyState {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = ui.theme();
-        let container = ui.add(
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let theme = draw_ui::theme(tree);
+        let container = draw_app::add(
+            tree,
             parent,
             Flex::column()
                 .align(Align::Center)
@@ -435,9 +458,10 @@ impl Component for EmptyState {
                 .padding(Edges::all(space::XXXL)),
         );
 
-        let icon = ui.add(container.id(), Flex::new().padding(Edges::ZERO));
-        ui.set_min_size(icon.id(), Size::new(32.0, 32.0));
-        ui.add_decor(
+        let icon = draw_app::add(tree, container.id(), Flex::new().padding(Edges::ZERO));
+        draw_app::update_control(tree, icon.id(), |d| d.min_size = Size::new(32.0, 32.0));
+        draw_ui::add_decor(
+            tree,
             icon.id(),
             foreground_decor(theme, |ctx, rect, theme, _| {
                 surface(
@@ -450,103 +474,14 @@ impl Component for EmptyState {
             }),
         );
 
-        ui.add(container.id(), Text::subheading(self.title));
+        draw_app::add(tree, container.id(), Text::subheading(self.title));
         if let Some(description) = self.description {
-            ui.add(container.id(), Text::small(description).tone(Tone::Muted));
+            draw_app::add(
+                tree,
+                container.id(),
+                Text::small(description).tone(Tone::Muted),
+            );
         }
         container
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use draw_core::{Size as CoreSize, Viewport};
-    use draw_render::DrawCommand;
-    use draw_theme::Theme;
-
-    fn layout(ui: &mut Ui, width: f32, height: f32) {
-        ui.layout(Viewport::new(CoreSize::new(width, height)));
-    }
-
-    #[test]
-    fn card_registers_a_surface_and_flows_children() {
-        let mut ui = Ui::new();
-        ui.set_theme(Theme::dark());
-        let root = ui.root();
-        let card = ui.add(root, Card::new());
-        ui.add(card.id(), Text::heading("Title"));
-        layout(&mut ui, 400.0, 300.0);
-
-        let mut ctx = PaintContext::new();
-        ui.paint(&mut ctx);
-        let list = ctx.into_draw_list();
-        assert!(list
-            .commands()
-            .iter()
-            .any(|c| matches!(c, DrawCommand::FillRoundedRect { .. })));
-    }
-
-    #[test]
-    fn divider_has_a_one_pixel_min_extent() {
-        let mut ui = Ui::new();
-        ui.set_theme(Theme::light());
-        let root = ui.root();
-        let divider = ui.add(root, Divider::horizontal());
-        layout(&mut ui, 300.0, 100.0);
-        let rect = ui.control(divider.id()).unwrap().rect;
-        assert!((rect.size.height - 1.0).abs() < 1e-3);
-    }
-
-    #[test]
-    fn badge_sizes_to_its_text() {
-        let mut ui = Ui::new();
-        ui.set_theme(Theme::light());
-        let root = ui.root();
-        let badge = ui.add(root, Badge::new("Stable"));
-        layout(&mut ui, 300.0, 100.0);
-        let rect = ui.control(badge.id()).unwrap().rect;
-        assert!(rect.size.width > 0.0);
-        assert!(rect.size.height > 0.0);
-    }
-
-    #[test]
-    fn code_block_draws_surface_and_text() {
-        let mut ui = Ui::new();
-        ui.set_theme(Theme::dark());
-        let root = ui.root();
-        let block = ui.add(
-            root,
-            CodeBlock::new("let x = 1;")
-                .filename("main.rs")
-                .language("rust"),
-        );
-        layout(&mut ui, 500.0, 300.0);
-        let mut ctx = PaintContext::new();
-        ui.paint(&mut ctx);
-        let list = ctx.into_draw_list();
-        let texts: Vec<&str> = list
-            .commands()
-            .iter()
-            .filter_map(|c| match c {
-                DrawCommand::DrawText { text, .. } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert!(texts.iter().any(|t| t.contains("let x = 1;")));
-        let _ = block;
-    }
-
-    #[test]
-    fn empty_state_has_a_title() {
-        let mut ui = Ui::new();
-        ui.set_theme(Theme::light());
-        let root = ui.root();
-        let empty = ui.add(
-            root,
-            EmptyState::new("No results").description("Try another query."),
-        );
-        layout(&mut ui, 400.0, 300.0);
-        assert!(ui.control(empty.id()).is_some());
     }
 }

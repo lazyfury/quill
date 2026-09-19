@@ -3,7 +3,7 @@ use std::fmt;
 
 use web_sys::{CanvasRenderingContext2d, HtmlImageElement};
 
-use draw_core::{Color, Transform2D, Viewport};
+use draw_core::{Color, Transform2D, ViewportSize};
 use draw_render::{CornerRadii, DrawCommand, DrawList, Paint, RenderBackend, TextAlign, TextureId};
 
 /// The Canvas font spec used for `DrawText` at `font_size` logical pixels.
@@ -288,7 +288,7 @@ impl Canvas2dBackend {
 impl RenderBackend for Canvas2dBackend {
     type Error = CanvasError;
 
-    fn begin_frame(&mut self, viewport: Viewport) -> Result<(), Self::Error> {
+    fn begin_frame(&mut self, viewport: ViewportSize) -> Result<(), Self::Error> {
         let canvas = self.ctx.canvas().ok_or(CanvasError::MissingCanvas)?;
         let device = viewport.device_size(self.scale_factor);
         canvas.set_width(device.width.round().max(0.0) as u32);

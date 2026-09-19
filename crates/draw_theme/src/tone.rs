@@ -1,12 +1,13 @@
-//! Semantic color tones resolved against a [`Theme`].
+//! Semantic color tones resolved against a [`Theme`](crate::Theme).
 
 use draw_core::Color;
-use draw_theme::{Semantic, SurfaceLevel, Theme};
+
+use crate::{Semantic, SurfaceLevel, Theme};
 
 /// A semantic color role used by text and component chrome.
 ///
 /// Tones keep component constructors free of raw colors while still allowing an
-/// explicit [`color`](crate::Text::color) override.
+/// explicit color override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Tone {
     /// Primary foreground text.
@@ -59,7 +60,7 @@ impl Tone {
     }
 }
 
-/// Surface level used by the [`Card`](crate::Card) component.
+/// Surface level used by card / panel components.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SurfaceTone {
     /// Page background.

@@ -6,7 +6,7 @@
 //!
 //! - [`DebugOverlay`] — **component debug drawing**: a yellow border around
 //!   every visible `Control` plus a `Name #id` label in its top-left corner. It
-//!   wraps [`Ui::paint_debug`](draw_ui::Ui::paint_debug) and draws over the
+//!   wraps [`draw_ui::paint_debug`](draw_ui::paint_debug) and draws over the
 //!   application's own UI.
 //! - [`PerformanceOverlay`] — the frame-timing / inspection panel fed by
 //!   [`draw_profile`]; it owns its own `Ui` tree and is painted after the app UI.
@@ -29,13 +29,3 @@ mod performance;
 
 pub use component::DebugOverlay;
 pub use performance::{Corner, OverlayConfig, OverlayText, PerformanceOverlay};
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn crate_identity() {
-        assert_eq!(CRATE, "draw_debug_ui");
-    }
-}

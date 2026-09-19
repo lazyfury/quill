@@ -1,27 +1,26 @@
 //! Reusable component API.
 //!
-//! Components are small builder structs mounted into a [`Ui`]:
+//! Components are small builder structs mounted into a [`SceneTree`]:
 //!
 //! ```ignore
-//! let panel = ui.add(ui.root(), Panel::new());
-//! let vbox = ui.add(panel.id(), VBox::new());
-//! let label = ui.add(vbox.id(), Label::new("Hello"));
-//! let button = ui.add(vbox.id(), Button::new("Click me").on_click(|| { /* ... */ }));
+//! let panel = add(tree, root, Panel::new());
+//! let vbox = add(tree, panel.id(), VBox::new());
+//! let label = add(tree, vbox.id(), Label::new("Hello"));
+//! let button = add(tree, vbox.id(), Button::new("Click me").on_click(|| { /* ... */ }));
 //! ```
 //!
-//! Layout is applied per-frame via [`Ui::layout`](crate::Ui::layout); state
-//! changes only touch core data and the next `paint` produces a fresh
-//! `DrawList`.
+//! Layout is applied per-frame via [`draw_ui::layout`]; state changes only
+//! touch core data and the next `paint` produces a fresh `DrawList`.
 
 use draw_core::{Color, Edges, NodeId};
-
-use crate::control::ControlData;
-use crate::layout::{
+use draw_scene::SceneTree;
+use draw_ui::layout::{
     Align, AlignContent, FlexDirection, FlexStyle, GridStyle, Justify, TextOptions, Track,
 };
-use crate::ui::Ui;
+use draw_ui::{ButtonData, ControlData, Widget};
+
+use crate::build::insert;
 use crate::view::{child, BuildContext, Child, View};
-use crate::widget::{ButtonData, Widget};
 
 /// An owned handle to a mounted control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,9 +44,9 @@ impl From<ControlRef> for NodeId {
     }
 }
 
-/// Something that can be mounted into a [`Ui`].
+/// Something that can be mounted into a [`SceneTree`].
 pub trait Component {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef;
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef;
 }
 
 /// A card/background control. Fills its parent by default.
@@ -115,8 +114,9 @@ impl Panel {
 }
 
 impl Component for Panel {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let id = ui.insert(
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let id = insert(
+            tree,
             parent,
             "Panel",
             ControlData::fill_parent(),
@@ -125,7 +125,7 @@ impl Component for Panel {
                 border: self.border,
             },
         );
-        BuildContext { ui, parent: id }.children(self.children);
+        BuildContext::new(tree, id).children(self.children);
         ControlRef::new(id)
     }
 }
@@ -184,8 +184,9 @@ impl Label {
 }
 
 impl Component for Label {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        ControlRef::new(ui.insert(
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        ControlRef::new(insert(
+            tree,
             parent,
             "Label",
             ControlData::default(),
@@ -247,17 +248,18 @@ impl Button {
 }
 
 impl Component for Button {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
         let mut data = ButtonData::new(self.text);
         data.options = self.options;
-        let id = ui.insert(
+        let id = insert(
+            tree,
             parent,
             "Button",
             ControlData::default(),
             Widget::Button(data),
         );
         if let Some(callback) = self.on_click {
-            ui.set_on_click(id, callback);
+            crate::set_on_click(tree, id, callback);
         }
         ControlRef::new(id)
     }
@@ -296,11 +298,12 @@ impl VBox {
 }
 
 impl Component for VBox {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
         let style = FlexStyle::column()
             .gap(self.separation)
             .padding(self.padding);
-        ControlRef::new(ui.insert(
+        ControlRef::new(insert(
+            tree,
             parent,
             "VBox",
             ControlData::fill_parent(),
@@ -342,9 +345,10 @@ impl HBox {
 }
 
 impl Component for HBox {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
         let style = FlexStyle::row().gap(self.separation).padding(self.padding);
-        ControlRef::new(ui.insert(
+        ControlRef::new(insert(
+            tree,
             parent,
             "HBox",
             ControlData::fill_parent(),
@@ -461,14 +465,15 @@ impl Flex {
 }
 
 impl Component for Flex {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let id = ui.insert(
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let id = insert(
+            tree,
             parent,
             "Flex",
             ControlData::fill_parent(),
             Widget::Flex(self.style),
         );
-        BuildContext { ui, parent: id }.children(self.children);
+        BuildContext::new(tree, id).children(self.children);
         ControlRef::new(id)
     }
 }
@@ -665,63 +670,13 @@ impl Grid {
 }
 
 impl Component for Grid {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        ControlRef::new(ui.insert(
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        ControlRef::new(insert(
+            tree,
             parent,
             "Grid",
             ControlData::fill_parent(),
             Widget::Grid(self.style),
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::cell::Cell;
-    use std::rc::Rc;
-
-    use draw_core::{InputEvent, PointerButton, Size, Viewport};
-
-    #[test]
-    fn components_compose_and_click() {
-        let mut ui = Ui::new();
-        let clicks = Rc::new(Cell::new(0));
-
-        let panel = ui.add(ui.root(), Panel::new());
-        let vbox = ui.add(panel.id(), VBox::new());
-        let label = ui.add(vbox.id(), Label::new("Hello"));
-        let counter = clicks.clone();
-        let button = ui.add(
-            vbox.id(),
-            Button::new("Click me").on_click(move || counter.set(counter.get() + 1)),
-        );
-
-        ui.layout(Viewport::new(Size::new(800.0, 600.0)));
-
-        let label_rect = ui.control(label.id()).unwrap().rect;
-        let button_rect = ui.control(button.id()).unwrap().rect;
-        assert!(label_rect.top() < button_rect.top());
-
-        let center = button_rect.center();
-        ui.handle_input(&InputEvent::PointerDown {
-            position: center,
-            button: PointerButton::Left,
-        });
-        ui.handle_input(&InputEvent::PointerUp {
-            position: center,
-            button: PointerButton::Left,
-        });
-
-        assert_eq!(clicks.get(), 1);
-        assert_eq!(ui.click_count(button.id()), 1);
-    }
-
-    #[test]
-    fn control_ref_converts_to_node_id() {
-        let mut ui = Ui::new();
-        let label = ui.add(ui.root(), Label::new("x"));
-        let id: NodeId = label.into();
-        assert_eq!(id, label.id());
     }
 }

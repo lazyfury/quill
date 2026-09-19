@@ -4,7 +4,7 @@ A `RenderBackend` consumes a backend-neutral `DrawList` and produces output. The
 frame lifecycle is:
 
 ```text
-begin_frame(Viewport) -> submit(&DrawList) (0..n) -> end_frame()
+begin_frame(ViewportSize) -> submit(&DrawList) (0..n) -> end_frame()
 ```
 
 ## Canvas 2D (`draw_backend_canvas`)

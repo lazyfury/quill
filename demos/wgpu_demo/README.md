@@ -108,7 +108,7 @@ top-left corner. This is `draw_ui::Ui::paint_debug` wrapped by
 `draw_debug_ui::DebugOverlay`:
 
 ```text
-demo.paint -> debug.paint(&demo.ui(), ctx) -> `ui.paint_debug(...)`
+demo.paint -> debug.paint(demo.ui(), demo.tree(), ctx) -> `ui.paint_debug(tree, ...)`
 ```
 
 See `docs/debug.md` for the options (`show_names`, `show_ids`, colors, ...) and

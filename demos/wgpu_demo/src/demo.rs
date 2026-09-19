@@ -9,9 +9,9 @@
 use std::rc::Rc;
 
 use draw_backend_wgpu::FontMetrics;
-use draw_core::{EventResult, InputEvent, Viewport};
+use draw_core::{EventResult, InputEvent, ViewportSize};
 use draw_render::PaintContext;
-use draw_ui::{TextMeasurer, Ui};
+use draw_ui::TextMeasurer;
 
 use demo_app::DemoApp;
 
@@ -68,12 +68,12 @@ impl Demo {
     ///
     /// UI layout is deliberately *not* performed here: the host times it as a
     /// separate pipeline phase via [`Demo::layout`].
-    pub fn update(&mut self, viewport: Viewport, dt: f32) {
+    pub fn update(&mut self, viewport: ViewportSize, dt: f32) {
         self.app.update(viewport, dt);
     }
 
     /// Resolves UI layout for `viewport` (the timed *layout* pipeline phase).
-    pub fn layout(&mut self, viewport: Viewport) {
+    pub fn layout(&mut self, viewport: ViewportSize) {
         self.app.layout(viewport);
     }
 
@@ -87,9 +87,9 @@ impl Demo {
         self.app.event(event)
     }
 
-    /// The demo's UI tree, used by the component debug overlay.
-    pub fn ui(&self) -> &Ui {
-        self.app.ui()
+    /// The scene tree shared by world and UI nodes.
+    pub fn tree(&self) -> &draw_scene::SceneTree {
+        self.app.tree()
     }
 
     /// Controls in the demo UI.

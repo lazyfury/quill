@@ -61,31 +61,33 @@ Then submit `list` to any `RenderBackend` (recording, Canvas 2D, ...). See
 ## Create your first control
 
 ```rust
-use draw_core::{Size, Viewport};
-use draw_ui::{Ui, Panel, VBox, Label, Button};
+use draw_core::{Size, ViewportSize};
+use draw_scene::SceneTree;
+use draw_ui as ui;
 
-let mut ui = Ui::new();
+let mut tree = SceneTree::new();
+let root = ui::add_flex(&mut tree, tree.root(), ui::FlexStyle::column());
+let panel = ui::add(&mut tree, root, Panel::new());
+let vbox = ui::add(&mut tree, panel.id(), VBox::new());
+ui::add(&mut tree, vbox.id(), Label::new("Hello"));
 
-let panel = ui.add(ui.root(), Panel::new());
-let vbox = ui.add(panel.id(), VBox::new());
-ui.add(vbox.id(), Label::new("Hello"));
-
-let button = ui.add(
+let button = ui::add(
+    &mut tree,
     vbox.id(),
     Button::new("Click me").on_click(|| println!("clicked!")),
 );
 
-ui.layout(Viewport::new(Size::new(800.0, 600.0)));
+ui::layout(&mut tree, ViewportSize::new(Size::new(800.0, 600.0)));
 
 // Pointer/keyboard input (backend-neutral):
-ui.handle_input(&draw_core::InputEvent::PointerDown {
+ui::route_input(&mut tree, &draw_core::InputEvent::PointerDown {
     position: draw_core::Vec2::new(100.0, 100.0),
     button: draw_core::PointerButton::Left,
 });
 
 // Paint into a DrawList:
 let mut ctx = draw_render::PaintContext::new();
-ui.paint(&mut ctx);
+ui::paint(&tree, &mut ctx);
 ```
 
 See `docs/components.md` for anchors, containers, events and custom components,

@@ -31,13 +31,15 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use draw_app::{Column, Flex, Label, Panel, Row, View, ViewExt};
 use draw_components::{Badge, Button, Checkbox, Divider, Overlays, Switch, Text};
-use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, Viewport};
+use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize};
 use draw_render::{CornerRadii, PaintContext};
-use draw_theme::{radius, space, TextSize, Theme};
+use draw_scene::SceneTree;
+use draw_theme::{radius, space, TextSize, Theme, Tone};
 use draw_ui::{
-    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Column, Flex, Justify, Label,
-    Panel, Row, SurfaceStyle, TextMeasurer, TextOptions, Tone, Ui, View, ViewExt,
+    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, FlexStyle, Justify, MouseFilter,
+    SurfaceStyle, TextMeasurer, TextOptions,
 };
 
 /// Sidebar width in logical pixels.
@@ -116,7 +118,7 @@ const TAG_ITEMS: &[&str] = &["Design", "Rust", "Docs"];
 
 /// Application state shared by every demo host.
 pub struct DemoApp {
-    ui: Ui,
+    tree: SceneTree,
     theme: Theme,
     sidebar: NodeId,
     list: NodeId,
@@ -135,7 +137,7 @@ pub struct DemoApp {
     overlays: Overlays,
     delete_requested: Rc<Cell<bool>>,
     deleted: Rc<Cell<bool>>,
-    viewport: Viewport,
+    viewport: ViewportSize,
 }
 
 impl Default for DemoApp {
@@ -152,9 +154,13 @@ impl DemoApp {
 
     /// Builds the app with an explicit theme.
     pub fn with_theme(theme: Theme) -> Self {
-        let mut ui = Ui::new();
-        ui.set_theme(theme);
-        let root = ui.root();
+        let mut tree = SceneTree::new();
+        draw_ui::set_theme(&mut tree, theme);
+        let tree_root = tree.root();
+        let root = draw_app::add_flex(&mut tree, tree_root, FlexStyle::column());
+        draw_app::update_control(&mut tree, root, |data| {
+            data.mouse_filter = MouseFilter::Ignore
+        });
 
         let selected = Rc::new(Cell::new(0));
         let selected_nav = Rc::new(Cell::new(0));
@@ -163,19 +169,20 @@ impl DemoApp {
         let ids = Rc::new(RefCell::new(Ids::default()));
 
         // Three columns plus their hairline separators, all declarative.
-        ui.mount(root, sidebar_view(theme, &selected_nav, &ids));
-        ui.mount(root, list_view(theme, &selected, &ids));
-        ui.mount(
+        draw_app::mount(&mut tree, root, sidebar_view(theme, &selected_nav, &ids));
+        draw_app::mount(&mut tree, root, list_view(theme, &selected, &ids));
+        draw_app::mount(
+            &mut tree,
             root,
             detail_view(theme, &selected, &clicks, &delete_requested, &ids),
         );
         for x in [SIDEBAR_WIDTH, DETAIL_X] {
-            ui.mount(root, separator_view(theme, x));
+            draw_app::mount(&mut tree, root, separator_view(theme, x));
         }
 
         let ids = ids.borrow();
         Self {
-            ui,
+            tree,
             theme,
             sidebar: ids.sidebar.expect("sidebar node"),
             list: ids.list.expect("list node"),
@@ -194,24 +201,20 @@ impl DemoApp {
             overlays: Overlays::new(theme),
             delete_requested,
             deleted: Rc::new(Cell::new(false)),
-            viewport: Viewport::new(Size::new(1100.0, 720.0)),
+            viewport: ViewportSize::new(Size::new(1100.0, 720.0)),
         }
     }
 
     // -- accessors ---------------------------------------------------------
 
-    pub fn ui(&self) -> &Ui {
-        &self.ui
-    }
-
-    /// Mutable UI access, e.g. to inject a text measurer.
-    pub fn ui_mut(&mut self) -> &mut Ui {
-        &mut self.ui
+    /// The scene tree shared by world and UI nodes.
+    pub fn tree(&self) -> &SceneTree {
+        &self.tree
     }
 
     /// Installs `measurer` for both the main UI and the overlay layer.
     pub fn set_text_measurer(&mut self, measurer: Rc<dyn TextMeasurer>) {
-        self.ui.set_text_measurer(measurer.clone());
+        draw_ui::set_text_measurer(&mut self.tree, measurer.clone());
         self.overlays.set_text_measurer(measurer);
     }
 
@@ -223,7 +226,7 @@ impl DemoApp {
         &self.theme
     }
 
-    pub fn viewport(&self) -> Viewport {
+    pub fn viewport(&self) -> ViewportSize {
         self.viewport
     }
 
@@ -266,29 +269,23 @@ impl DemoApp {
 
     /// Center of the primary button in logical viewport coordinates.
     pub fn button_center(&self) -> Option<Vec2> {
-        self.ui
-            .control(self.primary_button)
-            .map(|control| control.rect.center())
+        draw_ui::control(&self.tree, self.primary_button).map(|control| control.rect.center())
     }
 
     /// Text of the detail title label (used by tests).
     pub fn detail_title_text(&self) -> Option<&str> {
-        self.ui
-            .widget(self.detail_title)
-            .and_then(|widget| widget.text())
+        draw_ui::widget(&self.tree, self.detail_title).and_then(|widget| widget.text())
     }
 
     /// Text of the list-item count badge label.
     pub fn detail_body_text(&self) -> Option<&str> {
-        self.ui
-            .widget(self.detail_body)
-            .and_then(|widget| widget.text())
+        draw_ui::widget(&self.tree, self.detail_body).and_then(|widget| widget.text())
     }
 
     // -- pipeline ----------------------------------------------------------
 
     /// Updates state-driven text and overlay timers.
-    pub fn update(&mut self, viewport: Viewport, dt: f32) {
+    pub fn update(&mut self, viewport: ViewportSize, dt: f32) {
         self.viewport = viewport;
         self.overlays.update(dt);
 
@@ -308,20 +305,22 @@ impl DemoApp {
 
         let index = self.selected.get().min(NOTES.len() - 1);
         let note = &NOTES[index];
-        self.ui.set_text(self.detail_title, note.title);
-        self.ui.set_text(self.detail_body, note.body);
-        self.ui.set_text(self.detail_tag, note.tag);
-        self.ui.set_text(
+        draw_app::set_text(&mut self.tree, self.detail_title, note.title);
+        draw_app::set_text(&mut self.tree, self.detail_body, note.body);
+        draw_app::set_text(&mut self.tree, self.detail_tag, note.tag);
+        draw_app::set_text(
+            &mut self.tree,
             self.detail_meta,
             format!("Edited {} · {}", note.modified, note.tag),
         );
     }
 
     /// Resolves UI layout for `viewport`, then positions the overlays.
-    pub fn layout(&mut self, viewport: Viewport) {
+    pub fn layout(&mut self, viewport: ViewportSize) {
         self.viewport = viewport;
-        self.ui.layout(viewport);
-        self.overlays.layout(&self.ui, viewport);
+        draw_ui::layout(&mut self.tree, viewport);
+        self.tree.update();
+        self.overlays.layout(&self.tree, viewport);
     }
 
     /// Emits this frame's `DrawList` into `ctx`.
@@ -335,7 +334,7 @@ impl DemoApp {
             self.theme.palette.background,
         );
 
-        self.ui.paint(ctx);
+        draw_ui::paint(&self.tree, ctx);
         self.overlays.paint(ctx);
     }
 
@@ -344,20 +343,18 @@ impl DemoApp {
         if self.overlays.handle_input(event).is_handled() {
             return EventResult::Handled;
         }
-        self.ui.handle_input(event)
+        draw_app::route_input(&mut self.tree, event)
     }
 
     /// Controls in the demo UI.
     pub fn control_count(&self) -> usize {
-        self.ui.control_count()
+        draw_ui::control_count(&self.tree)
     }
 
     /// Whether the pointer is over anything clickable (a themed component or
     /// core button). Hosts use this for cursor feedback.
     pub fn pointer_over_clickable(&self) -> bool {
-        self.ui
-            .hovered()
-            .is_some_and(|id| self.ui.is_interactive(id))
+        draw_app::hovered(&self.tree).is_some_and(|id| draw_app::is_interactive(&self.tree, id))
     }
 }
 
@@ -779,7 +776,7 @@ mod tests {
     use draw_render::{DrawCommand, RenderBackend};
 
     fn laid_out(width: f32, height: f32) -> DemoApp {
-        let viewport = Viewport::new(Size::new(width, height));
+        let viewport = ViewportSize::new(Size::new(width, height));
         let mut app = DemoApp::new();
         app.update(viewport, 0.016);
         app.layout(viewport);
@@ -787,7 +784,7 @@ mod tests {
     }
 
     fn rect(app: &DemoApp, id: NodeId) -> Rect {
-        app.ui().control(id).expect("control").rect
+        draw_ui::control(app.tree(), id).expect("control").rect
     }
 
     fn click(app: &mut DemoApp, position: Vec2) {
@@ -832,10 +829,9 @@ mod tests {
 
     #[test]
     fn note_rows_fit_with_a_wide_measurer() {
-        let viewport = Viewport::new(Size::new(1100.0, 720.0));
+        let viewport = ViewportSize::new(Size::new(1100.0, 720.0));
         let mut app = DemoApp::new();
-        app.ui_mut()
-            .set_text_measurer(std::rc::Rc::new(draw_ui::FixedWidthTextMeasurer::default()));
+        app.set_text_measurer(std::rc::Rc::new(draw_ui::FixedWidthTextMeasurer::default()));
         app.update(viewport, 0.016);
         app.layout(viewport);
         let list = rect(&app, app.list());
@@ -878,7 +874,7 @@ mod tests {
         let mut app = laid_out(1100.0, 720.0);
         let detail_before = rect(&app, app.detail()).size.width;
 
-        let wide = Viewport::new(Size::new(1400.0, 800.0));
+        let wide = ViewportSize::new(Size::new(1400.0, 800.0));
         app.update(wide, 0.016);
         app.layout(wide);
 
@@ -945,7 +941,7 @@ mod tests {
         let row_rect = rect(&app, row);
 
         let mut ctx = PaintContext::new();
-        app.ui.paint(&mut ctx);
+        draw_ui::paint(app.tree(), &mut ctx);
         let list = ctx.into_draw_list();
 
         // The selection surface is square on the left and rounded on the right.

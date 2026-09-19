@@ -1,4 +1,8 @@
-use draw_core::{Color, NodeId, Size, Transform2D};
+use std::any::Any;
+
+use draw_core::{Color, EventResult, InputEvent, NodeId, Size, Transform2D, Vec2};
+
+use crate::viewport::Viewport;
 
 /// A minimal built-in visual for canvas items.
 ///
@@ -23,7 +27,10 @@ pub enum Visual {
 ///
 /// `Node` is a pure grouping node with no visual state. `Node2D` is a canvas
 /// item: it owns a local [`Transform2D`], a z-index and visibility.
-/// `Control` is added in Stage 6.
+/// `CanvasLayer` opens a new canvas transform context (it is *not* a canvas
+/// item); `Camera2D` is a canvas item that writes the viewport camera.
+/// `Control` is a UI canvas item whose layout and painting are owned by
+/// `draw_ui`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
     Node,
@@ -31,6 +38,78 @@ pub enum NodeKind {
     /// A UI control. Like `Node2D` it is a canvas item, but its layout and
     /// painting are owned by `draw_ui`.
     Control,
+    /// A grouping node that opens a new canvas transform context. Children
+    /// belonging to no nested `CanvasLayer` are painted with this layer's
+    /// transform instead of the viewport camera. Not a canvas item.
+    CanvasLayer,
+    /// A 2D camera. A canvas item (it has a transform), but invisible; its
+    /// transform drives the viewport's `canvas_transform` when current.
+    Camera2D,
+    /// The root render context. Owns the logical size and the world -> screen
+    /// `canvas_transform`. Not a canvas item. Only the tree root uses it today
+    /// (Godot `RootViewport`); `SubViewport` is out of scope.
+    Viewport,
+}
+
+/// How a [`Camera2DData`] maps the camera position onto the viewport.
+///
+/// Mirrors Godot `Camera2D::AnchorMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AnchorMode {
+    /// The camera's position is the viewport's top-left corner.
+    FixedTopLeft,
+    /// The camera's position is the viewport's center (Godot default).
+    #[default]
+    DragCenter,
+}
+
+/// Per-node data owned by a [`NodeKind::CanvasLayer`].
+///
+/// Mirrors Godot's `CanvasLayer`: `layer` selects paint order (default `1`,
+/// the default world canvas being `0`), `transform` is the layer's own canvas
+/// transform, and `follow_viewport` composes the camera transform before it
+/// (Godot `CanvasLayer::get_final_transform`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CanvasLayerData {
+    pub layer: i32,
+    pub transform: Transform2D,
+    pub follow_viewport: bool,
+}
+
+impl Default for CanvasLayerData {
+    fn default() -> Self {
+        Self {
+            layer: 1,
+            transform: Transform2D::IDENTITY,
+            follow_viewport: false,
+        }
+    }
+}
+
+/// Per-node data owned by a [`NodeKind::Camera2D`].
+///
+/// Phase 2 keeps the transform inputs Godot uses for
+/// `Camera2D::get_camera_transform`: `current`, `zoom`, `offset` and
+/// `anchor_mode`. Limits, drag margins and smoothing arrive in a later phase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Camera2DData {
+    pub enabled: bool,
+    pub current: bool,
+    pub zoom: Vec2,
+    pub offset: Vec2,
+    pub anchor_mode: AnchorMode,
+}
+
+impl Default for Camera2DData {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            current: false,
+            zoom: Vec2::ONE,
+            offset: Vec2::ZERO,
+            anchor_mode: AnchorMode::DragCenter,
+        }
+    }
 }
 
 /// Which derived values are stale and must be recomputed on the next update.
@@ -128,7 +207,10 @@ impl CanvasItem {
 }
 
 /// A single node in the [`crate::SceneTree`].
-#[derive(Debug, Clone)]
+///
+/// `Node` is not `Clone`: it can hold arbitrary user data (`Box<dyn Any>`) via
+/// [`Node::set_data`]. Clone the tree only if you never need the slot, which is
+/// not the case today.
 pub struct Node {
     pub(crate) id: NodeId,
     pub(crate) name: String,
@@ -138,11 +220,54 @@ pub struct Node {
     /// Monotonic creation sequence, used as a stable tie-breaker for z-ordering.
     pub(crate) order: u64,
     pub(crate) canvas: Option<CanvasItem>,
+    pub(crate) canvas_layer: Option<CanvasLayerData>,
+    pub(crate) camera_2d: Option<Camera2DData>,
+    pub(crate) viewport: Option<Viewport>,
+    /// Backend-neutral extension slot for engine/UI data (`ControlData`, …).
+    /// `draw_scene` never names the concrete type.
+    pub(crate) data: Option<Box<dyn Any>>,
+    /// Per-frame lifecycle callback, dispatched by [`crate::SceneTree::process`].
+    pub(crate) process: Option<Box<dyn FnMut(f32)>>,
+    /// Capture-phase input callback (Godot `Node::_input`).
+    pub(crate) input: Option<Box<dyn FnMut(&InputEvent) -> EventResult>>,
+    /// World-pick input callback (Godot `Node2D`/`CanvasItem::_input_event`).
+    pub(crate) input_event: Option<Box<dyn FnMut(&InputEvent) -> EventResult>>,
+    /// Unhandled-input callback (Godot `Node::_unhandled_input`).
+    pub(crate) unhandled_input: Option<Box<dyn FnMut(&InputEvent) -> EventResult>>,
+}
+
+impl std::fmt::Debug for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Node")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("kind", &self.kind)
+            .field("parent", &self.parent)
+            .field("children", &self.children)
+            .field("order", &self.order)
+            .field("canvas", &self.canvas)
+            .field("canvas_layer", &self.canvas_layer)
+            .field("camera_2d", &self.camera_2d)
+            .field("viewport", &self.viewport)
+            .field("has_data", &self.data.is_some())
+            .field("has_process", &self.process.is_some())
+            .field("has_input", &self.input.is_some())
+            .field("has_input_event", &self.input_event.is_some())
+            .field("has_unhandled_input", &self.unhandled_input.is_some())
+            .finish()
+    }
 }
 
 impl Node {
     pub(crate) fn new(id: NodeId, name: impl Into<String>, kind: NodeKind, order: u64) -> Self {
-        let canvas = matches!(kind, NodeKind::Node2D | NodeKind::Control).then(CanvasItem::new);
+        let canvas = matches!(
+            kind,
+            NodeKind::Node2D | NodeKind::Control | NodeKind::Camera2D
+        )
+        .then(CanvasItem::new);
+        let canvas_layer = (kind == NodeKind::CanvasLayer).then(CanvasLayerData::default);
+        let camera_2d = (kind == NodeKind::Camera2D).then(Camera2DData::default);
+        let viewport = (kind == NodeKind::Viewport).then(Viewport::default);
         Self {
             id,
             name: name.into(),
@@ -151,6 +276,14 @@ impl Node {
             children: Vec::new(),
             order,
             canvas,
+            canvas_layer,
+            camera_2d,
+            viewport,
+            data: None,
+            process: None,
+            input: None,
+            input_event: None,
+            unhandled_input: None,
         }
     }
 
@@ -212,5 +345,73 @@ impl Node {
     /// Effective visibility including ancestors (valid after update).
     pub fn world_visible(&self) -> bool {
         self.canvas.as_ref().map_or(true, |c| c.world_visible)
+    }
+
+    /// Layer data for a [`NodeKind::CanvasLayer`] node; `None` otherwise.
+    pub fn canvas_layer(&self) -> Option<&CanvasLayerData> {
+        self.canvas_layer.as_ref()
+    }
+
+    /// Data for a [`NodeKind::Camera2D`] node; `None` otherwise.
+    pub fn camera_2d(&self) -> Option<&Camera2DData> {
+        self.camera_2d.as_ref()
+    }
+
+    /// Render context for a [`NodeKind::Viewport`] node; `None` otherwise.
+    pub fn viewport(&self) -> Option<&Viewport> {
+        self.viewport.as_ref()
+    }
+
+    // -- generic extension slot --------------------------------------------
+
+    /// Stores a value in the node's type-keyed extension slot, replacing any
+    /// previous value (of any type). Downcast with [`Node::data`].
+    pub fn set_data<T: 'static>(&mut self, value: T) {
+        self.data = Some(Box::new(value));
+    }
+
+    /// Borrows the stored value if it has type `T`.
+    pub fn data<T: 'static>(&self) -> Option<&T> {
+        self.data.as_ref()?.downcast_ref::<T>()
+    }
+
+    /// Mutably borrows the stored value if it has type `T`.
+    pub fn data_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.data.as_mut()?.downcast_mut::<T>()
+    }
+
+    /// Returns `true` if a value of type `T` is stored.
+    pub fn has_data<T: 'static>(&self) -> bool {
+        self.data::<T>().is_some()
+    }
+
+    /// Removes and returns the stored value if it has type `T`.
+    pub fn take_data<T: 'static>(&mut self) -> Option<T> {
+        self.data.take()?.downcast::<T>().ok().map(|boxed| *boxed)
+    }
+
+    /// Removes any stored value regardless of type.
+    pub fn clear_data(&mut self) {
+        self.data = None;
+    }
+
+    /// Whether the node has a lifecycle callback.
+    pub fn has_process(&self) -> bool {
+        self.process.is_some()
+    }
+
+    /// Whether the node has a capture-phase input callback.
+    pub fn has_input(&self) -> bool {
+        self.input.is_some()
+    }
+
+    /// Whether the node has a world-pick input callback.
+    pub fn has_input_event(&self) -> bool {
+        self.input_event.is_some()
+    }
+
+    /// Whether the node has an unhandled-input callback.
+    pub fn has_unhandled_input(&self) -> bool {
+        self.unhandled_input.is_some()
     }
 }

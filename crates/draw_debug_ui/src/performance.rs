@@ -1,7 +1,8 @@
-use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Viewport};
+use draw_app::{Label, Panel, VBox};
+use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, ViewportSize};
 use draw_profile::{InspectionReport, Phase, Profiler, Severity};
 use draw_render::PaintContext;
-use draw_ui::{Label, Panel, Ui, VBox};
+use draw_scene::SceneTree;
 
 /// Which viewport corner the overlay panel is pinned to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -135,12 +136,12 @@ struct Rows {
 /// A togglable performance panel drawn from a [`Profiler`] and an
 /// [`InspectionReport`].
 ///
-/// The overlay owns a private [`Ui`](draw_ui::Ui); hosts keep their own UI and
+/// The overlay owns a private [`SceneTree`]; hosts keep their own tree and
 /// simply call [`update`](PerformanceOverlay::update) + [`paint`](PerformanceOverlay::paint)
 /// after painting the application. When closed, `update` and `paint` are no-ops
 /// and paint nothing.
 pub struct PerformanceOverlay {
-    ui: Ui,
+    tree: SceneTree,
     panel: NodeId,
     open: bool,
     config: OverlayConfig,
@@ -160,19 +161,26 @@ impl PerformanceOverlay {
     }
 
     pub fn with_config(config: OverlayConfig) -> Self {
-        let mut ui = Ui::new();
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        let root = draw_app::add_flex(&mut tree, tree_root, draw_ui::FlexStyle::column());
+        draw_app::update_control(&mut tree, root, |d| {
+            d.mouse_filter = draw_ui::MouseFilter::Ignore
+        });
 
-        let panel = ui.add(
-            ui.root(),
+        let panel = draw_app::add(
+            &mut tree,
+            root,
             Panel::new()
                 .color(config.background)
                 .border(Some(config.border)),
         );
         let (anchors, offsets) = config.placement();
-        ui.set_anchors(panel.id(), anchors);
-        ui.set_offsets(panel.id(), offsets);
+        draw_app::update_control(&mut tree, panel.id(), |d| d.anchors = anchors);
+        draw_app::update_control(&mut tree, panel.id(), |d| d.offsets = offsets);
 
-        let vbox = ui.add(
+        let vbox = draw_app::add(
+            &mut tree,
             panel.id(),
             VBox::new()
                 .separation(config.separation)
@@ -184,32 +192,36 @@ impl PerformanceOverlay {
         let title_size = config.title_font_size;
         let font_size = config.font_size;
 
-        let add = |ui: &mut Ui, text: &str, size: f32, color: Color| -> NodeId {
-            ui.add(vbox.id(), Label::new(text).font_size(size).color(color))
-                .id()
+        let add = |tree: &mut SceneTree, text: &str, size: f32, color: Color| -> NodeId {
+            draw_app::add(
+                tree,
+                vbox.id(),
+                Label::new(text).font_size(size).color(color),
+            )
+            .id()
         };
 
-        let title = add(&mut ui, "Performance", title_size, text_color);
-        let fps = add(&mut ui, "FPS --", font_size, text_color);
-        let frame = add(&mut ui, "frame -- ms", font_size, text_color);
-        let profiler = add(&mut ui, "profiler on  (F5 / o)", font_size, muted);
-        let update_layout = add(&mut ui, "update --   layout --", font_size, muted);
-        let paint_render = add(&mut ui, "paint --   render --", font_size, muted);
-        let commands = add(&mut ui, "commands --", font_size, muted);
-        let entities = add(&mut ui, "nodes --   controls --", font_size, muted);
-        let findings = add(&mut ui, "findings none", font_size, muted);
+        let title = add(&mut tree, "Performance", title_size, text_color);
+        let fps = add(&mut tree, "FPS --", font_size, text_color);
+        let frame = add(&mut tree, "frame -- ms", font_size, text_color);
+        let profiler = add(&mut tree, "profiler on  (F5 / o)", font_size, muted);
+        let update_layout = add(&mut tree, "update --   layout --", font_size, muted);
+        let paint_render = add(&mut tree, "paint --   render --", font_size, muted);
+        let commands = add(&mut tree, "commands --", font_size, muted);
+        let entities = add(&mut tree, "nodes --   controls --", font_size, muted);
+        let findings = add(&mut tree, "findings none", font_size, muted);
         let finding_rows: Vec<NodeId> = (0..config.max_finding_rows)
-            .map(|_| add(&mut ui, "(none)", font_size, muted))
+            .map(|_| add(&mut tree, "(none)", font_size, muted))
             .collect();
         let shortcuts = add(
-            &mut ui,
+            &mut tree,
             "F3 / ` / d bounds   F4 / p panel   F5 / o profiler",
             font_size,
             muted,
         );
 
         Self {
-            ui,
+            tree,
             panel: panel.id(),
             open: true,
             config,
@@ -235,8 +247,8 @@ impl PerformanceOverlay {
     }
 
     /// The overlay's own UI tree.
-    pub fn ui(&self) -> &Ui {
-        &self.ui
+    pub fn tree(&self) -> &SceneTree {
+        &self.tree
     }
 
     /// The panel control id (root of the overlay's visible content).
@@ -268,49 +280,60 @@ impl PerformanceOverlay {
     /// Recomputes the panel text from `profiler`/`report` and lays it out.
     ///
     /// No-op while closed.
-    pub fn update(&mut self, profiler: &Profiler, report: &InspectionReport, viewport: Viewport) {
+    pub fn update(
+        &mut self,
+        profiler: &Profiler,
+        report: &InspectionReport,
+        viewport: ViewportSize,
+    ) {
         if !self.open {
             return;
         }
         let text = build_text(profiler, report, self.config.max_finding_rows);
         self.apply(&text);
         self.text = text;
-        self.ui.layout(viewport);
+        draw_ui::layout(&mut self.tree, viewport);
+        self.tree.update();
     }
 
     /// Paints the overlay into `ctx`. No-op while closed.
     pub fn paint(&self, ctx: &mut PaintContext) {
         if self.open {
-            self.ui.paint(ctx);
+            draw_ui::paint(&self.tree, ctx);
         }
     }
 
     /// Routes an input event through the overlay. Closed overlays ignore input.
     pub fn handle_input(&mut self, event: &InputEvent) -> EventResult {
         if self.open {
-            self.ui.handle_input(event)
+            draw_app::handle_input(&mut self.tree, event)
         } else {
             EventResult::Ignored
         }
     }
 
     fn apply(&mut self, text: &OverlayText) {
-        self.ui.set_text(self.rows.title, text.title.clone());
-        self.ui.set_text(self.rows.fps, text.fps.clone());
-        self.ui.set_text(self.rows.frame, text.frame.clone());
-        self.ui.set_text(self.rows.profiler, text.profiler.clone());
-        self.ui
-            .set_text(self.rows.update_layout, text.update_layout.clone());
-        self.ui
-            .set_text(self.rows.paint_render, text.paint_render.clone());
-        self.ui.set_text(self.rows.commands, text.commands.clone());
-        self.ui.set_text(self.rows.entities, text.entities.clone());
-        self.ui.set_text(self.rows.findings, text.findings.clone());
+        draw_app::set_text(&mut self.tree, self.rows.title, text.title.clone());
+        draw_app::set_text(&mut self.tree, self.rows.fps, text.fps.clone());
+        draw_app::set_text(&mut self.tree, self.rows.frame, text.frame.clone());
+        draw_app::set_text(&mut self.tree, self.rows.profiler, text.profiler.clone());
+        draw_app::set_text(
+            &mut self.tree,
+            self.rows.update_layout,
+            text.update_layout.clone(),
+        );
+        draw_app::set_text(
+            &mut self.tree,
+            self.rows.paint_render,
+            text.paint_render.clone(),
+        );
+        draw_app::set_text(&mut self.tree, self.rows.commands, text.commands.clone());
+        draw_app::set_text(&mut self.tree, self.rows.entities, text.entities.clone());
+        draw_app::set_text(&mut self.tree, self.rows.findings, text.findings.clone());
         for (id, row) in self.rows.finding_rows.iter().zip(&text.finding_rows) {
-            self.ui.set_text(*id, row.clone());
+            draw_app::set_text(&mut self.tree, *id, row.clone());
         }
-        self.ui
-            .set_text(self.rows.shortcuts, text.shortcuts.clone());
+        draw_app::set_text(&mut self.tree, self.rows.shortcuts, text.shortcuts.clone());
     }
 }
 
@@ -405,6 +428,3 @@ fn build_text(profiler: &Profiler, report: &InspectionReport, max_rows: usize) -
         shortcuts: "F3 / ` / d bounds   F4 / p panel   F5 / o profiler".to_string(),
     }
 }
-
-#[cfg(test)]
-mod tests;

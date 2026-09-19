@@ -44,7 +44,7 @@ use std::sync::mpsc;
 
 use bytemuck::{Pod, Zeroable};
 
-use draw_core::{Color, Rect, Transform2D, Vec2, Viewport};
+use draw_core::{Color, Rect, Transform2D, Vec2, ViewportSize};
 use draw_render::{DrawList, Paint, RenderBackend, TextureId};
 
 use crate::font::{Font, FontConfig, FontMetrics};
@@ -228,7 +228,7 @@ pub struct WgpuBackend {
 
     // Per-frame CPU staging.
     pub(super) in_frame: bool,
-    pub(super) viewport: Viewport,
+    pub(super) viewport: ViewportSize,
     pub(super) scale_factor: f32,
     pub(super) clear: Color,
     pub(super) device_width: f32,
@@ -322,7 +322,7 @@ impl WgpuBackend {
     }
 
     /// Returns the viewport of the most recent [`RenderBackend::begin_frame`].
-    pub fn viewport(&self) -> Viewport {
+    pub fn viewport(&self) -> ViewportSize {
         self.viewport
     }
 
@@ -485,7 +485,7 @@ impl WgpuBackend {
 impl RenderBackend for WgpuBackend {
     type Error = WgpuError;
 
-    fn begin_frame(&mut self, viewport: Viewport) -> Result<(), Self::Error> {
+    fn begin_frame(&mut self, viewport: ViewportSize) -> Result<(), Self::Error> {
         let size = viewport.device_size(self.scale_factor);
         let width = size.width.round().max(1.0) as u32;
         let height = size.height.round().max(1.0) as u32;

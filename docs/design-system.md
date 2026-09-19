@@ -71,20 +71,22 @@ from `ui.theme()`, and attach their chrome to their own node. Hosts build one
 
 ```rust
 use draw_components::{Card, Checkbox, Text};
+use draw_scene::SceneTree;
 use draw_theme::{space, Theme};
-use draw_ui::{Tone, Ui};
+use draw_ui as ui;
 
-let mut ui = Ui::new();
-ui.set_theme(Theme::dark());
+let mut tree = SceneTree::new();
+ui::set_theme(&mut tree, Theme::dark());
 
-ui.mount(ui.root(), Card::new().gap(space::MD)
+let root = ui::add_flex(&mut tree, tree.root(), ui::FlexStyle::column());
+ui::mount(&mut tree, root, Card::new().gap(space::MD)
     .child(Text::heading("Settings"))
     .child(Text::small("Changes save automatically.").tone(Tone::Muted))
     .child(Checkbox::new("Verbose output")));
 
-ui.layout(viewport);
-ui.paint(&mut ctx);        // surfaces + content + marks, in tree order
-ui.handle_input(&event);   // dispatches component clicks
+ui::layout(&mut tree, viewport);
+ui::paint(&tree, &mut ctx);        // surfaces + content + marks, in tree order
+ui::route_input(&mut tree, &event); // dispatches component clicks
 ```
 
 ### Paint passes

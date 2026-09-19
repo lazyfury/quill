@@ -15,7 +15,7 @@ mod demo {
     use wasm_bindgen::prelude::*;
     use web_sys::CanvasRenderingContext2d;
 
-    use draw_core::{EventResult, InputEvent, Viewport};
+    use draw_core::{EventResult, InputEvent, ViewportSize};
     use draw_render::PaintContext;
     use draw_wasm::{App, CanvasTextMeasurer};
 
@@ -57,7 +57,7 @@ mod demo {
             self.0.pointer_over_clickable()
         }
 
-        fn update(&mut self, viewport: Viewport) {
+        fn update(&mut self, viewport: ViewportSize) {
             self.0.update(viewport, 0.016);
             self.0.layout(viewport);
             self.report_probe();

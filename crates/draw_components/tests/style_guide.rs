@@ -5,54 +5,78 @@ use draw_backend_recording::RecordingBackend;
 use draw_components::{
     Badge, Card, Checkbox, CodeBlock, Divider, EmptyState, Switch, Terminal, Text,
 };
-use draw_core::{Edges, Size, Viewport};
+use draw_core::{Edges, Size, ViewportSize};
 use draw_render::{DrawCommand, PaintContext, RenderBackend};
-use draw_theme::Theme;
-use draw_ui::Tone;
-use draw_ui::Ui;
+use draw_scene::SceneTree;
+use draw_theme::{Theme, Tone};
 
-fn build(theme: Theme) -> Ui {
-    let mut ui = Ui::new();
-    ui.set_theme(theme);
-    let root = ui.root();
+fn build(theme: Theme) -> SceneTree {
+    let mut tree = SceneTree::new();
+    draw_ui::set_theme(&mut tree, theme);
+    let tree_root = tree.root();
+    let root = draw_app::add_flex(&mut tree, tree_root, draw_ui::FlexStyle::column());
+    draw_app::update_control(&mut tree, root, |data| {
+        data.mouse_filter = draw_ui::MouseFilter::Ignore
+    });
 
-    let card = ui.add(root, Card::new().padding(Edges::all(24.0)).gap(12.0));
-    ui.add(card.id(), Text::title("Component Kit"));
-    ui.add(
+    let card = draw_app::add(
+        &mut tree,
+        root,
+        Card::new().padding(Edges::all(24.0)).gap(12.0),
+    );
+    draw_app::add(&mut tree, card.id(), Text::title("Component Kit"));
+    draw_app::add(
+        &mut tree,
         card.id(),
         Text::small("design tokens + themed components").tone(Tone::Muted),
     );
-    ui.add(card.id(), Divider::horizontal());
-    ui.add(card.id(), Badge::new("Stable").tone(Tone::Success));
-    ui.add(card.id(), Checkbox::new("Enable logs").checked(true));
-    ui.add(card.id(), Switch::new().label("Dark mode").on(true));
-    ui.add(
+    draw_app::add(&mut tree, card.id(), Divider::horizontal());
+    draw_app::add(
+        &mut tree,
+        card.id(),
+        Badge::new("Stable").tone(Tone::Success),
+    );
+    draw_app::add(
+        &mut tree,
+        card.id(),
+        Checkbox::new("Enable logs").checked(true),
+    );
+    draw_app::add(
+        &mut tree,
+        card.id(),
+        Switch::new().label("Dark mode").on(true),
+    );
+    draw_app::add(
+        &mut tree,
         card.id(),
         CodeBlock::new("cargo test --workspace")
             .filename("shell")
             .language("bash"),
     );
-    ui.add(
+    draw_app::add(
+        &mut tree,
         card.id(),
         Terminal::new()
             .command("cargo test")
             .output("test result: ok. 23 passed; 0 failed"),
     );
-    ui.add(
+    draw_app::add(
+        &mut tree,
         card.id(),
         EmptyState::new("No items").description("Create one to get started."),
     );
 
-    ui
+    tree
 }
 
 fn render(theme: Theme) -> Vec<DrawCommand> {
-    let mut ui = build(theme);
-    let viewport = Viewport::new(Size::new(560.0, 1000.0));
-    ui.layout(viewport);
+    let mut tree = build(theme);
+    let viewport = ViewportSize::new(Size::new(560.0, 1000.0));
+    draw_ui::layout(&mut tree, viewport);
+    tree.update();
 
     let mut ctx = PaintContext::new();
-    ui.paint(&mut ctx);
+    draw_ui::paint(&tree, &mut ctx);
     let list = ctx.into_draw_list();
 
     let mut backend = RecordingBackend::new();

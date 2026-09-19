@@ -17,7 +17,7 @@
 //!
 //! ```no_run
 //! use draw_backend_wgpu::WgpuBackend;
-//! use draw_core::{Color, Rect, Size, Vec2, Viewport};
+//! use draw_core::{Color, Rect, Size, Vec2, ViewportSize};
 //! use draw_render::{PaintContext, RenderBackend};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,7 +27,7 @@
 //!     Rect::from_min_size(Vec2::ZERO, Size::splat(16.0)),
 //!     Color::RED,
 //! );
-//! let viewport = Viewport::new(Size::new(32.0, 32.0));
+//! let viewport = ViewportSize::new(Size::new(32.0, 32.0));
 //! backend.begin_frame(viewport)?;
 //! backend.submit(&ctx.into_draw_list())?;
 //! backend.end_frame()?;

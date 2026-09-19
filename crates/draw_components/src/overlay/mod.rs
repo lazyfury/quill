@@ -27,21 +27,35 @@
 //! [`placement`].
 
 mod placement;
-#[cfg(test)]
-mod tests;
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use draw_core::{Color, Edges, EventResult, InputEvent, Key, NodeId, Size, Viewport};
+use draw_app::{BuildContext, Flex, Label};
+use draw_core::{Color, Edges, EventResult, InputEvent, Key, NodeId, Size, ViewportSize};
 use draw_render::PaintContext;
-use draw_theme::{radius, space, SurfaceLevel, TextSize, Theme};
-use draw_ui::{Align, BuildContext, Flex, Justify, Label, MouseFilter, Ui};
+use draw_scene::SceneTree;
+use draw_theme::{radius, space, SurfaceLevel, TextSize, Theme, Tone};
+use draw_ui::{Align, Justify, MouseFilter};
 
 use crate::Button;
 use draw_ui::surface_decor;
 use draw_ui::SurfaceStyle;
-use draw_ui::Tone;
+
+/// Builds the overlay layer's private tree with a viewport-filling root.
+fn overlay_tree(
+    theme: Theme,
+    measurer: Option<Rc<dyn draw_ui::TextMeasurer>>,
+) -> (SceneTree, NodeId) {
+    let mut tree = SceneTree::new();
+    draw_ui::set_theme(&mut tree, theme);
+    if let Some(measurer) = measurer {
+        draw_ui::set_text_measurer(&mut tree, measurer);
+    }
+    let tree_root = tree.root();
+    let root = draw_app::add_flex(&mut tree, tree_root, draw_ui::FlexStyle::column());
+    draw_app::update_control(&mut tree, root, |d| d.mouse_filter = MouseFilter::Ignore);
+    (tree, root)
+}
 
 pub use placement::Placement;
 
@@ -63,7 +77,7 @@ enum Anchor {
     /// A control in the host UI (resolved from its laid-out rect).
     Target(NodeId),
     /// The viewport itself (modal dialogs / toasts).
-    Viewport,
+    ViewportSize,
 }
 
 /// The content of an overlay.
@@ -136,26 +150,27 @@ impl Entry {
 /// The overlay layer.
 pub struct Overlays {
     theme: Theme,
-    ui: Ui,
+    tree: SceneTree,
+    root: NodeId,
     entries: Vec<Entry>,
     measurer: Option<Rc<dyn draw_ui::TextMeasurer>>,
     next_id: u64,
-    viewport: Viewport,
+    viewport: ViewportSize,
     dirty: bool,
     actions: Rc<RefCell<Vec<Action>>>,
 }
 
 impl Overlays {
     pub fn new(theme: Theme) -> Self {
-        let mut ui = Ui::new();
-        ui.set_theme(theme);
+        let (tree, root) = overlay_tree(theme, None);
         Self {
             theme,
-            ui,
+            tree,
+            root,
             entries: Vec::new(),
             measurer: None,
             next_id: 1,
-            viewport: Viewport::default(),
+            viewport: ViewportSize::default(),
             dirty: false,
             actions: Rc::new(RefCell::new(Vec::new())),
         }
@@ -173,7 +188,7 @@ impl Overlays {
 
     /// Uses `measurer` for overlay text layout, matching the host UI.
     pub fn set_text_measurer(&mut self, measurer: Rc<dyn draw_ui::TextMeasurer>) {
-        self.ui.set_text_measurer(measurer.clone());
+        draw_ui::set_text_measurer(&mut self.tree, measurer.clone());
         self.measurer = Some(measurer);
         self.dirty = true;
     }
@@ -192,7 +207,7 @@ impl Overlays {
                 cancel: "Cancel".into(),
                 destructive: false,
             },
-            Anchor::Viewport,
+            Anchor::ViewportSize,
             Placement::Center,
         );
         entry.modal = true;
@@ -248,7 +263,7 @@ impl Overlays {
                 text: text.into(),
                 tone,
             },
-            Anchor::Viewport,
+            Anchor::ViewportSize,
             Placement::BottomCenter,
         );
         entry.duration = Some(MESSAGE_DURATION);
@@ -326,7 +341,7 @@ impl Overlays {
     pub fn rect(&self, id: OverlayId) -> Option<draw_core::Rect> {
         let entry = self.entries.iter().find(|entry| entry.id == id)?;
         let root = entry.root?;
-        self.ui.control(root).map(|control| control.rect)
+        draw_ui::control(&self.tree, root).map(|control| control.rect)
     }
 
     pub fn len(&self) -> usize {
@@ -381,15 +396,16 @@ impl Overlays {
     /// Resolves positions against the host UI and lays out the overlay tree.
     ///
     /// Call after the host's own `Ui::layout`.
-    pub fn layout(&mut self, host: &Ui, viewport: Viewport) {
+    pub fn layout(&mut self, host_tree: &SceneTree, viewport: ViewportSize) {
         // Tooltips live only while their target (or a descendant) is hovered.
-        let hovered = host.hovered();
+        let hovered = draw_app::hovered(host_tree);
         let stale: Vec<OverlayId> = self
             .entries
             .iter()
             .filter_map(|entry| match (entry.anchor, &entry.kind) {
                 (Anchor::Target(target), Kind::Tips { .. })
-                    if !hovered.is_some_and(|node| is_self_or_ancestor(host, target, node)) =>
+                    if !hovered
+                        .is_some_and(|node| is_self_or_ancestor(host_tree, target, node)) =>
                 {
                     Some(entry.id)
                 }
@@ -405,21 +421,19 @@ impl Overlays {
             self.rebuild();
         }
 
-        self.ui.layout(viewport);
+        draw_ui::layout(&mut self.tree, viewport);
         let viewport_rect = viewport.logical_rect();
         let mut moved = false;
         for entry in &mut self.entries {
             let Some(root) = entry.root else {
                 continue;
             };
-            let size = self
-                .ui
-                .control(root)
+            let size = draw_ui::control(&self.tree, root)
                 .map(|control| control.rect.size)
                 .unwrap_or(Size::ZERO);
             let anchor = match entry.anchor {
-                Anchor::Target(id) => host.control(id).map(|control| control.rect),
-                Anchor::Viewport => None,
+                Anchor::Target(id) => draw_ui::control(host_tree, id).map(|control| control.rect),
+                Anchor::ViewportSize => None,
             };
             let rect = placement::place(
                 anchor.unwrap_or(viewport_rect),
@@ -429,17 +443,16 @@ impl Overlays {
                 entry.offset,
                 MARGIN,
             );
-            if self.ui.control(root).map(|control| control.rect) != Some(rect) {
-                self.ui.set_anchors(root, Edges::ZERO);
-                self.ui.set_offsets(
-                    root,
-                    Edges::new(rect.left(), rect.top(), rect.right(), rect.bottom()),
-                );
+            if draw_ui::control(&self.tree, root).map(|control| control.rect) != Some(rect) {
+                draw_app::update_control(&mut self.tree, root, |d| d.anchors = Edges::ZERO);
+                draw_app::update_control(&mut self.tree, root, |d| {
+                    d.offsets = Edges::new(rect.left(), rect.top(), rect.right(), rect.bottom())
+                });
                 moved = true;
             }
         }
         if moved {
-            self.ui.layout(viewport);
+            draw_ui::layout(&mut self.tree, viewport);
         }
     }
 
@@ -454,7 +467,7 @@ impl Overlays {
                 ctx.fill_rect(viewport, scrim);
             }
         }
-        self.ui.paint(ctx);
+        draw_ui::paint(&self.tree, ctx);
     }
 
     /// Routes an event to the overlays.
@@ -487,7 +500,7 @@ impl Overlays {
         };
 
         if let InputEvent::PointerDown { position, .. } = event {
-            if self.ui.hit_test(*position).is_none() {
+            if draw_app::hit_test(&self.tree, *position).is_none() {
                 if let Some(entry) = self
                     .entries
                     .iter()
@@ -500,14 +513,16 @@ impl Overlays {
             }
         }
 
-        let ui_result = self.ui.handle_input(event);
+        let ui_result = draw_app::handle_input(&mut self.tree, event);
         self.process_actions();
 
         // `Ui::handle_input` reports `Handled` for every `PointerUp`, so pointer
         // events only count while they are over overlay content.
         let consumed = match pointer {
             Some(position) => {
-                modal || (self.ui.hit_test(position).is_some() && ui_result.is_handled())
+                modal
+                    || (draw_app::hit_test(&self.tree, position).is_some()
+                        && ui_result.is_handled())
             }
             None => modal || ui_result.is_handled(),
         };
@@ -534,15 +549,17 @@ impl Overlays {
     }
 
     fn rebuild(&mut self) {
-        let mut ui = Ui::new();
-        ui.set_theme(self.theme);
-        if let Some(measurer) = &self.measurer {
-            ui.set_text_measurer(measurer.clone());
-        }
+        let (tree, root) = overlay_tree(self.theme, self.measurer.clone());
+        self.tree = tree;
+        self.root = root;
         for entry in &mut self.entries {
-            entry.root = Some(build_entry(entry, &mut ui, self.actions.clone()));
+            entry.root = Some(build_entry(
+                entry,
+                &mut self.tree,
+                self.root,
+                self.actions.clone(),
+            ));
         }
-        self.ui = ui;
         self.dirty = false;
     }
 
@@ -585,12 +602,12 @@ enum Slot {
     Cancel,
 }
 
-fn is_self_or_ancestor(host: &Ui, target: NodeId, mut node: NodeId) -> bool {
+fn is_self_or_ancestor(host_tree: &SceneTree, target: NodeId, mut node: NodeId) -> bool {
     loop {
         if node == target {
             return true;
         }
-        match host.tree().parent(node) {
+        match host_tree.parent(node) {
             Some(parent) => node = parent,
             None => return false,
         }
@@ -598,8 +615,13 @@ fn is_self_or_ancestor(host: &Ui, target: NodeId, mut node: NodeId) -> bool {
 }
 
 /// Builds one overlay's content and returns its root node.
-fn build_entry(entry: &Entry, ui: &mut Ui, actions: Rc<RefCell<Vec<Action>>>) -> NodeId {
-    let theme = ui.theme();
+fn build_entry(
+    entry: &Entry,
+    tree: &mut SceneTree,
+    root: NodeId,
+    actions: Rc<RefCell<Vec<Action>>>,
+) -> NodeId {
+    let theme = draw_ui::theme(tree);
     let palette = theme.palette;
     let surface = SurfaceStyle::new(theme.surface(SurfaceLevel::Floating))
         .border(palette.border)
@@ -613,42 +635,46 @@ fn build_entry(entry: &Entry, ui: &mut Ui, actions: Rc<RefCell<Vec<Action>>>) ->
             cancel,
             destructive,
         } => {
-            let root = ui
-                .add(
-                    ui.root(),
-                    Flex::column().gap(space::MD).padding(Edges::all(space::LG)),
-                )
-                .id();
-            crate::detach(ui, root);
-            ui.set_min_size(root, Size::new(CONFIRM_WIDTH, 0.0));
-            ui.add_decor(root, surface_decor(surface));
+            let root = draw_app::add(
+                tree,
+                root,
+                Flex::column().gap(space::MD).padding(Edges::all(space::LG)),
+            )
+            .id();
+            draw_app::update_control(tree, root, |d| d.anchors = Edges::ZERO);
+            draw_app::update_control(tree, root, |d| d.offsets = Edges::ZERO);
+            draw_app::update_control(tree, root, |d| d.min_size = Size::new(CONFIRM_WIDTH, 0.0));
+            draw_ui::add_decor(tree, root, surface_decor(surface));
 
-            ui.add(
+            draw_app::add(
+                tree,
                 root,
                 Label::new(title.clone())
                     .font_size(TextSize::Heading.px())
                     .color(palette.foreground),
             );
-            ui.add(
+            draw_app::add(
+                tree,
                 root,
                 Label::new(message.clone())
                     .font_size(TextSize::Body.px())
                     .color(palette.muted),
             );
 
-            let row = ui
-                .add(
-                    root,
-                    Flex::row()
-                        .align(Align::Center)
-                        .justify(Justify::End)
-                        .gap(space::SM)
-                        .padding(Edges::ZERO),
-                )
-                .id();
+            let row = draw_app::add(
+                tree,
+                root,
+                Flex::row()
+                    .align(Align::Center)
+                    .justify(Justify::End)
+                    .gap(space::SM)
+                    .padding(Edges::ZERO),
+            )
+            .id();
             let id = entry.id;
             let cancel_actions = actions.clone();
-            ui.add(
+            draw_app::add(
+                tree,
                 row,
                 Button::ghost(cancel.clone())
                     .on_click(move || cancel_actions.borrow_mut().push(Action::Cancel(id))),
@@ -659,73 +685,80 @@ fn build_entry(entry: &Entry, ui: &mut Ui, actions: Rc<RefCell<Vec<Action>>>) ->
                 Button::primary(confirm.clone())
             };
             let confirm_actions = actions;
-            ui.add(
+            draw_app::add(
+                tree,
                 row,
                 button.on_click(move || confirm_actions.borrow_mut().push(Action::Confirm(id))),
             );
             root
         }
         Kind::Popover { title, content } => {
-            let root = ui
-                .add(
-                    ui.root(),
-                    Flex::column().gap(space::SM).padding(Edges::all(space::MD)),
-                )
-                .id();
-            crate::detach(ui, root);
-            ui.add_decor(root, surface_decor(surface));
+            let root = draw_app::add(
+                tree,
+                root,
+                Flex::column().gap(space::SM).padding(Edges::all(space::MD)),
+            )
+            .id();
+            draw_app::update_control(tree, root, |d| d.anchors = Edges::ZERO);
+            draw_app::update_control(tree, root, |d| d.offsets = Edges::ZERO);
+            draw_ui::add_decor(tree, root, surface_decor(surface));
             if let Some(title) = title {
-                ui.add(
+                draw_app::add(
+                    tree,
                     root,
                     Label::new(title.clone())
                         .font_size(TextSize::Subheading.px())
                         .color(palette.foreground),
                 );
             }
-            content(&mut BuildContext::new(ui, root));
+            content(&mut BuildContext::new(tree, root));
             root
         }
         Kind::Tips { text } => {
-            let root = ui
-                .add(
-                    ui.root(),
-                    Flex::row()
-                        .padding(Edges::symmetric(space::SM, space::XS))
-                        .gap(0.0),
-                )
-                .id();
-            crate::detach(ui, root);
-            ui.add_decor(
+            let root = draw_app::add(
+                tree,
+                root,
+                Flex::row()
+                    .padding(Edges::symmetric(space::SM, space::XS))
+                    .gap(0.0),
+            )
+            .id();
+            draw_app::update_control(tree, root, |d| d.anchors = Edges::ZERO);
+            draw_app::update_control(tree, root, |d| d.offsets = Edges::ZERO);
+            draw_ui::add_decor(
+                tree,
                 root,
                 surface_decor(
                     SurfaceStyle::new(palette.foreground.lerp(palette.background, 0.08))
                         .radius(radius::SM),
                 ),
             );
-            ui.set_mouse_filter(root, MouseFilter::Ignore);
-            let label = ui
-                .add(
-                    root,
-                    Label::new(text.clone())
-                        .font_size(TextSize::Small.px())
-                        .color(palette.background),
-                )
-                .id();
-            ui.set_mouse_filter(label, MouseFilter::Ignore);
+            draw_app::update_control(tree, root, |d| d.mouse_filter = MouseFilter::Ignore);
+            let label = draw_app::add(
+                tree,
+                root,
+                Label::new(text.clone())
+                    .font_size(TextSize::Small.px())
+                    .color(palette.background),
+            )
+            .id();
+            draw_app::update_control(tree, label, |d| d.mouse_filter = MouseFilter::Ignore);
             root
         }
         Kind::Message { text, tone } => {
-            let root = ui
-                .add(
-                    ui.root(),
-                    Flex::row()
-                        .align(Align::Center)
-                        .padding(Edges::symmetric(space::MD, space::SM))
-                        .gap(0.0),
-                )
-                .id();
-            crate::detach(ui, root);
-            ui.add_decor(
+            let root = draw_app::add(
+                tree,
+                root,
+                Flex::row()
+                    .align(Align::Center)
+                    .padding(Edges::symmetric(space::MD, space::SM))
+                    .gap(0.0),
+            )
+            .id();
+            draw_app::update_control(tree, root, |d| d.anchors = Edges::ZERO);
+            draw_app::update_control(tree, root, |d| d.offsets = Edges::ZERO);
+            draw_ui::add_decor(
+                tree,
                 root,
                 surface_decor(
                     SurfaceStyle::new(theme.surface(SurfaceLevel::Floating))
@@ -733,16 +766,16 @@ fn build_entry(entry: &Entry, ui: &mut Ui, actions: Rc<RefCell<Vec<Action>>>) ->
                         .radius(radius::MD),
                 ),
             );
-            ui.set_mouse_filter(root, MouseFilter::Ignore);
-            let label = ui
-                .add(
-                    root,
-                    Label::new(text.clone())
-                        .font_size(TextSize::Small.px())
-                        .color(tone.color(&theme)),
-                )
-                .id();
-            ui.set_mouse_filter(label, MouseFilter::Ignore);
+            draw_app::update_control(tree, root, |d| d.mouse_filter = MouseFilter::Ignore);
+            let label = draw_app::add(
+                tree,
+                root,
+                Label::new(text.clone())
+                    .font_size(TextSize::Small.px())
+                    .color(tone.color(&theme)),
+            )
+            .id();
+            draw_app::update_control(tree, label, |d| d.mouse_filter = MouseFilter::Ignore);
             root
         }
     }

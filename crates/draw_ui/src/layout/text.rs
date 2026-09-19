@@ -4,7 +4,7 @@
 //! [`TextMeasurer`]. The default [`ApproxTextMeasurer`] is a deterministic
 //! per-character estimate; a host can inject real font metrics (for example a
 //! fixed-width measurer matching the bitmap-font backend) via
-//! [`Ui::set_text_measurer`](crate::Ui::set_text_measurer).
+//! [`set_text_measurer`](crate::set_text_measurer).
 //!
 //! Wrapping rules:
 //!

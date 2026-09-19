@@ -1,25 +1,30 @@
 # Components
 
-`draw_ui` provides a reusable component API on top of the `draw_scene` tree. A
-[`Ui`] owns a `SceneTree` of `Control` nodes plus per-control layout and behavior.
+`draw_ui` provides a reusable component API on top of the `draw_scene` tree.
+All UI state lives on the tree, so the crate is a set of free functions over
+`&SceneTree` / `&mut SceneTree` — there is no `Ui` object.
 
 ## Create & compose components
 
-Mount small builder components with `Ui::add`:
+Mount small builder components with [`add`](crate::add):
 
 ```rust
-use draw_ui::{Ui, Panel, VBox, Label, Button};
+use draw_scene::SceneTree;
+use draw_ui as ui;
 
-let mut ui = Ui::new();
+let mut tree = SceneTree::new();
+let root = ui::add_flex(&mut tree, tree.root(), ui::FlexStyle::column());
+let panel = ui::add(&mut tree, root, Panel::new());
+let vbox = ui::add(&mut tree, panel.id(), VBox::new().separation(12.0));
+let label = ui::add(&mut tree, vbox.id(), Label::new("Hello"));
 
-let panel = ui.add(ui.root(), Panel::new());
-let vbox = ui.add(panel.id(), VBox::new().separation(12.0));
-let label = ui.add(vbox.id(), Label::new("Hello"));
-
-let button = ui.add(
+let button = ui::add(
+    &mut tree,
     vbox.id(),
     Button::new("Click me").on_click(|| { /* mutate app state */ }),
 );
+ui::layout(&mut tree, viewport);
+ui::paint(&tree, &mut ctx);
 ```
 
 Available components: `Panel`, `Flex`, `VBox`, `HBox`, `Grid`, `Label`,
@@ -158,14 +163,15 @@ measurer invalidates layout.
 
 ### Redraw / layout caching
 
-`Ui` caches the last resolved `Viewport` and skips measure/arrange unless it is
-invalidated. Inserting controls, changing anchors/offsets/layout style, changing
-text, `tree_mut()`, swapping the measurer, or a new viewport size all mark it
-dirty. A change only dirties that node and its ancestors, so clean sibling
-subtrees whose resolved rects are unchanged are skipped (partial relayout). Call
-`ui.layout(viewport)` after changes; `Ui::layout_count()` and
-`Ui::last_arranged_nodes()` report the work done, and `Ui::invalidate_layout()`
-forces a full pass.
+`Ui` (through the layout cache stored on the tree's root node) caches the last
+resolved `ViewportSize` and skips measure/arrange unless it is invalidated.
+Inserting controls, changing anchors/offsets/layout style, changing text,
+`tree_mut()`, swapping the measurer, or a new viewport size all mark it dirty. A
+change only dirties that node and its ancestors, so clean sibling subtrees whose
+resolved rects are unchanged are skipped (partial relayout). Call
+`ui.layout(viewport)` after changes; `ui.layout_count(&tree)` and
+`ui.last_arranged_nodes(&tree)` report the work done, and
+`ui.invalidate_layout(&mut tree)` forces a full pass.
 
 Within a pass, repeated measurements of the same control are memoized, and
 paint reuses a per-control cache of wrapped/clipped lines until its text, font,

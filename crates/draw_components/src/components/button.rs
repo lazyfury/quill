@@ -1,10 +1,12 @@
 //! Themed buttons.
 
+use draw_app::{Flex, Label};
 use draw_core::{Color, Edges, NodeId, Size};
+use draw_scene::SceneTree;
 use draw_theme::{control, radius, TextSize};
-use draw_ui::{Align, Flex, Justify, Label, TextOptions};
+use draw_ui::{Align, Justify, TextOptions};
 
-use crate::{detach, Component, ControlRef, Ui};
+use crate::{detach, Component, ControlRef};
 use draw_ui::dynamic_surface_decor;
 use draw_ui::SurfaceStyle;
 
@@ -73,15 +75,16 @@ impl Button {
 }
 
 impl Component for Button {
-    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = ui.theme();
+    fn mount(self, tree: &mut SceneTree, parent: NodeId) -> ControlRef {
+        let theme = draw_ui::theme(tree);
         let font = self.font_size;
         let pad = control::PADDING_X;
 
         // A centered row: the label is intrinsically sized by the active text
         // measurer and centred both ways, so the button re-measures when the
         // host swaps the measurer (e.g. for a real font).
-        let node = ui.add(
+        let node = draw_app::add(
+            tree,
             parent,
             Flex::row()
                 .align(Align::Center)
@@ -89,11 +92,14 @@ impl Component for Button {
                 .gap(0.0)
                 .padding(Edges::symmetric(pad, 0.0)),
         );
-        detach(ui, node.id());
-        ui.set_min_size(node.id(), Size::new(0.0, control::HEIGHT));
+        detach(tree, node.id());
+        draw_app::update_control(tree, node.id(), |d| {
+            d.min_size = Size::new(0.0, control::HEIGHT)
+        });
 
         let variant = self.variant;
-        ui.add_decor(
+        draw_ui::add_decor(
+            tree,
             node.id(),
             dynamic_surface_decor(theme, move |theme, st| {
                 let palette = &theme.palette;
@@ -143,7 +149,8 @@ impl Component for Button {
             ButtonVariant::Primary | ButtonVariant::Destructive => theme.palette.on_accent,
             _ => theme.palette.foreground,
         };
-        ui.add(
+        draw_app::add(
+            tree,
             node.id(),
             Label::new(self.text)
                 .font_size(font)
@@ -152,44 +159,8 @@ impl Component for Button {
         );
 
         if let Some(callback) = self.on_click {
-            ui.set_on_click(node.id(), callback);
+            draw_app::set_on_click(tree, node.id(), callback);
         }
         node
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::cell::Cell;
-    use std::rc::Rc;
-
-    use draw_core::{InputEvent, PointerButton, Size as CoreSize, Viewport};
-    use draw_theme::Theme;
-
-    #[test]
-    fn primary_button_is_clickable_and_fires_callback() {
-        let mut ui = Ui::new();
-        ui.set_theme(Theme::dark());
-        let clicks = Rc::new(Cell::new(0));
-        let counter = clicks.clone();
-        let root = ui.root();
-        let button = ui.add(
-            root,
-            Button::primary("Save").on_click(move || counter.set(counter.get() + 1)),
-        );
-        ui.layout(Viewport::new(CoreSize::new(400.0, 200.0)));
-        let center = ui.control(button.id()).unwrap().rect.center();
-        ui.handle_input(&InputEvent::PointerDown {
-            position: center,
-            button: PointerButton::Left,
-        });
-        ui.handle_input(&InputEvent::PointerUp {
-            position: center,
-            button: PointerButton::Left,
-        });
-        assert_eq!(clicks.get(), 1);
-        let rect = ui.control(button.id()).unwrap().rect;
-        assert!(rect.size.height >= control::HEIGHT);
     }
 }

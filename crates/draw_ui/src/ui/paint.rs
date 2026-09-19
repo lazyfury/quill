@@ -1,26 +1,35 @@
 //! Emitting control visuals and debug bounds into a `DrawList`.
 
 use super::*;
+use crate::control::control_of;
 use crate::debug::DebugDrawOptions;
 use draw_core::Vec2;
 use draw_render::{PaintContext, TextAlign};
+use draw_scene::SceneTree;
 
 impl Ui {
     /// Emits control visuals into `ctx` in draw order.
-    pub fn paint(&self, ctx: &mut PaintContext) {
-        for id in self.tree.iter_visible() {
-            let (Some(control), Some(widget)) = (self.controls.get(&id), self.widgets.get(&id))
-            else {
+    pub fn paint(&self, tree: &SceneTree, ctx: &mut PaintContext) {
+        // Hold the root's text cache and measurer for the whole pass (created
+        // empty / default if the tree has never been laid out).
+        let root = crate::control::root_state(tree);
+        let mut fallback = crate::control::LayoutCache::default();
+        let mut cache_ref = root.map(|state| state.layout.borrow_mut());
+        let cache: &mut crate::control::LayoutCache =
+            cache_ref.as_deref_mut().unwrap_or(&mut fallback);
+        let measurer: &dyn TextMeasurer = root
+            .map(|state| state.text_measurer.as_ref())
+            .unwrap_or(&crate::control::DEFAULT_MEASURER);
+        for id in tree.iter_visible() {
+            let Some(control) = control_of(tree, id) else {
                 continue;
             };
-            let rect = control.rect;
-            let state = self.state_for(id);
-            if let Some(decorators) = self.decorations.get(&id) {
-                for decor in decorators {
-                    decor.paint_behind(ctx, rect, state);
-                }
+            let rect = control.data.rect;
+            let state = self.state_for(tree, id);
+            for decor in &control.decorations {
+                decor.paint_behind(ctx, rect, state);
             }
-            match widget {
+            match &control.widget {
                 Widget::Panel { color, border } => {
                     ctx.fill_rect(rect, *color);
                     if let Some(border) = border {
@@ -33,10 +42,17 @@ impl Ui {
                     color,
                     options,
                 } => {
-                    let lines =
-                        self.layout_text_cached(id, text, *font_size, rect.size.width, *options);
-                    let step = self.text_measurer.line_height(*font_size);
-                    let mut baseline = rect.top() + self.text_measurer.ascent(*font_size);
+                    let lines = self.layout_text_cached(
+                        cache,
+                        measurer,
+                        id,
+                        text,
+                        *font_size,
+                        rect.size.width,
+                        *options,
+                    );
+                    let step = measurer.line_height(*font_size);
+                    let mut baseline = rect.top() + measurer.ascent(*font_size);
                     for line in lines.iter() {
                         ctx.draw_text(
                             line.clone(),
@@ -54,16 +70,18 @@ impl Ui {
 
                     let inner = (rect.size.width - 32.0).max(0.0);
                     let lines = self.layout_text_cached(
+                        cache,
+                        measurer,
                         id,
                         &button.text,
                         button.font_size,
                         inner,
                         button.options,
                     );
-                    let step = self.text_measurer.line_height(button.font_size);
+                    let step = measurer.line_height(button.font_size);
                     let block = lines.len() as f32 * step;
                     let mut baseline =
-                        rect.center().y - block / 2.0 + self.text_measurer.ascent(button.font_size);
+                        rect.center().y - block / 2.0 + measurer.ascent(button.font_size);
                     for line in lines.iter() {
                         ctx.draw_text(
                             line.clone(),
@@ -77,10 +95,8 @@ impl Ui {
                 }
                 Widget::Flex(_) | Widget::Grid(_) => {}
             }
-            if let Some(decorators) = self.decorations.get(&id) {
-                for decor in decorators {
-                    decor.paint_front(ctx, rect, state);
-                }
+            for decor in &control.decorations {
+                decor.paint_front(ctx, rect, state);
             }
         }
     }
@@ -90,15 +106,20 @@ impl Ui {
     /// Emits ordinary backend-neutral commands, so any backend renders it.
     /// Typical use: paint the UI first, then call this so the yellow boxes sit
     /// on top of the components.
-    pub fn paint_debug(&self, ctx: &mut PaintContext, options: &DebugDrawOptions) {
-        for id in self.tree.iter_visible() {
-            let Some(control) = self.controls.get(&id) else {
+    pub fn paint_debug(
+        &self,
+        tree: &SceneTree,
+        ctx: &mut PaintContext,
+        options: &DebugDrawOptions,
+    ) {
+        for id in tree.iter_visible() {
+            let Some(control) = control_of(tree, id) else {
                 continue;
             };
-            let rect = control.rect;
+            let rect = control.data.rect;
             ctx.stroke_rect(rect, options.width, options.border_color);
 
-            let name = self.tree.get(id).map_or("", |node| node.name());
+            let name = tree.get(id).map_or("", |node| node.name());
             let label = options.label(name, id);
             if label.is_empty() {
                 continue;
