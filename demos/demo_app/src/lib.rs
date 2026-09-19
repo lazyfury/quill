@@ -36,16 +36,18 @@ use draw_render::{CornerRadii, PaintContext};
 use draw_scene::SceneTree;
 use draw_theme::{radius, space, TextSize, Theme, Tone};
 use draw_ui::{
-    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Justify, MouseFilter, SurfaceStyle,
-    TextMeasurer, TextOptions,
+    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Justify, MouseFilter, SizeBasis,
+    SurfaceStyle, TextMeasurer, TextOptions,
 };
 
 /// Sidebar width in logical pixels.
 pub const SIDEBAR_WIDTH: f32 = 220.0;
 /// Content-list width in logical pixels.
 pub const LIST_WIDTH: f32 = 324.0;
-/// X offset where the detail pane starts.
-pub const DETAIL_X: f32 = SIDEBAR_WIDTH + LIST_WIDTH;
+/// Width of one column separator (a real 1px line in the split view).
+pub const SEPARATOR_WIDTH: f32 = 1.0;
+/// X offset where the detail pane starts (after two separators).
+pub const DETAIL_X: f32 = SIDEBAR_WIDTH + SEPARATOR_WIDTH + LIST_WIDTH + SEPARATOR_WIDTH;
 
 /// A note shown in the list/detail panes.
 #[derive(Debug, Clone, Copy)]
@@ -154,26 +156,39 @@ impl DemoApp {
     pub fn with_theme(theme: Theme) -> Self {
         let mut tree = SceneTree::new();
         let tree_root = tree.root();
+        // Top-level control (anchored to the viewport) plus a split row that
+        // owns the three panes. Keeping the frame separate means the split's
+        // flex layout is resolved by the layout engine, while the frame itself
+        // just fills the viewport.
         let root = tree.add_child(tree_root, Flex::column().mouse_filter(MouseFilter::Ignore));
+        let split = tree.add_child(
+            root,
+            Flex::row()
+                .gap(0.0)
+                .padding(Edges::ZERO)
+                .mouse_filter(MouseFilter::Ignore),
+        );
 
         let selected = Rc::new(Cell::new(0));
         let selected_nav = Rc::new(Cell::new(0));
         let delete_requested = Rc::new(Cell::new(false));
         let clicks = Rc::new(Cell::new(0));
 
-        let (sidebar, nav_rows) = build_sidebar(&mut tree, root, theme, &selected_nav);
-        let (list, list_rows) = build_list(&mut tree, root, theme, &selected);
+        // Split view: panes and 1px separators are siblings in the flex row, so
+        // the dividers take part in layout instead of being overlaid on the
+        // column boundaries.
+        let (sidebar, nav_rows) = build_sidebar(&mut tree, split, theme, &selected_nav);
+        tree.add_child(split, Divider::vertical(theme).shrink(0.0));
+        let (list, list_rows) = build_list(&mut tree, split, theme, &selected);
+        tree.add_child(split, Divider::vertical(theme).shrink(0.0));
         let detail = build_detail(
             &mut tree,
-            root,
+            split,
             theme,
             &selected,
             &clicks,
             &delete_requested,
         );
-        for x in [SIDEBAR_WIDTH, DETAIL_X] {
-            tree.add_child(root, separator_view(theme, x));
-        }
 
         Self {
             tree,
@@ -404,23 +419,6 @@ fn thumb(size: f32, theme: Theme, shade: f32) -> Panel {
         })
 }
 
-/// A 1px vertical column separator, drawn as a real line primitive.
-fn separator_view(theme: Theme, x: f32) -> Flex {
-    Flex::new()
-        .padding(Edges::ZERO)
-        .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
-        .offsets(Edges::new(x, 0.0, x + 1.0, 0.0))
-        .foreground(move |ctx, rect, _| {
-            let center = rect.center().x;
-            ctx.draw_line(
-                Vec2::new(center, rect.top()),
-                Vec2::new(center, rect.bottom()),
-                1.0,
-                theme.palette.border_subtle,
-            );
-        })
-}
-
 fn nav_row_view(theme: Theme, label: &str, index: usize, selected: &Rc<Cell<usize>>) -> Row {
     let held = selected.clone();
     let click = selected.clone();
@@ -455,8 +453,8 @@ fn build_sidebar(
         Column::new()
             .gap(space::MD)
             .padding(Edges::new(space::LG, space::MD, space::MD, space::MD))
-            .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
-            .offsets(Edges::new(0.0, 0.0, SIDEBAR_WIDTH, 0.0))
+            .basis(SizeBasis::Px(SIDEBAR_WIDTH))
+            .shrink(0.0)
             .surface(SurfaceStyle::new(theme.palette.surface)),
     );
 
@@ -604,8 +602,8 @@ fn build_list(
         Column::new()
             .gap(space::XS)
             .padding(Edges::new(space::MD, space::MD, space::MD, space::MD))
-            .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
-            .offsets(Edges::new(SIDEBAR_WIDTH, 0.0, DETAIL_X, 0.0))
+            .basis(SizeBasis::Px(LIST_WIDTH))
+            .shrink(0.0)
             .surface(SurfaceStyle::new(theme.palette.background)),
     );
 
@@ -654,8 +652,7 @@ fn build_detail(
         Column::new()
             .gap(0.0)
             .padding(Edges::ZERO)
-            .anchors(Edges::new(0.0, 0.0, 1.0, 1.0))
-            .offsets(Edges::new(DETAIL_X, 0.0, 0.0, 0.0))
+            .grow(1.0)
             .surface(SurfaceStyle::new(theme.palette.background)),
     );
 
@@ -870,7 +867,7 @@ mod tests {
         assert!(detail.size.width > 0.0);
 
         assert!((sidebar.left()).abs() < 1e-3);
-        assert!((list.left() - SIDEBAR_WIDTH).abs() < 1e-3);
+        assert!((list.left() - (SIDEBAR_WIDTH + SEPARATOR_WIDTH)).abs() < 1e-3);
         assert!((detail.left() - DETAIL_X).abs() < 1e-3);
 
         // Columns tile left-to-right without overlap.
