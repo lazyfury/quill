@@ -50,7 +50,6 @@ mod demo {
     impl App for WebDemo {
         fn attach_context(&mut self, ctx: &CanvasRenderingContext2d) {
             self.0
-                .ui_mut()
                 .set_text_measurer(Rc::new(CanvasTextMeasurer::new(ctx.clone())));
         }
 

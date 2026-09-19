@@ -119,6 +119,12 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       for alignment. `TextMeasurer::measure_run` (default: sum of advances) lets
       layout measure with the same shaping; the Canvas/WASM `measureText`
       measurer uses it too. The core stays text-free.
+- [x] Stage 22 — overlay layer (`draw_kit::Overlays`): a generic floating layer
+      (own `Ui` + `Kit`) with `confirm`, `popover`, `tips` and `message` builders,
+      edge-aware placement with flipping (`overlay::placement`), scrims, input
+      capture/modal blocking, Esc/click-outside dismissal, auto-dismiss timers
+      and `on_confirm`/`on_cancel`/`on_close` callbacks. `draw_kit::Button`
+      gained a `Destructive` variant.
 
 ## Per-stage gate (must run)
 

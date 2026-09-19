@@ -39,6 +39,7 @@ pub const CRATE: &str = "draw_kit";
 
 mod components;
 mod kit;
+mod overlay;
 mod paint;
 mod tone;
 
@@ -47,6 +48,7 @@ pub use components::{
     Text,
 };
 pub use kit::{InteractState, Kit};
+pub use overlay::{OverlayId, Overlays, Placement};
 pub use paint::{fill_rounded_rect, fill_rounded_rect_corners, inset, surface, SurfaceStyle};
 pub use tone::{SurfaceTone, Tone};
 

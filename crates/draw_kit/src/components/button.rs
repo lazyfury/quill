@@ -17,6 +17,8 @@ pub enum ButtonVariant {
     Secondary,
     /// Transparent until hovered.
     Ghost,
+    /// Solid error background for destructive actions.
+    Destructive,
 }
 
 /// A compact, themed button.
@@ -47,6 +49,10 @@ impl Button {
 
     pub fn ghost(text: impl Into<String>) -> Self {
         Self::new(text).variant(ButtonVariant::Ghost)
+    }
+
+    pub fn destructive(text: impl Into<String>) -> Self {
+        Self::new(text).variant(ButtonVariant::Destructive)
     }
 
     pub fn variant(mut self, variant: ButtonVariant) -> Self {
@@ -117,11 +123,21 @@ impl Component for Button {
                     };
                     SurfaceStyle::new(fill).radius(radius::MD)
                 }
+                ButtonVariant::Destructive => {
+                    let fill = if st.pressed {
+                        palette.error.lerp(Color::BLACK, 0.12)
+                    } else if st.hovered {
+                        palette.error.lerp(palette.foreground, 0.10)
+                    } else {
+                        palette.error
+                    };
+                    SurfaceStyle::new(fill).radius(radius::MD)
+                }
             }
         });
 
         let color = match variant {
-            ButtonVariant::Primary => theme.palette.on_accent,
+            ButtonVariant::Primary | ButtonVariant::Destructive => theme.palette.on_accent,
             _ => theme.palette.foreground,
         };
         ui.add(

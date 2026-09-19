@@ -34,11 +34,11 @@ use std::rc::Rc;
 use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, Viewport};
 use draw_kit::{
     fill_rounded_rect, fill_rounded_rect_corners, inset, Badge, Button, Checkbox, CornerRadii,
-    Divider, Kit, SurfaceStyle, Switch, Text, Tone,
+    Divider, Kit, Overlays, SurfaceStyle, Switch, Text, Tone,
 };
 use draw_render::PaintContext;
 use draw_theme::{radius, space, TextSize, Theme};
-use draw_ui::{Align, Flex, Justify, Label, Panel, TextOptions, Ui};
+use draw_ui::{Align, Flex, Justify, Label, Panel, TextMeasurer, TextOptions, Ui};
 
 /// Sidebar width in logical pixels.
 pub const SIDEBAR_WIDTH: f32 = 220.0;
@@ -133,6 +133,9 @@ pub struct DemoApp {
     selected: Rc<Cell<usize>>,
     selected_nav: Rc<Cell<usize>>,
     clicks: Rc<Cell<u32>>,
+    overlays: Overlays,
+    delete_requested: Rc<Cell<bool>>,
+    deleted: Rc<Cell<bool>>,
     viewport: Viewport,
 }
 
@@ -157,6 +160,7 @@ impl DemoApp {
 
         let selected = Rc::new(Cell::new(0));
         let selected_nav = Rc::new(Cell::new(0));
+        let delete_requested = Rc::new(Cell::new(false));
 
         // ---- column shells + separators ---------------------------------
         let sidebar = ui.add(
@@ -444,7 +448,12 @@ impl DemoApp {
         );
         kit.add(ui, actions.id(), Button::secondary("Open"));
         kit.add(ui, actions.id(), Button::secondary("Duplicate"));
-        kit.add(ui, actions.id(), Button::ghost("Delete"));
+        let delete_flag = delete_requested.clone();
+        kit.add(
+            ui,
+            actions.id(),
+            Button::ghost("Delete").on_click(move || delete_flag.set(true)),
+        );
 
         // ---- hero: a static image placeholder --------------------------
         // No animation: the app is static so idle performance can be profiled.
@@ -482,6 +491,9 @@ impl DemoApp {
             selected,
             selected_nav,
             clicks,
+            overlays: Overlays::new(theme),
+            delete_requested,
+            deleted: Rc::new(Cell::new(false)),
             viewport: Viewport::new(Size::new(1100.0, 720.0)),
         }
     }
@@ -495,6 +507,16 @@ impl DemoApp {
     /// Mutable UI access, e.g. to inject a text measurer.
     pub fn ui_mut(&mut self) -> &mut Ui {
         &mut self.ui
+    }
+
+    /// Installs `measurer` for both the main UI and the overlay layer.
+    pub fn set_text_measurer(&mut self, measurer: Rc<dyn TextMeasurer>) {
+        self.ui.set_text_measurer(measurer.clone());
+        self.overlays.set_text_measurer(measurer);
+    }
+
+    pub fn overlays(&self) -> &Overlays {
+        &self.overlays
     }
 
     pub fn theme(&self) -> &Theme {
@@ -565,10 +587,24 @@ impl DemoApp {
 
     // -- pipeline ----------------------------------------------------------
 
-    /// Updates state-driven text. The app is static: `dt` is accepted for a
-    /// uniform host pipeline but nothing animates.
-    pub fn update(&mut self, viewport: Viewport, _dt: f32) {
+    /// Updates state-driven text and overlay timers.
+    pub fn update(&mut self, viewport: Viewport, dt: f32) {
         self.viewport = viewport;
+        self.overlays.update(dt);
+
+        if self.delete_requested.replace(false) {
+            let deleted = self.deleted.clone();
+            let id = self
+                .overlays
+                .confirm("Delete note?", "This cannot be undone.");
+            self.overlays
+                .confirm_label(id, "Delete")
+                .destructive(id, true)
+                .on_confirm(id, move || deleted.set(true));
+        }
+        if self.deleted.replace(false) {
+            self.overlays.message_tone("Note deleted", Tone::Success);
+        }
 
         let index = self.selected.get().min(NOTES.len() - 1);
         let note = &NOTES[index];
@@ -581,16 +617,17 @@ impl DemoApp {
         );
     }
 
-    /// Resolves UI layout for `viewport`.
+    /// Resolves UI layout for `viewport`, then positions the overlays.
     pub fn layout(&mut self, viewport: Viewport) {
         self.viewport = viewport;
         self.ui.layout(viewport);
+        self.overlays.layout(&self.ui, viewport);
     }
 
     /// Emits this frame's `DrawList` into `ctx`.
     ///
     /// Order: window background, kit surfaces, UI content, kit foregrounds
-    /// (indicators, icons, the hero image placeholder).
+    /// (indicators, icons, the hero image placeholder), then overlays.
     pub fn paint(&self, ctx: &mut PaintContext) {
         let size = self.viewport.logical_size();
         ctx.fill_rect(
@@ -601,10 +638,14 @@ impl DemoApp {
         self.kit.paint_surfaces(&self.ui, ctx);
         self.ui.paint(ctx);
         self.kit.paint_foreground(&self.ui, ctx);
+        self.overlays.paint(ctx);
     }
 
-    /// Routes a backend-neutral input event to kit interactions then the UI.
+    /// Routes an event to the overlays first, then kit interactions, then UI.
     pub fn event(&mut self, event: &InputEvent) -> EventResult {
+        if self.overlays.handle_input(event).is_handled() {
+            return EventResult::Handled;
+        }
         let kit_handled = self.kit.handle_input(&self.ui, event);
         let ui_result = self.ui.handle_input(event);
         if kit_handled || ui_result.is_handled() {

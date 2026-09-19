@@ -34,10 +34,11 @@ audited by `draw_profile`'s inspector, or it is not "done".
 | `Tabs` | next | active indicator, keyboard focus |
 | `Input` / `TextArea` | next | placeholder, caret, selection, focus ring; needs core text editing or a Kit-owned editor |
 | `Select` / `Dropdown` | next | menu surface + selected state |
-| `Tooltip` | next | floating surface + delay |
+| `Tooltip` | done | `Overlays::tips`, anchored and hover-tracked |
 | `List` / `Table` | next | header row, column alignment, hover, selection |
 | `Toolbar` | next | grouped icon buttons + separators |
-| `Modal` / `Toast` | next | floating surface + scrim / transient surface |
+| `Modal` / `Toast` | done | `Overlays::confirm` (scrim) / `Overlays::message` (transient) |
+| `Popover` | done | `Overlays::popover`, anchored with edge flipping |
 | `Progress`, `Spinner`, `Skeleton` | later | uses `Arc`/rounded primitives |
 | `ScrollView` | later | needs a clip + offset model |
 
@@ -69,6 +70,11 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Done
 
+- Overlay layer (`draw_kit::Overlays`): a generic floating layer with `confirm`,
+  `popover`, `tips` and `message` built on a pure placement module (flip + clamp),
+  scrims, modal capture, Esc/click-outside dismissal and auto-dismiss timers.
+  `draw_kit::Button` gained `Destructive`. Wired into `demo_app` (Delete →
+  confirm → toast).
 - Fixed flex cross-axis `Stretch` overflowing a definite container: items now
   fill the container's inner cross size instead of growing to their content's
   preferred width, so a fixed-width column's items no longer push past its edge.

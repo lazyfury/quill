@@ -121,7 +121,7 @@ placeholders) and detail pane (toolbar, hero scene, body, actions).
 | `Card` | column flex container with themed surface + hairline border. |
 | `Divider` | 1px horizontal/vertical rule. |
 | `Badge` | metadata tag; `tone`, `pill`, `solid`. |
-| `Button` | `Primary`/`Secondary`/`Ghost` variants with `on_click`. |
+| `Button` | `Primary`/`Secondary`/`Ghost`/`Destructive` variants with `on_click`. |
 | `CodeBlock` | code surface, optional filename/language. |
 | `Terminal` | header dots, command and output lines. |
 | `EmptyState` | icon placeholder, title, description. |
@@ -145,6 +145,39 @@ impl Component for Caption {
 }
 ```
 
+## Overlays
+
+`draw_kit::Overlays` is a generic floating layer built on its own `Ui` + `Kit`.
+It keeps the host pipeline explicit — the host lays out its UI, then the layer,
+and paints the layer last:
+
+```rust
+app.ui.layout(viewport);
+overlays.layout(&app.ui, viewport); // resolve targets after layout
+// ... paint main UI ...
+overlays.paint(&mut ctx);           // scrim + floating content on top
+```
+
+Input goes to the layer first; a modal entry returns `EventResult::Handled` so
+the host must not process the event. With no open entries `handle_input` is a
+no-op, so hosts can call it unconditionally.
+
+| Builder | Behavior |
+|---|---|
+| `confirm(title, message)` | modal dialog, centered, scrim, Esc / click-outside / buttons close it. |
+| `popover(target, placement, content)` | anchored to a laid-out control; `content` builds into the layer's `Ui`. |
+| `tips(target, text)` | tooltip anchored to a control, shown only while it (or a descendant) is hovered. |
+| `message(text)` / `message_tone(text, tone)` | transient toast, auto-dismissed after ~2.5s. |
+
+Positioning is in `overlay::placement::place`: `Above`/`Below`/`Left`/`Right`
+flip to the opposite side when they would leave the viewport, then clamp to an
+8px margin; `Center`/`TopCenter`/`BottomCenter` are used for dialogs and toasts.
+`Overlays::rect(id)` exposes the resolved rectangle for tests/tools.
+
+Entries are declarative and rebuilt only when the set changes, so per-frame
+layout stays incremental. Button clicks, Esc and click-outside push actions that
+`handle_input` drains into `on_confirm` / `on_cancel` / `on_close` callbacks.
+
 ## Locked core
 
 `draw_core`, `draw_scene`, `draw_render` and `draw_ui` are treated as a frozen
@@ -165,5 +198,5 @@ Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /
 `StrokeRoundedRect`) with per-corner radii (`CornerRadii`, so one shape can mix
 square and rounded corners), implemented by the canvas, wgpu and recording
 backends, so surfaces no longer compose circles + rects by hand. Inputs, selects,
-tabs, tooltips, tables, lists, modals and toasts are staged next; see
-`docs/plan.md` for the full roadmap.
+tabs, tables and lists are staged next; see `docs/plan.md` for the full roadmap.
+The overlay layer covers confirm dialogs, popovers, tooltips and toasts.

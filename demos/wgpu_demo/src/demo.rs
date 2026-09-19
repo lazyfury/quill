@@ -61,7 +61,6 @@ impl Demo {
     /// Call after the [`draw_backend_wgpu::WgpuBackend`] is created.
     pub fn set_text_metrics(&mut self, metrics: FontMetrics) {
         self.app
-            .ui_mut()
             .set_text_measurer(Rc::new(BackendTextMeasurer { metrics }));
     }
 

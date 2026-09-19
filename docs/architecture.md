@@ -100,6 +100,11 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
   advance. `TextMeasurer::measure_run` is the backend-neutral hook so layout
   measures with the same shaping; the Canvas/WASM `measureText` measurer also
   measures whole runs. The core stays text-free.
+- Stage 22 — overlay layer [done]: `draw_kit::Overlays` owns its own `Ui` + `Kit`
+  and provides `confirm` / `popover` / `tips` / `message` builders on top of a
+  pure placement module (edge flipping + margin clamp). It handles scrims, modal
+  input capture, Esc/click-outside dismissal, auto-dismiss timers and callbacks;
+  hosts call `layout`, `paint` and `handle_input` around their own pipeline.
 
 ## Debugging & performance inspection (Stage 10)
 
