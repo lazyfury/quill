@@ -77,11 +77,10 @@ use draw_ui::{Tone, Ui};
 let mut ui = Ui::new();
 ui.set_theme(Theme::dark());
 
-let root = ui.root();
-let card = ui.add(root, Card::new().gap(space::MD));
-ui.add(card.id(), Text::heading("Settings"));
-ui.add(card.id(), Text::small("Changes save automatically.").tone(Tone::Muted));
-ui.add(card.id(), Checkbox::new("Verbose output"));
+ui.mount(ui.root(), Card::new().gap(space::MD)
+    .child(Text::heading("Settings"))
+    .child(Text::small("Changes save automatically.").tone(Tone::Muted))
+    .child(Checkbox::new("Verbose output")));
 
 ui.layout(viewport);
 ui.paint(&mut ctx);        // surfaces + content + marks, in tree order
@@ -136,6 +135,18 @@ placeholders) and detail pane (toolbar, hero scene, body, actions).
 | `EmptyState` | icon placeholder, title, description. |
 | `Checkbox` | compact control with shared state and `on_change`. |
 | `Switch` | compact on/off control. |
+
+`draw_components` containers take children, so a screen is one expression:
+
+```rust
+ui.mount(ui.root(), Card::new().gap(12.0)
+    .child(Text::heading("Settings"))
+    .child(Button::primary("Save").on_click(save).grow(1.0)));
+```
+
+`draw_ui::ViewExt` modifiers (`grow`, `min_size`, `anchors`/`offsets`,
+`background`, `dynamic_background`, `foreground`, `on_click`, `capture`, …)
+wrap any view and post-process its node.
 
 Extend the library by implementing `draw_ui::Component`:
 

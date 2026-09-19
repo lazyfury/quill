@@ -20,6 +20,7 @@ use crate::layout::{
     Align, AlignContent, FlexDirection, FlexStyle, GridStyle, Justify, TextOptions, Track,
 };
 use crate::ui::Ui;
+use crate::view::{child, BuildContext, Child, View};
 use crate::widget::{ButtonData, Widget};
 
 /// An owned handle to a mounted control.
@@ -50,10 +51,20 @@ pub trait Component {
 }
 
 /// A card/background control. Fills its parent by default.
-#[derive(Debug, Clone, Copy)]
 pub struct Panel {
     color: Color,
     border: Option<Color>,
+    children: Vec<Child>,
+}
+
+impl std::fmt::Debug for Panel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Panel")
+            .field("color", &self.color)
+            .field("border", &self.border)
+            .field("children", &self.children.len())
+            .finish()
+    }
 }
 
 impl Default for Panel {
@@ -61,6 +72,7 @@ impl Default for Panel {
         Self {
             color: Color::new(0.13, 0.15, 0.20, 1.0),
             border: Some(Color::new(0.26, 0.30, 0.40, 1.0)),
+            children: Vec::new(),
         }
     }
 }
@@ -84,11 +96,27 @@ impl Panel {
         self.border = None;
         self
     }
+
+    /// Adds one child view.
+    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
+        self.children.push(child(view));
+        self
+    }
+
+    /// Adds several child views.
+    pub fn children<I, V>(mut self, views: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: View + 'static,
+    {
+        self.children.extend(views.into_iter().map(child));
+        self
+    }
 }
 
 impl Component for Panel {
     fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        ControlRef::new(ui.insert(
+        let id = ui.insert(
             parent,
             "Panel",
             ControlData::fill_parent(),
@@ -96,7 +124,9 @@ impl Component for Panel {
                 color: self.color,
                 border: self.border,
             },
-        ))
+        );
+        BuildContext { ui, parent: id }.children(self.children);
+        ControlRef::new(id)
     }
 }
 
@@ -324,15 +354,25 @@ impl Component for HBox {
 }
 
 /// A configurable flex container.
-#[derive(Debug, Clone, Copy)]
 pub struct Flex {
     style: FlexStyle,
+    children: Vec<Child>,
+}
+
+impl std::fmt::Debug for Flex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Flex")
+            .field("style", &self.style)
+            .field("children", &self.children.len())
+            .finish()
+    }
 }
 
 impl Default for Flex {
     fn default() -> Self {
         Self {
             style: FlexStyle::default(),
+            children: Vec::new(),
         }
     }
 }
@@ -345,12 +385,14 @@ impl Flex {
     pub fn row() -> Self {
         Self {
             style: FlexStyle::row(),
+            children: Vec::new(),
         }
     }
 
     pub fn column() -> Self {
         Self {
             style: FlexStyle::column(),
+            children: Vec::new(),
         }
     }
 
@@ -400,16 +442,170 @@ impl Flex {
         self.style.padding = padding;
         self
     }
+
+    /// Adds one child view.
+    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
+        self.children.push(child(view));
+        self
+    }
+
+    /// Adds several child views.
+    pub fn children<I, V>(mut self, views: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: View + 'static,
+    {
+        self.children.extend(views.into_iter().map(child));
+        self
+    }
 }
 
 impl Component for Flex {
     fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        ControlRef::new(ui.insert(
+        let id = ui.insert(
             parent,
             "Flex",
             ControlData::fill_parent(),
             Widget::Flex(self.style),
-        ))
+        );
+        BuildContext { ui, parent: id }.children(self.children);
+        ControlRef::new(id)
+    }
+}
+
+/// A vertical flex stack with zero default padding/gap.
+///
+/// ```ignore
+/// ui.mount(root, Column::new().gap(12.0).padding(Edges::all(16.0))
+///     .child(Label::new("Settings"))
+///     .child(Button::new("Save")));
+/// ```
+pub struct Column {
+    flex: Flex,
+}
+
+impl Default for Column {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Column {
+    pub fn new() -> Self {
+        Self {
+            flex: Flex::column().gap(0.0).padding(Edges::ZERO),
+        }
+    }
+
+    pub fn gap(mut self, gap: f32) -> Self {
+        self.flex = self.flex.gap(gap);
+        self
+    }
+
+    pub fn padding(mut self, padding: Edges) -> Self {
+        self.flex = self.flex.padding(padding);
+        self
+    }
+
+    pub fn align(mut self, align: Align) -> Self {
+        self.flex = self.flex.align(align);
+        self
+    }
+
+    pub fn justify(mut self, justify: Justify) -> Self {
+        self.flex = self.flex.justify(justify);
+        self
+    }
+
+    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
+        self.flex = self.flex.child(view);
+        self
+    }
+
+    pub fn children<I, V>(mut self, views: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: View + 'static,
+    {
+        self.flex = self.flex.children(views);
+        self
+    }
+}
+
+impl std::fmt::Debug for Column {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Column").field("flex", &self.flex).finish()
+    }
+}
+
+impl View for Column {
+    fn build(self, cx: &mut BuildContext) -> NodeId {
+        self.flex.build(cx)
+    }
+}
+
+/// A horizontal flex row with zero default padding/gap.
+pub struct Row {
+    flex: Flex,
+}
+
+impl Default for Row {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Row {
+    pub fn new() -> Self {
+        Self {
+            flex: Flex::row().gap(0.0).padding(Edges::ZERO),
+        }
+    }
+
+    pub fn gap(mut self, gap: f32) -> Self {
+        self.flex = self.flex.gap(gap);
+        self
+    }
+
+    pub fn padding(mut self, padding: Edges) -> Self {
+        self.flex = self.flex.padding(padding);
+        self
+    }
+
+    pub fn align(mut self, align: Align) -> Self {
+        self.flex = self.flex.align(align);
+        self
+    }
+
+    pub fn justify(mut self, justify: Justify) -> Self {
+        self.flex = self.flex.justify(justify);
+        self
+    }
+
+    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
+        self.flex = self.flex.child(view);
+        self
+    }
+
+    pub fn children<I, V>(mut self, views: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: View + 'static,
+    {
+        self.flex = self.flex.children(views);
+        self
+    }
+}
+
+impl std::fmt::Debug for Row {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Row").field("flex", &self.flex).finish()
+    }
+}
+
+impl View for Row {
+    fn build(self, cx: &mut BuildContext) -> NodeId {
+        self.flex.build(cx)
     }
 }
 

@@ -3,7 +3,7 @@
 use draw_core::{Color, Edges, NodeId, Size, Vec2};
 use draw_render::PaintContext;
 use draw_theme::{radius, space, TextSize};
-use draw_ui::{Align, Flex, Justify, Label, TextOptions};
+use draw_ui::{child, Align, BuildContext, Child, Flex, Justify, Label, TextOptions, View};
 
 use crate::{Component, ControlRef, Text, Ui};
 use draw_ui::{foreground_decor, surface_decor};
@@ -14,7 +14,12 @@ use draw_ui::{SurfaceTone, Tone};
 ///
 /// The card is a column flex container, so children flow vertically. Its
 /// surface is attached as a `draw_ui::NodeDecor` and painted behind its content.
-#[derive(Debug, Clone, Copy)]
+///
+/// ```ignore
+/// ui.mount(root, Card::new().gap(12.0)
+///     .child(Text::heading("Settings"))
+///     .child(Checkbox::new("Verbose")));
+/// ```
 pub struct Card {
     tone: SurfaceTone,
     fill: Option<Color>,
@@ -22,6 +27,16 @@ pub struct Card {
     radius: f32,
     padding: Edges,
     gap: f32,
+    children: Vec<Child>,
+}
+
+impl std::fmt::Debug for Card {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Card")
+            .field("tone", &self.tone)
+            .field("children", &self.children.len())
+            .finish()
+    }
 }
 
 impl Default for Card {
@@ -40,6 +55,7 @@ impl Card {
             radius: radius::LG,
             padding: Edges::all(space::LG),
             gap: space::MD,
+            children: Vec::new(),
         }
     }
 
@@ -79,6 +95,22 @@ impl Card {
         self.gap = gap;
         self
     }
+
+    /// Adds one child view.
+    pub fn child<V: View + 'static>(mut self, view: V) -> Self {
+        self.children.push(child(view));
+        self
+    }
+
+    /// Adds several child views.
+    pub fn children<I, V>(mut self, views: I) -> Self
+    where
+        I: IntoIterator<Item = V>,
+        V: View + 'static,
+    {
+        self.children.extend(views.into_iter().map(child));
+        self
+    }
 }
 
 impl Component for Card {
@@ -95,6 +127,7 @@ impl Component for Card {
             .radius(self.radius)
             .border_opt(border);
         ui.add_decor(card.id(), surface_decor(style));
+        BuildContext::new(ui, card.id()).children(self.children);
         card
     }
 }

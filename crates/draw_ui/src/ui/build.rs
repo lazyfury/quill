@@ -160,6 +160,18 @@ impl Ui {
         component.mount(self, parent)
     }
 
+    /// Mounts a declarative [`View`](crate::View) under `parent`.
+    ///
+    /// ```ignore
+    /// ui.mount(root, Column::new().gap(12.0)
+    ///     .child(Label::new("Settings"))
+    ///     .child(Button::new("Save").on_click(save)));
+    /// ```
+    pub fn mount<V: crate::View>(&mut self, parent: NodeId, view: V) -> NodeId {
+        let mut cx = crate::view::BuildContext { ui: self, parent };
+        view.build(&mut cx)
+    }
+
     fn with_control(&mut self, id: NodeId, f: impl FnOnce(&mut ControlData)) -> bool {
         match self.controls.get_mut(&id) {
             Some(control) => {

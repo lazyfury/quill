@@ -113,6 +113,11 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
   `draw_ui -> draw_theme`) and the `Kit` runtime is gone: `draw_components` components
   implement `draw_ui::Component`, read `ui.theme()` and attach decorators, and
   hosts run a single `ui.paint` / `ui.handle_input`.
+- Stage 24 — declarative views [done]: `draw_ui::{View, BuildContext, ViewExt,
+  Column, Row}` + `Ui::mount`. A view tree composes with `.child(..)` and
+  chainable modifiers that post-process the built node, so node ids and
+  `ui.set_*` stay out of app code. `Component` is blanket a `View`, and
+  `demo_app` / overlay content are built as view trees.
 
 ## Debugging & performance inspection (Stage 10)
 

@@ -9,6 +9,16 @@
 //! - **Input** hit-tests topmost `Control`s and routes pointer/keyboard events
 //!   (target dispatch in MVP; capture/bubble is a future extension).
 //!
+//! UI is built declaratively: [`View`] values compose into a tree and
+//! [`Ui::mount`] builds them. Containers take [`children`](ViewExt) and
+//! [`ViewExt`] modifiers apply layout/surface/clicks without exposing node ids:
+//!
+//! ```ignore
+//! ui.mount(root, Column::new().gap(12.0).padding(Edges::all(16.0))
+//!     .child(Label::new("Settings"))
+//!     .child(Button::new("Save").grow(1.0).on_click(save)));
+//! ```
+//!
 //! This crate never touches browser APIs, so all of the above is testable with
 //! native `cargo test`.
 
@@ -23,9 +33,12 @@ pub mod layout;
 mod paint;
 mod tone;
 mod ui;
+mod view;
 mod widget;
 
-pub use component::{Button, Component, ControlRef, Flex, Grid, HBox, Label, Panel, VBox};
+pub use component::{
+    Button, Column, Component, ControlRef, Flex, Grid, HBox, Label, Panel, Row, VBox,
+};
 pub use control::{ControlData, MouseFilter};
 pub use debug::DebugDrawOptions;
 pub use decor::{
@@ -39,6 +52,7 @@ pub use layout::{
 pub use paint::{fill_rounded_rect, fill_rounded_rect_corners, inset, surface, SurfaceStyle};
 pub use tone::{SurfaceTone, Tone};
 pub use ui::{ClickCallback, Ui};
+pub use view::{child, widget, BuildContext, Child, Modify, View, ViewExt};
 pub use widget::{estimate_text_size, BoxLayout, ButtonData, ButtonState, Widget};
 
 #[cfg(test)]
@@ -144,6 +158,43 @@ mod tests {
 
         ui.handle_input(&InputEvent::PointerLeave);
         assert!(!ui.hovered_is_button());
+    }
+
+    #[test]
+    fn view_tree_composes_children_and_modifiers() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        use draw_core::Edges;
+
+        let mut ui = Ui::new();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let captured = Rc::new(RefCell::new(None));
+        let capture = captured.clone();
+
+        ui.mount(
+            ui.root(),
+            Column::new()
+                .gap(4.0)
+                .padding(Edges::ZERO)
+                .child(Label::new("first"))
+                .child(Label::new("second").grow(1.0).min_size(0.0, 32.0).capture({
+                    let capture = capture.clone();
+                    move |node| *capture.borrow_mut() = Some(node)
+                }))
+                .capture({
+                    let sink = sink.clone();
+                    move |node| sink.borrow_mut().push(node)
+                }),
+        );
+        ui.layout(Viewport::new(Size::new(200.0, 200.0)));
+
+        assert_eq!(seen.borrow().len(), 1, "container node captured");
+        let node = captured.borrow().expect("child captured");
+        assert!(ui.control(node).is_some());
+        assert_eq!(ui.control(node).unwrap().min_size, Size::new(0.0, 32.0));
+        assert_eq!(ui.control(node).unwrap().layout.grow, 1.0);
     }
 
     #[test]

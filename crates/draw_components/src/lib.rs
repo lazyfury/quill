@@ -15,9 +15,9 @@
 //! ui.set_theme(Theme::dark());
 //!
 //! let root = ui.root();
-//! let card = ui.add(root, Card::new().gap(space::MD));
-//! ui.add(card.id(), Text::heading("Settings"));
-//! ui.add(card.id(), Checkbox::new("Verbose output"));
+//! ui.mount(root, Card::new().gap(space::MD)
+//!     .child(Text::heading("Settings"))
+//!     .child(Checkbox::new("Verbose output")));
 //!
 //! ui.layout(viewport);
 //! ui.paint(&mut ctx);      // surfaces + content + marks, in tree order
@@ -49,7 +49,9 @@ pub use overlay::{OverlayId, Overlays, Placement};
 // Re-exported so component users need one import for the common surface.
 pub use draw_render::CornerRadii;
 pub use draw_theme::{self as theme, Theme};
-pub use draw_ui::{Component, ControlRef, Ui};
+pub use draw_ui::{
+    child, BuildContext, Child, Column, Component, ControlRef, Row, Ui, View, ViewExt,
+};
 
 /// Resets a control to top-left anchors so it sizes to its own content.
 ///
@@ -78,9 +80,7 @@ mod tests {
 
         let mut ui = Ui::new();
         ui.set_theme(Theme::dark());
-        let root = ui.root();
-        let card = ui.add(root, Card::new());
-        ui.add(card.id(), Text::heading("Hello"));
+        ui.mount(ui.root(), Card::new().child(Text::heading("Hello")));
         let vp = Viewport::new(Size::new(400.0, 300.0));
         ui.layout(vp);
 

@@ -36,7 +36,7 @@ use std::rc::Rc;
 use draw_core::{Color, Edges, EventResult, InputEvent, Key, NodeId, Size, Viewport};
 use draw_render::PaintContext;
 use draw_theme::{radius, space, SurfaceLevel, TextSize, Theme};
-use draw_ui::{Align, Flex, Justify, Label, MouseFilter, Ui};
+use draw_ui::{Align, BuildContext, Flex, Justify, Label, MouseFilter, Ui};
 
 use crate::Button;
 use draw_ui::surface_decor;
@@ -46,7 +46,7 @@ use draw_ui::Tone;
 pub use placement::Placement;
 
 type Callback = Rc<RefCell<dyn FnMut()>>;
-type ContentFn = Rc<dyn Fn(&mut Ui, NodeId)>;
+type ContentFn = Rc<dyn Fn(&mut BuildContext)>;
 
 const MARGIN: f32 = 8.0;
 const OFFSET: f32 = 8.0;
@@ -207,7 +207,7 @@ impl Overlays {
         &mut self,
         target: NodeId,
         placement: Placement,
-        content: impl Fn(&mut Ui, NodeId) + 'static,
+        content: impl Fn(&mut BuildContext) + 'static,
     ) -> OverlayId {
         let mut entry = Entry::new(
             OverlayId(0),
@@ -682,7 +682,7 @@ fn build_entry(entry: &Entry, ui: &mut Ui, actions: Rc<RefCell<Vec<Action>>>) ->
                         .color(palette.foreground),
                 );
             }
-            content(ui, root);
+            content(&mut BuildContext::new(ui, root));
             root
         }
         Kind::Tips { text } => {

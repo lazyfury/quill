@@ -50,6 +50,29 @@ audited by `draw_profile`'s inspector, or it is not "done".
 - Font weights are not modeled (no weight axis yet) — add `FontWeight` tokens
   when the backends can render them.
 
+## View layer (`draw_ui`)
+
+Declarative views are the public construction API (`View` / `BuildContext` /
+`ViewExt` / `Ui::mount`); the retained `Ui` + `Widget` are the runtime. Remaining
+polish, in priority order:
+
+1. **Reactive text bindings** — add `Text::dynamic(|| …)` (a text source on
+   labels) so `update()` stops calling `ui.set_text`; the runtime re-evaluates the
+   closure at layout/paint. This removes the last `set_*` from app code.
+2. **Container-aware modifiers** — `Modify<V>` only post-processes its node, so
+   `.child(..)` must precede any `ViewExt` modifier. Make container modifiers
+   (`grow`/`padding`/`gap`) forward `child`/`children` so the two interleave
+   freely.
+3. **Explicit rect anchors** — allow a popover/menu to anchor to a raw `Rect` or
+   pointer position (context menus), not only a laid-out `NodeId`.
+4. **Keys + reconciliation** — if a host rebuilds the view tree per frame, add
+   `ViewExt::key` and a reconciler that diffs by type/key into `Ui`, reusing the
+   existing dirty tracking / partial relayout.
+5. **`view!` macro (optional sugar)** — a `draw_macros` proc-macro expanding to
+   the builder calls, e.g. `view! { Card(gap = 12.0) { Text("Hi") } }`.
+6. **Migrate remaining imperative hosts** — `component_demo` and any lingering
+   `ui.add` + `ui.set_*` construction; keep `Ui::set_*` runtime-internal only.
+
 ## Demo (`demos/demo_app`)
 
 - Light/dark toggle in the sidebar.
@@ -70,6 +93,11 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Done
 
+- Declarative views (Stage 24): `Ui::mount` + `View`/`ViewExt` compose UI with
+  `.child(..)` and chainable modifiers (`grow`, `min_size`, `background`,
+  `dynamic_background`, `on_click`, `capture`, …); `Column`/`Row` are the
+  standard containers and `Component` is blanket a `View`. `demo_app` and the
+  overlay popover content are built as view trees.
 - Decorator-based chrome, no `Kit` (Stage 23): `Ui` owns the `Theme`
   (`Ui::theme`/`set_theme`); components implement `draw_ui::Component`, read
   `ui.theme()` and attach `draw_ui::NodeDecor` (surface / foreground) while

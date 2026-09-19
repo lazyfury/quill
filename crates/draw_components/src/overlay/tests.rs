@@ -75,7 +75,7 @@ fn outside_click_dismisses_a_popover() {
     let (host_ui, button) = host();
     let viewport = Viewport::new(Size::new(400.0, 300.0));
     let mut overlays = Overlays::new(Theme::dark());
-    let id = overlays.popover(button, Placement::Below, |_, _| {});
+    let id = overlays.popover(button, Placement::Below, |_| {});
     overlays.layout(&host_ui, viewport);
 
     let result = overlays.handle_input(&InputEvent::PointerDown {
@@ -107,8 +107,8 @@ fn popover_sits_below_its_target() {
     let viewport = Viewport::new(Size::new(400.0, 300.0));
 
     let mut overlays = Overlays::new(Theme::dark());
-    let id = overlays.popover(button, Placement::Below, |ui, parent| {
-        ui.add(parent, Label::new("Menu"));
+    let id = overlays.popover(button, Placement::Below, |cx| {
+        cx.child(Label::new("Menu"));
     });
     overlays.layout(&host_ui, viewport);
 

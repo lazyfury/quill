@@ -136,6 +136,14 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       foreground_decor}`. Hosts run a single `ui.paint` + `ui.handle_input`.
       `draw_components` holds only component builders; the surface/tone/decorator
       primitives live in `draw_ui`.
+- [x] Stage 24 — declarative views: `draw_ui::{View, BuildContext, ViewExt,
+      Column, Row}` and `Ui::mount`. Views compose with `.child(..)`; `ViewExt`
+      modifiers (`grow`, `min_size`, `anchors`/`offsets`, `background`,
+      `dynamic_background`, `foreground`, `on_click`, `capture`, …) wrap a view
+      and post-process its node, so `ui.set_*` never appears in app code. Every
+      `Component` is automatically a `View` (blanket impl). `Card` takes
+      children; `demo_app` and the overlay popover content are built as view
+      trees.
       Recorded in `docs/design-system.md`.
 
 ## Per-stage gate (must run)

@@ -28,7 +28,7 @@
 //! The app owns no window/backend/browser API. Both `wgpu_demo` and the WASM
 //! `web_demo` build and drive this exact app.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use draw_components::{Badge, Button, Checkbox, Divider, Overlays, Switch, Text};
@@ -36,9 +36,8 @@ use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2,
 use draw_render::{CornerRadii, PaintContext};
 use draw_theme::{radius, space, TextSize, Theme};
 use draw_ui::{
-    dynamic_surface_decor, fill_rounded_rect, fill_rounded_rect_corners, foreground_decor, inset,
-    surface_decor, Align, Flex, Justify, Label, Panel, SurfaceStyle, TextMeasurer, TextOptions,
-    Tone, Ui,
+    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Column, Flex, Justify, Label,
+    Panel, Row, SurfaceStyle, TextMeasurer, TextOptions, Tone, Ui, View, ViewExt,
 };
 
 /// Sidebar width in logical pixels.
@@ -153,334 +152,42 @@ impl DemoApp {
 
     /// Builds the app with an explicit theme.
     pub fn with_theme(theme: Theme) -> Self {
-        let mut ui_storage = Ui::new();
-        let ui = &mut ui_storage;
+        let mut ui = Ui::new();
         ui.set_theme(theme);
         let root = ui.root();
 
         let selected = Rc::new(Cell::new(0));
         let selected_nav = Rc::new(Cell::new(0));
         let delete_requested = Rc::new(Cell::new(false));
-
-        // ---- column shells + separators ---------------------------------
-        let sidebar = ui.add(
-            root,
-            Flex::column().gap(space::MD).padding(Edges::new(
-                space::LG,
-                space::MD,
-                space::MD,
-                space::MD,
-            )),
-        );
-        ui.set_anchors(sidebar.id(), Edges::new(0.0, 0.0, 0.0, 1.0));
-        ui.set_offsets(sidebar.id(), Edges::new(0.0, 0.0, SIDEBAR_WIDTH, 0.0));
-        ui.add_decor(
-            sidebar.id(),
-            surface_decor(SurfaceStyle::new(theme.palette.surface)),
-        );
-
-        let list = ui.add(
-            root,
-            Flex::column().gap(space::XS).padding(Edges::new(
-                space::MD,
-                space::MD,
-                space::MD,
-                space::MD,
-            )),
-        );
-        ui.set_anchors(list.id(), Edges::new(0.0, 0.0, 0.0, 1.0));
-        ui.set_offsets(list.id(), Edges::new(SIDEBAR_WIDTH, 0.0, DETAIL_X, 0.0));
-        ui.add_decor(
-            list.id(),
-            surface_decor(SurfaceStyle::new(theme.palette.background)),
-        );
-
-        let detail = ui.add(root, Flex::column().gap(0.0).padding(Edges::ZERO));
-        ui.set_anchors(detail.id(), Edges::new(0.0, 0.0, 1.0, 1.0));
-        ui.set_offsets(detail.id(), Edges::new(DETAIL_X, 0.0, 0.0, 0.0));
-        ui.add_decor(
-            detail.id(),
-            surface_decor(SurfaceStyle::new(theme.palette.background)),
-        );
-
-        for x in [SIDEBAR_WIDTH, DETAIL_X] {
-            let separator = ui.add(root, Panel::new().color(theme.palette.border_subtle).flat());
-            ui.set_anchors(separator.id(), Edges::new(0.0, 0.0, 0.0, 1.0));
-            ui.set_offsets(separator.id(), Edges::new(x, 0.0, x + 1.0, 0.0));
-        }
-
-        // ---- sidebar ----------------------------------------------------
-        let traffic = ui.add(
-            sidebar.id(),
-            Flex::row().gap(space::XS).padding(Edges::ZERO),
-        );
-        ui.set_min_size(traffic.id(), Size::new(0.0, 12.0));
-        ui.add_decor(
-            traffic.id(),
-            foreground_decor(theme, |ctx, rect, theme, _| {
-                let radius = 5.0;
-                let step = radius * 2.0 + 6.0;
-                let y = rect.center().y;
-                for (index, color) in [
-                    theme.palette.error,
-                    theme.palette.warning,
-                    theme.palette.success,
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    ctx.fill_circle(
-                        Vec2::new(rect.left() + radius + index as f32 * step, y),
-                        radius,
-                        color,
-                    );
-                }
-            }),
-        );
-
-        let title_row = ui.add(
-            sidebar.id(),
-            Flex::row()
-                .align(Align::Center)
-                .gap(space::SM)
-                .padding(Edges::ZERO),
-        );
-        let app_icon = add_placeholder(ui, title_row.id(), 20.0);
-        ui.add_decor(
-            app_icon.id(),
-            surface_decor(SurfaceStyle::new(theme.palette.accent).radius(radius::SM)),
-        );
-        ui.add_decor(
-            app_icon.id(),
-            foreground_decor(theme, |ctx, rect, theme, _| {
-                fill_rounded_rect(ctx, inset(rect, 6.0), 1.0, theme.palette.on_accent);
-            }),
-        );
-        ui.add(title_row.id(), Text::subheading("Quill"));
-
-        let search = ui.add(sidebar.id(), Panel::new().color(Color::TRANSPARENT).flat());
-        ui.set_min_size(search.id(), Size::new(0.0, 30.0));
-        ui.add_decor(
-            search.id(),
-            surface_decor(
-                SurfaceStyle::new(theme.palette.surface_raised)
-                    .border(theme.palette.border)
-                    .radius(radius::MD),
-            ),
-        );
-        let search_label = ui.add(
-            search.id(),
-            Label::new("Search")
-                .font_size(TextSize::Small.px())
-                .color(theme.palette.muted)
-                .text_options(TextOptions::no_wrap()),
-        );
-        ui.set_anchors(search_label.id(), Edges::new(0.0, 0.5, 1.0, 0.5));
-        ui.set_offsets(
-            search_label.id(),
-            Edges::new(space::SM, -8.0, -space::SM, 8.0),
-        );
-
-        ui.add(sidebar.id(), Text::caption("Library").tone(Tone::Subtle));
-        let mut nav_rows = Vec::new();
-        for (index, label) in NAV_ITEMS.iter().enumerate() {
-            nav_rows.push(add_nav_row(ui, sidebar.id(), label, index, &selected_nav));
-        }
-
-        ui.add(sidebar.id(), Text::caption("Tags").tone(Tone::Subtle));
-        for (index, label) in TAG_ITEMS.iter().enumerate() {
-            let row_index = NAV_ITEMS.len() + index;
-            nav_rows.push(add_nav_row(
-                ui,
-                sidebar.id(),
-                label,
-                row_index,
-                &selected_nav,
-            ));
-        }
-
-        let spacer = ui.add(sidebar.id(), Flex::new().padding(Edges::ZERO));
-        ui.set_flex_grow(spacer.id(), 1.0);
-        let footer = ui.add(
-            sidebar.id(),
-            Flex::row()
-                .align(Align::Center)
-                .gap(space::SM)
-                .padding(Edges::ZERO),
-        );
-        ui.add(footer.id(), Badge::new("v0.1.0").tone(Tone::Muted));
-        ui.add(footer.id(), Text::caption("local").tone(Tone::Subtle));
-
-        // ---- content list ----------------------------------------------
-        let header = ui.add(
-            list.id(),
-            Flex::row()
-                .align(Align::Center)
-                .justify(Justify::SpaceBetween)
-                .gap(space::SM)
-                .padding(Edges::new(space::SM, space::XS, space::SM, space::XS)),
-        );
-        ui.set_min_size(header.id(), Size::new(0.0, 32.0));
-        ui.add(header.id(), Text::heading("All Notes"));
-        ui.add(
-            header.id(),
-            Text::small(format!("{} notes", NOTES.len())).tone(Tone::Muted),
-        );
-        ui.add(list.id(), Divider::horizontal());
-
-        let mut list_rows = Vec::new();
-        for (index, note) in NOTES.iter().enumerate() {
-            list_rows.push(add_note_row(ui, list.id(), theme, note, index, &selected));
-        }
-
-        // ---- detail pane ------------------------------------------------
-        let toolbar = ui.add(
-            detail.id(),
-            Flex::row()
-                .align(Align::Center)
-                .gap(space::SM)
-                .padding(Edges::new(space::LG, space::SM, space::LG, space::SM)),
-        );
-        ui.set_min_size(toolbar.id(), Size::new(0.0, 48.0));
-
-        let nav_group = ui.add(
-            toolbar.id(),
-            Flex::row()
-                .align(Align::Center)
-                .gap(space::XS)
-                .padding(Edges::ZERO),
-        );
-        let back = add_placeholder(ui, nav_group.id(), 28.0);
-        let selected_prev = selected.clone();
-        ui.set_on_click(back.id(), move || {
-            let value = selected_prev.get();
-            selected_prev.set(value.saturating_sub(1));
-        });
-        let forward = add_placeholder(ui, nav_group.id(), 28.0);
-        let selected_next = selected.clone();
-        ui.set_on_click(forward.id(), move || {
-            let value = selected_next.get();
-            selected_next.set((value + 1).min(NOTES.len() - 1));
-        });
-
-        let toolbar_spacer = ui.add(toolbar.id(), Flex::new().padding(Edges::ZERO));
-        ui.set_flex_grow(toolbar_spacer.id(), 1.0);
-
-        let actions = ui.add(
-            toolbar.id(),
-            Flex::row()
-                .align(Align::Center)
-                .gap(space::SM)
-                .padding(Edges::ZERO),
-        );
-        ui.add(actions.id(), Button::ghost("Share"));
         let clicks = Rc::new(Cell::new(0));
-        let counter = clicks.clone();
-        let primary_button = ui.add(
-            actions.id(),
-            Button::primary("New Note").on_click(move || counter.set(counter.get() + 1)),
-        );
-        ui.add(detail.id(), Divider::horizontal());
+        let ids = Rc::new(RefCell::new(Ids::default()));
 
-        let content = ui.add(
-            detail.id(),
-            Flex::column().gap(space::LG).padding(Edges::new(
-                space::XXL,
-                space::LG,
-                space::XXL,
-                space::XXL,
-            )),
+        // Three columns plus their hairline separators, all declarative.
+        ui.mount(root, sidebar_view(theme, &selected_nav, &ids));
+        ui.mount(root, list_view(theme, &selected, &ids));
+        ui.mount(
+            root,
+            detail_view(theme, &selected, &clicks, &delete_requested, &ids),
         );
+        for x in [SIDEBAR_WIDTH, DETAIL_X] {
+            ui.mount(root, separator_view(theme, x));
+        }
 
-        let hero = ui.add(content.id(), Flex::new().padding(Edges::ZERO));
-        ui.set_min_size(hero.id(), Size::new(0.0, 220.0));
-        ui.add_decor(
-            hero.id(),
-            surface_decor(
-                SurfaceStyle::new(theme.palette.surface_raised)
-                    .border(theme.palette.border)
-                    .radius(radius::LG),
-            ),
-        );
-
-        let note = &NOTES[0];
-        let title_row = ui.add(
-            content.id(),
-            Flex::row()
-                .align(Align::Center)
-                .gap(space::SM)
-                .padding(Edges::ZERO),
-        );
-        let detail_title = ui.add(title_row.id(), Text::heading(note.title));
-        ui.set_flex_grow(detail_title.id(), 1.0);
-        let detail_tag = ui.add(title_row.id(), Text::caption(note.tag).tone(Tone::Accent));
-        let detail_meta = ui.add(
-            content.id(),
-            Text::small(format!("Edited {} · {}", note.modified, note.tag)).tone(Tone::Muted),
-        );
-        let detail_body = ui.add(content.id(), Text::new(note.body).tone(Tone::Muted));
-
-        let preferences = ui.add(
-            content.id(),
-            Flex::row()
-                .align(Align::Center)
-                .gap(space::XL)
-                .padding(Edges::ZERO),
-        );
-        ui.add(preferences.id(), Checkbox::new("Pin note"));
-        ui.add(preferences.id(), Switch::new().label("Shared"));
-
-        ui.add(content.id(), Divider::horizontal());
-        let actions = ui.add(
-            content.id(),
-            Flex::row()
-                .align(Align::Center)
-                .gap(space::SM)
-                .padding(Edges::ZERO),
-        );
-        ui.add(actions.id(), Button::secondary("Open"));
-        ui.add(actions.id(), Button::secondary("Duplicate"));
-        let delete_flag = delete_requested.clone();
-        ui.add(
-            actions.id(),
-            Button::ghost("Delete").on_click(move || delete_flag.set(true)),
-        );
-
-        // ---- hero: a static image placeholder --------------------------
-        // No animation: the app is static so idle performance can be profiled.
-        ui.add_decor(
-            hero.id(),
-            foreground_decor(theme, |ctx, rect, theme, _| {
-                let side = 64.0f32
-                    .min(rect.size.width - 24.0)
-                    .min(rect.size.height - 24.0)
-                    .max(0.0);
-                if side > 0.0 {
-                    let inner = Rect::from_center_size(rect.center(), Size::splat(side));
-                    fill_rounded_rect(
-                        ctx,
-                        inner,
-                        radius::MD,
-                        theme.palette.subtle.with_alpha(0.18),
-                    );
-                }
-            }),
-        );
-
+        let ids = ids.borrow();
         Self {
-            ui: ui_storage,
+            ui,
             theme,
-            sidebar: sidebar.id(),
-            list: list.id(),
-            detail: detail.id(),
-            hero: hero.id(),
-            list_rows,
-            nav_rows,
-            detail_title: detail_title.id(),
-            detail_body: detail_body.id(),
-            detail_tag: detail_tag.id(),
-            detail_meta: detail_meta.id(),
-            primary_button: primary_button.id(),
+            sidebar: ids.sidebar.expect("sidebar node"),
+            list: ids.list.expect("list node"),
+            detail: ids.detail.expect("detail node"),
+            hero: ids.hero.expect("hero node"),
+            list_rows: ids.list_rows.clone(),
+            nav_rows: ids.nav_rows.clone(),
+            detail_title: ids.detail_title.expect("detail title node"),
+            detail_body: ids.detail_body.expect("detail body node"),
+            detail_tag: ids.detail_tag.expect("detail tag node"),
+            detail_meta: ids.detail_meta.expect("detail meta node"),
+            primary_button: ids.primary_button.expect("primary button node"),
             selected,
             selected_nav,
             clicks,
@@ -655,60 +362,102 @@ impl DemoApp {
 }
 
 /// Adds a compact rounded-square icon/thumbnail placeholder.
-fn add_placeholder(ui: &mut Ui, parent: NodeId, size: f32) -> draw_ui::ControlRef {
-    let theme = ui.theme();
-    let node = ui.add(parent, Panel::new().color(Color::TRANSPARENT).flat());
-    ui.set_min_size(node.id(), Size::new(size, size));
-    ui.add_decor(
-        node.id(),
-        dynamic_surface_decor(theme, move |theme, state| {
+/// Node ids captured while the view tree is built.
+#[derive(Default)]
+struct Ids {
+    sidebar: Option<NodeId>,
+    list: Option<NodeId>,
+    detail: Option<NodeId>,
+    hero: Option<NodeId>,
+    detail_title: Option<NodeId>,
+    detail_body: Option<NodeId>,
+    detail_tag: Option<NodeId>,
+    detail_meta: Option<NodeId>,
+    primary_button: Option<NodeId>,
+    list_rows: Vec<NodeId>,
+    nav_rows: Vec<NodeId>,
+}
+
+/// A compact square placeholder: hover surface + a small inner mark.
+fn icon_box(size: f32) -> impl View {
+    Panel::new()
+        .color(Color::TRANSPARENT)
+        .flat()
+        .min_size(size, size)
+        .dynamic_background(|theme, state| {
             let fill = if state.hovered || state.pressed {
                 theme.palette.surface_hover
             } else {
                 Color::TRANSPARENT
             };
             SurfaceStyle::new(fill).radius(radius::SM)
-        }),
-    );
-    ui.add_decor(
-        node.id(),
-        foreground_decor(theme, |ctx, rect, theme, _| {
+        })
+        .foreground(|ctx, rect, theme, _| {
             let inner = inset(rect, rect.size.width * 0.32);
             fill_rounded_rect(ctx, inner, 1.5, theme.palette.subtle);
-        }),
-    );
-    node
+        })
 }
 
-/// Adds one sidebar navigation row (icon placeholder + label + selection).
-fn add_nav_row(
-    ui: &mut Ui,
-    parent: NodeId,
+/// The app icon: accent square with a light inner mark.
+fn app_icon(size: f32, theme: Theme) -> impl View {
+    Panel::new()
+        .color(Color::TRANSPARENT)
+        .flat()
+        .min_size(size, size)
+        .background(SurfaceStyle::new(theme.palette.accent).radius(radius::SM))
+        .foreground(|ctx, rect, theme, _| {
+            fill_rounded_rect(ctx, inset(rect, 6.0), 1.0, theme.palette.on_accent);
+        })
+}
+
+/// A note thumbnail: bordered surface with a shaded inner rectangle.
+fn thumb(size: f32, theme: Theme, shade: f32) -> impl View {
+    Panel::new()
+        .color(Color::TRANSPARENT)
+        .flat()
+        .min_size(size, size)
+        .background(
+            SurfaceStyle::new(theme.palette.surface_raised)
+                .border(theme.palette.border)
+                .radius(radius::MD),
+        )
+        .foreground(move |ctx, rect, theme, _| {
+            fill_rounded_rect(
+                ctx,
+                inset(rect, 12.0),
+                2.0,
+                theme.palette.subtle.with_alpha(shade),
+            );
+        })
+}
+
+fn separator_view(theme: Theme, x: f32) -> impl View {
+    Panel::new()
+        .color(theme.palette.border_subtle)
+        .flat()
+        .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
+        .offsets(Edges::new(x, 0.0, x + 1.0, 0.0))
+}
+
+fn nav_row_view(
     label: &str,
     index: usize,
     selected: &Rc<Cell<usize>>,
-) -> NodeId {
-    let theme = ui.theme();
-    let row = ui.add(
-        parent,
-        Flex::row()
-            .align(Align::Center)
-            .gap(space::SM)
-            .padding(Edges::new(space::SM, space::XS, space::SM, space::XS)),
-    );
-    ui.set_min_size(row.id(), Size::new(0.0, 28.0));
-
-    let icon = add_placeholder(ui, row.id(), 14.0);
-    let _ = icon;
-
-    ui.add(row.id(), Text::small(label));
-
-    let state = selected.clone();
+    ids: &Rc<RefCell<Ids>>,
+) -> impl View {
+    let held = selected.clone();
     let current = index;
-    ui.add_decor(
-        row.id(),
-        dynamic_surface_decor(theme, move |theme, interact| {
-            let fill = if state.get() == current {
+    let click = selected.clone();
+    let row_ids = ids.clone();
+    Row::new()
+        .align(Align::Center)
+        .gap(space::SM)
+        .padding(Edges::new(space::SM, space::XS, space::SM, space::XS))
+        .child(icon_box(14.0))
+        .child(Text::small(label))
+        .min_size(0.0, 28.0)
+        .dynamic_background(move |theme, interact| {
+            let fill = if held.get() == current {
                 theme.palette.selection
             } else if interact.hovered {
                 theme.palette.surface_hover
@@ -716,40 +465,128 @@ fn add_nav_row(
                 Color::TRANSPARENT
             };
             SurfaceStyle::new(fill).radius(radius::SM)
-        }),
-    );
-
-    let click = selected.clone();
-    let target = index;
-    ui.set_on_click(row.id(), move || click.set(target));
-    row.id()
+        })
+        .on_click(move || click.set(index))
+        .capture(move |node| row_ids.borrow_mut().nav_rows.push(node))
 }
 
-/// Adds one note row to the content list.
-fn add_note_row(
-    ui: &mut Ui,
-    parent: NodeId,
+fn sidebar_view(theme: Theme, selected_nav: &Rc<Cell<usize>>, ids: &Rc<RefCell<Ids>>) -> impl View {
+    let traffic =
+        Row::new()
+            .gap(space::XS)
+            .min_size(0.0, 12.0)
+            .foreground(|ctx, rect, theme, _| {
+                let radius = 5.0;
+                let step = radius * 2.0 + 6.0;
+                let y = rect.center().y;
+                for (index, color) in [
+                    theme.palette.error,
+                    theme.palette.warning,
+                    theme.palette.success,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    ctx.fill_circle(
+                        Vec2::new(rect.left() + radius + index as f32 * step, y),
+                        radius,
+                        color,
+                    );
+                }
+            });
+
+    let title_row = Row::new()
+        .align(Align::Center)
+        .gap(space::SM)
+        .child(app_icon(20.0, theme))
+        .child(Text::subheading("Quill"));
+
+    let search_label = Label::new("Search")
+        .font_size(TextSize::Small.px())
+        .color(theme.palette.muted)
+        .text_options(TextOptions::no_wrap())
+        .anchors(Edges::new(0.0, 0.5, 1.0, 0.5))
+        .offsets(Edges::new(space::SM, -8.0, -space::SM, 8.0));
+    let search = Panel::new()
+        .color(Color::TRANSPARENT)
+        .flat()
+        .child(search_label)
+        .min_size(0.0, 30.0)
+        .background(
+            SurfaceStyle::new(theme.palette.surface_raised)
+                .border(theme.palette.border)
+                .radius(radius::MD),
+        );
+
+    let library_rows: Vec<_> = NAV_ITEMS
+        .iter()
+        .enumerate()
+        .map(|(index, label)| nav_row_view(label, index, selected_nav, ids))
+        .collect();
+    let tag_rows: Vec<_> = TAG_ITEMS
+        .iter()
+        .enumerate()
+        .map(|(index, label)| nav_row_view(label, NAV_ITEMS.len() + index, selected_nav, ids))
+        .collect();
+
+    let footer = Row::new()
+        .align(Align::Center)
+        .gap(space::SM)
+        .child(Badge::new("v0.1.0").tone(Tone::Muted))
+        .child(Text::caption("local").tone(Tone::Subtle));
+
+    let sidebar_ids = ids.clone();
+    Column::new()
+        .gap(space::MD)
+        .padding(Edges::new(space::LG, space::MD, space::MD, space::MD))
+        .child(traffic)
+        .child(title_row)
+        .child(search)
+        .child(Text::caption("Library").tone(Tone::Subtle))
+        .children(library_rows)
+        .child(Text::caption("Tags").tone(Tone::Subtle))
+        .children(tag_rows)
+        .child(Flex::new().padding(Edges::ZERO).grow(1.0))
+        .child(footer)
+        .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
+        .offsets(Edges::new(0.0, 0.0, SIDEBAR_WIDTH, 0.0))
+        .background(SurfaceStyle::new(theme.palette.surface))
+        .capture(move |node| sidebar_ids.borrow_mut().sidebar = Some(node))
+}
+
+fn note_row_view(
     theme: Theme,
     note: &Note,
     index: usize,
     selected: &Rc<Cell<usize>>,
-) -> NodeId {
-    let row = ui.add(
-        parent,
-        Flex::row()
-            .align(Align::Start)
-            .gap(space::MD)
-            .padding(Edges::all(space::SM)),
-    );
-    ui.set_min_size(row.id(), Size::new(0.0, 60.0));
-
-    let state = selected.clone();
+    ids: &Rc<RefCell<Ids>>,
+) -> impl View {
+    let held = selected.clone();
     let current = index;
-    // Square left corners, rounded right corners (a macOS-style list item).
-    ui.add_decor(
-        row.id(),
-        dynamic_surface_decor(theme, move |theme, interact| {
-            let fill = if state.get() == current {
+    let click = selected.clone();
+    let bar = selected.clone();
+    let row_ids = ids.clone();
+    let shade = 0.18 + index as f32 * 0.05;
+    let column = Column::new()
+        .gap(space::XXS)
+        .child(Text::small(note.title))
+        .child(
+            Text::caption(note.snippet)
+                .tone(Tone::Muted)
+                .max_lines(1)
+                .ellipsis(true),
+        )
+        .grow(1.0);
+
+    Row::new()
+        .align(Align::Start)
+        .gap(space::MD)
+        .padding(Edges::all(space::SM))
+        .child(thumb(44.0, theme, shade))
+        .child(column)
+        .min_size(0.0, 60.0)
+        .dynamic_background(move |theme, interact| {
+            let fill = if held.get() == current {
                 theme.palette.selection
             } else if interact.hovered {
                 theme.palette.surface_hover
@@ -757,16 +594,9 @@ fn add_note_row(
                 Color::TRANSPARENT
             };
             SurfaceStyle::new(fill).corners(CornerRadii::new(0.0, radius::MD, radius::MD, 0.0))
-        }),
-    );
-
-    let state = selected.clone();
-    let current = index;
-    // A full-height accent bar marks the selected item.
-    ui.add_decor(
-        row.id(),
-        foreground_decor(theme, move |ctx, rect, theme, _| {
-            if state.get() == current {
+        })
+        .foreground(move |ctx, rect, theme, _| {
+            if bar.get() == current {
                 let bar = Rect::from_min_max(
                     Vec2::new(rect.left(), rect.top()),
                     Vec2::new(rect.left() + 3.0, rect.bottom()),
@@ -778,50 +608,167 @@ fn add_note_row(
                     theme.palette.accent,
                 );
             }
-        }),
-    );
+        })
+        .on_click(move || click.set(index))
+        .capture(move |node| row_ids.borrow_mut().list_rows.push(node))
+}
 
-    let thumb = add_placeholder(ui, row.id(), 44.0);
-    ui.add_decor(
-        thumb.id(),
-        surface_decor(
+fn list_view(theme: Theme, selected: &Rc<Cell<usize>>, ids: &Rc<RefCell<Ids>>) -> impl View {
+    let header = Row::new()
+        .align(Align::Center)
+        .justify(Justify::SpaceBetween)
+        .gap(space::SM)
+        .padding(Edges::new(space::SM, space::XS, space::SM, space::XS))
+        .child(Text::heading("All Notes"))
+        .child(Text::small(format!("{} notes", NOTES.len())).tone(Tone::Muted))
+        .min_size(0.0, 32.0);
+
+    let rows: Vec<_> = NOTES
+        .iter()
+        .enumerate()
+        .map(|(index, note)| note_row_view(theme, note, index, selected, ids))
+        .collect();
+
+    let list_ids = ids.clone();
+    Column::new()
+        .gap(space::XS)
+        .padding(Edges::new(space::MD, space::MD, space::MD, space::MD))
+        .child(header)
+        .child(Divider::horizontal())
+        .children(rows)
+        .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
+        .offsets(Edges::new(SIDEBAR_WIDTH, 0.0, DETAIL_X, 0.0))
+        .background(SurfaceStyle::new(theme.palette.background))
+        .capture(move |node| list_ids.borrow_mut().list = Some(node))
+}
+
+fn detail_view(
+    theme: Theme,
+    selected: &Rc<Cell<usize>>,
+    clicks: &Rc<Cell<u32>>,
+    delete_requested: &Rc<Cell<bool>>,
+    ids: &Rc<RefCell<Ids>>,
+) -> impl View {
+    let back = selected.clone();
+    let forward = selected.clone();
+    let nav_group = Row::new()
+        .align(Align::Center)
+        .gap(space::XS)
+        .child(icon_box(28.0).on_click(move || {
+            let value = back.get();
+            back.set(value.saturating_sub(1));
+        }))
+        .child(icon_box(28.0).on_click(move || {
+            let value = forward.get();
+            forward.set((value + 1).min(NOTES.len() - 1));
+        }));
+
+    let counter = clicks.clone();
+    let primary_ids = ids.clone();
+    let primary = Button::primary("New Note")
+        .on_click(move || counter.set(counter.get() + 1))
+        .capture(move |node| primary_ids.borrow_mut().primary_button = Some(node));
+    let actions = Row::new()
+        .align(Align::Center)
+        .gap(space::SM)
+        .child(Button::ghost("Share"))
+        .child(primary);
+
+    let toolbar = Row::new()
+        .align(Align::Center)
+        .gap(space::SM)
+        .padding(Edges::new(space::LG, space::SM, space::LG, space::SM))
+        .child(nav_group)
+        .child(Flex::new().padding(Edges::ZERO).grow(1.0))
+        .child(actions)
+        .min_size(0.0, 48.0);
+
+    let note = &NOTES[0];
+    let hero_ids = ids.clone();
+    let hero = Flex::new()
+        .padding(Edges::ZERO)
+        .min_size(0.0, 220.0)
+        .background(
             SurfaceStyle::new(theme.palette.surface_raised)
                 .border(theme.palette.border)
-                .radius(radius::MD),
-        ),
-    );
-    let shade = 0.18 + index as f32 * 0.05;
-    ui.add_decor(
-        thumb.id(),
-        foreground_decor(theme, move |ctx, rect, theme, _| {
-            fill_rounded_rect(
-                ctx,
-                inset(rect, 12.0),
-                2.0,
-                theme.palette.subtle.with_alpha(shade),
-            );
-        }),
-    );
+                .radius(radius::LG),
+        )
+        .foreground(|ctx, rect, theme, _| {
+            let side = 64.0f32
+                .min(rect.size.width - 24.0)
+                .min(rect.size.height - 24.0)
+                .max(0.0);
+            if side > 0.0 {
+                let inner = Rect::from_center_size(rect.center(), Size::splat(side));
+                fill_rounded_rect(
+                    ctx,
+                    inner,
+                    radius::MD,
+                    theme.palette.subtle.with_alpha(0.18),
+                );
+            }
+        })
+        .capture(move |node| hero_ids.borrow_mut().hero = Some(node));
 
-    let column = ui.add(
-        row.id(),
-        Flex::column().gap(space::XXS).padding(Edges::ZERO),
-    );
-    ui.set_flex_grow(column.id(), 1.0);
-    ui.add(column.id(), Text::small(note.title));
-    ui.add(
-        column.id(),
-        Text::caption(note.snippet)
-            .tone(Tone::Muted)
-            .max_lines(1)
-            .ellipsis(true),
-    );
-    ui.add(column.id(), Text::caption(note.modified).tone(Tone::Subtle));
+    let title_ids = ids.clone();
+    let detail_title = Text::heading(note.title)
+        .grow(1.0)
+        .capture(move |node| title_ids.borrow_mut().detail_title = Some(node));
+    let tag_ids = ids.clone();
+    let detail_tag = Text::caption(note.tag)
+        .tone(Tone::Accent)
+        .capture(move |node| tag_ids.borrow_mut().detail_tag = Some(node));
+    let title_row = Row::new()
+        .align(Align::Center)
+        .gap(space::SM)
+        .child(detail_title)
+        .child(detail_tag);
 
-    let click = selected.clone();
-    let target = index;
-    ui.set_on_click(row.id(), move || click.set(target));
-    row.id()
+    let meta_ids = ids.clone();
+    let detail_meta = Text::small(format!("Edited {} · {}", note.modified, note.tag))
+        .tone(Tone::Muted)
+        .capture(move |node| meta_ids.borrow_mut().detail_meta = Some(node));
+    let body_ids = ids.clone();
+    let detail_body = Text::new(note.body)
+        .tone(Tone::Muted)
+        .capture(move |node| body_ids.borrow_mut().detail_body = Some(node));
+
+    let preferences = Row::new()
+        .align(Align::Center)
+        .gap(space::XL)
+        .child(Checkbox::new("Pin note"))
+        .child(Switch::new().label("Shared"));
+
+    let delete_flag = delete_requested.clone();
+    let content_actions = Row::new()
+        .align(Align::Center)
+        .gap(space::SM)
+        .child(Button::secondary("Open"))
+        .child(Button::secondary("Duplicate"))
+        .child(Button::ghost("Delete").on_click(move || delete_flag.set(true)));
+
+    let content = Column::new()
+        .gap(space::LG)
+        .padding(Edges::new(space::XXL, space::LG, space::XXL, space::XXL))
+        .child(hero)
+        .child(title_row)
+        .child(detail_meta)
+        .child(detail_body)
+        .child(preferences)
+        .child(Divider::horizontal())
+        .child(content_actions);
+
+    let detail_ids = ids.clone();
+    Column::new()
+        .gap(0.0)
+        .padding(Edges::ZERO)
+        .child(toolbar)
+        .child(Divider::horizontal())
+        .child(content)
+        .anchors(Edges::new(0.0, 0.0, 1.0, 1.0))
+        .offsets(Edges::new(DETAIL_X, 0.0, 0.0, 0.0))
+        .background(SurfaceStyle::new(theme.palette.background))
+        .capture(move |node| detail_ids.borrow_mut().detail = Some(node))
 }
 
 #[cfg(test)]
