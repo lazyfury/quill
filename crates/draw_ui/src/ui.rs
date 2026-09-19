@@ -8,6 +8,7 @@ use draw_core::{
 use draw_render::{PaintContext, TextAlign};
 use draw_scene::SceneTree;
 
+use crate::component::{Component, ControlRef};
 use crate::control::{ControlData, MouseFilter};
 use crate::widget::{BoxLayout, ButtonData, ButtonState, Widget};
 
@@ -162,7 +163,7 @@ impl Ui {
         )
     }
 
-    fn insert(
+    pub(crate) fn insert(
         &mut self,
         parent: NodeId,
         name: &str,
@@ -215,6 +216,18 @@ impl Ui {
         }
         self.callbacks.insert(id, Rc::new(RefCell::new(callback)));
         true
+    }
+
+    /// Mounts a [`Component`] under `parent` and returns its handle.
+    ///
+    /// ```ignore
+    /// let panel = ui.add(ui.root(), Panel::new());
+    /// let vbox = ui.add(panel.id(), VBox::new());
+    /// ui.add(vbox.id(), Label::new("Hello"));
+    /// ui.add(vbox.id(), Button::new("Click me").on_click(|| { /* ... */ }));
+    /// ```
+    pub fn add<C: Component>(&mut self, parent: NodeId, component: C) -> ControlRef {
+        component.mount(self, parent)
     }
 
     fn with_control(&mut self, id: NodeId, f: impl FnOnce(&mut ControlData)) -> bool {

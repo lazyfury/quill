@@ -61,22 +61,26 @@ Then submit `list` to any `RenderBackend` (recording, Canvas 2D, ...). See
 ## Create your first control
 
 ```rust
-use draw_core::{InputEvent, PointerButton, Size, Viewport};
-use draw_ui::Ui;
+use draw_core::{Size, Viewport};
+use draw_ui::{Ui, Panel, VBox, Label, Button};
 
 let mut ui = Ui::new();
-let panel = ui.add_panel(ui.root());
-let vbox = ui.add_vbox(panel);
-ui.add_label(vbox, "Hello");
-let button = ui.add_button(vbox, "Click me");
-ui.set_on_click(button, || println!("clicked!"));
+
+let panel = ui.add(ui.root(), Panel::new());
+let vbox = ui.add(panel.id(), VBox::new());
+ui.add(vbox.id(), Label::new("Hello"));
+
+let button = ui.add(
+    vbox.id(),
+    Button::new("Click me").on_click(|| println!("clicked!")),
+);
 
 ui.layout(Viewport::new(Size::new(800.0, 600.0)));
 
 // Pointer/keyboard input (backend-neutral):
-ui.handle_input(&InputEvent::PointerDown {
+ui.handle_input(&draw_core::InputEvent::PointerDown {
     position: draw_core::Vec2::new(100.0, 100.0),
-    button: PointerButton::Left,
+    button: draw_core::PointerButton::Left,
 });
 
 // Paint into a DrawList:
@@ -84,4 +88,5 @@ let mut ctx = draw_render::PaintContext::new();
 ui.paint(&mut ctx);
 ```
 
-See `docs/components.md` for anchors, containers and events.
+See `docs/components.md` for anchors, containers, events and custom components,
+and `demos/component_demo` for a runnable browser example.

@@ -51,7 +51,7 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 - [x] Stage 4 — RecordingBackend / headless tests
 - [x] Stage 5 — Canvas2D backend + WASM
 - [x] Stage 6 — Control / layout / input
-- [ ] Stage 7 — reusable component demo
+- [x] Stage 7 — reusable component demo
 - [ ] Stage 8 — second backend validation
 
 ## Per-stage gate (must run)
@@ -120,3 +120,9 @@ min_size/rect/mouse_filter) and `Widget` (Panel/Label/Button/VBox/HBox).
 bubble reserved). Pointer position is computed from `clientX/Y` minus the canvas
 bounding rect. `InputEvent`/`EventResult` live in `draw_core`. Browser click path
 is verified in headless Chrome via `?selftest=1`.
+
+## Component API (Stage 7, `draw_ui`)
+
+`Component` trait + builder structs `Panel`/`VBox`/`HBox`/`Label`/`Button`.
+`ui.add(parent, Button::new("x").on_click(..))` returns an owned `ControlRef`.
+Demos: `demos/web_demo` (raw API) and `demos/component_demo` (recommended API).

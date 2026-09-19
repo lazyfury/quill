@@ -15,10 +15,12 @@
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_ui";
 
+mod component;
 mod control;
 mod ui;
 mod widget;
 
+pub use component::{Button, Component, ControlRef, HBox, Label, Panel, VBox};
 pub use control::{ControlData, MouseFilter};
 pub use ui::{ClickCallback, Ui};
 pub use widget::{estimate_text_size, BoxLayout, ButtonData, ButtonState, Widget};

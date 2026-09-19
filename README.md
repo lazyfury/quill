@@ -25,15 +25,23 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 6 (Control / Layout / Input). `draw_core` provides math, colors, handles and
+Stage 7 (Demo Component API). `draw_core` provides math, colors, handles and
 the viewport model; `draw_scene` provides the scene tree with transform/visibility
 propagation and a `SceneTree::paint` step; `draw_render` provides the
 backend-neutral IR (`DrawCommand`/`DrawList`/`PaintContext`) and the
 `RenderBackend` trait; `draw_backend_recording` records frames for the fully
 headless `Scene -> DrawList -> RenderBackend` test pipeline; `draw_backend_canvas`
 + `draw_wasm` render that IR to an HTML Canvas with DPR handling and input; and
-`draw_ui` provides `Control`, layout (anchors/offsets/containers), `Label`,
-`Button` and hit-tested pointer/keyboard input.
+`draw_ui` provides `Control`, layout (anchors/offsets/containers), reusable
+components (`Panel`/`VBox`/`HBox`/`Label`/`Button`), hit-tested pointer/keyboard
+input, and click callbacks.
+
+## Demos
+
+| Demo | Shows |
+|---|---|
+| `demos/component_demo` | Recommended component API (compose, layout, `on_click`, state, WASM) |
+| `demos/web_demo` | Raw scene + UI API and the Canvas backend |
 
 ## Build & test
 
