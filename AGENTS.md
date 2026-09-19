@@ -23,6 +23,12 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 4. Resources use handles (`NodeId`, `TextureId`), not backend objects.
 5. No ECS, shaders, render graph, particles, physics, editor in MVP.
 6. Do not merge stages. Each stage ends with a report and waits for user approval.
+7. **No screenshot / screen-recording visual testing.** Never use
+   `screencapture`, browser screenshots, screen recording, or any OS-level
+   capture to verify rendering. Verify programmatically instead: read the
+   backend's own pixel buffer, assert `DrawList` command sequences, or read DOM
+   state markers. If a claim cannot be verified without a screenshot, say so
+   rather than capturing one.
 
 ## Dependency direction
 
@@ -34,6 +40,8 @@ draw_render   -> draw_core
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core
 web_demo      -> draw_core, draw_render, draw_scene, draw_wasm
+macos_demo    -> draw_core, draw_render, draw_scene, draw_ui,
+                 draw_backend_coregraphics
 ```
 
 `draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
@@ -52,7 +60,7 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 - [x] Stage 5 — Canvas2D backend + WASM
 - [x] Stage 6 — Control / layout / input
 - [x] Stage 7 — reusable component demo
-- [ ] Stage 8 — second backend validation
+- [x] Stage 8 — second backend validation (macOS Core Graphics)
 
 ## Per-stage gate (must run)
 

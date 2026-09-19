@@ -25,7 +25,7 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 7 (Demo Component API). `draw_core` provides math, colors, handles and
+Stage 8 (second backend: macOS Core Graphics). `draw_core` provides math, colors, handles and
 the viewport model; `draw_scene` provides the scene tree with transform/visibility
 propagation and a `SceneTree::paint` step; `draw_render` provides the
 backend-neutral IR (`DrawCommand`/`DrawList`/`PaintContext`) and the
@@ -34,7 +34,8 @@ headless `Scene -> DrawList -> RenderBackend` test pipeline; `draw_backend_canva
 + `draw_wasm` render that IR to an HTML Canvas with DPR handling and input; and
 `draw_ui` provides `Control`, layout (anchors/offsets/containers), reusable
 components (`Panel`/`VBox`/`HBox`/`Label`/`Button`), hit-tested pointer/keyboard
-input, and click callbacks.
+input, and click callbacks. `draw_backend_coregraphics` renders the same
+`DrawList` natively on macOS via Core Graphics / Core Text.
 
 ## Demos
 
@@ -42,6 +43,7 @@ input, and click callbacks.
 |---|---|
 | `demos/component_demo` | Recommended component API (compose, layout, `on_click`, state, WASM) |
 | `demos/web_demo` | Raw scene + UI API and the Canvas backend |
+| `demos/macos_demo` | Native Core Graphics backend: offscreen PNG + AppKit window |
 
 ## Build & test
 
@@ -64,4 +66,13 @@ cargo install wasm-bindgen-cli --version 0.2.128
 # serve (ES modules need http, not file://)
 python3 -m http.server 8080 --directory demos/web_demo
 # open http://localhost:8080/
+```
+
+## Run the macOS demo
+
+```bash
+# macOS only
+./target/debug/macos_demo --offscreen /tmp/quill.png   # headless PNG, exits
+./target/debug/macos_demo                              # AppKit window
+./target/debug/macos_demo --selftest                   # render a window frame, assert pixels, exit
 ```

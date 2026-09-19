@@ -7,9 +7,11 @@ members = [
     "crates/draw_render",
     "crates/draw_backend_canvas",
     "crates/draw_backend_recording",
+    "crates/draw_backend_coregraphics",
     "crates/draw_wasm",
     "demos/web_demo",
     "demos/component_demo",
+    "demos/macos_demo",
 ]
 
 [workspace.package]
@@ -26,6 +28,7 @@ draw_ui = { path = "crates/draw_ui" }
 draw_render = { path = "crates/draw_render" }
 draw_backend_canvas = { path = "crates/draw_backend_canvas" }
 draw_backend_recording = { path = "crates/draw_backend_recording" }
+draw_backend_coregraphics = { path = "crates/draw_backend_coregraphics" }
 draw_wasm = { path = "crates/draw_wasm" }
 
 [profile.release]
