@@ -300,6 +300,11 @@ fn truncate_with_ellipsis(
     line.push(ELLIPSIS);
 }
 
+/// Sub-pixel tolerance so text whose measured width is exactly the available
+/// width does not wrap from float rounding: the natural width and the running
+/// width in [`wrap_hard_line`] sum the same advances in a different order.
+const EPSILON: f32 = 1e-3;
+
 fn wrap_hard_line(
     measurer: &dyn TextMeasurer,
     line: &str,
@@ -329,7 +334,7 @@ fn wrap_hard_line(
             space_w
         };
 
-        if !current.is_empty() && current_w + sep + unit_w > max_width {
+        if !current.is_empty() && current_w + sep + unit_w > max_width + EPSILON {
             out.push(std::mem::take(&mut current));
             current_w = 0.0;
         }
@@ -341,7 +346,7 @@ fn wrap_hard_line(
             space_w
         };
 
-        if current.is_empty() && unit_w > max_width {
+        if current.is_empty() && unit_w > max_width + EPSILON {
             hard_break(
                 measurer,
                 &unit,
@@ -376,7 +381,7 @@ fn hard_break(
 ) {
     for ch in unit.chars() {
         let ch_w = measurer.advance(ch, font_size);
-        if !current.is_empty() && *current_w + ch_w > max_width {
+        if !current.is_empty() && *current_w + ch_w > max_width + EPSILON {
             out.push(std::mem::take(current));
             *current_w = 0.0;
         }
@@ -452,6 +457,16 @@ mod tests {
     fn wraps_on_spaces() {
         let lines = wrap_text("hello world", 10.0, 40.0);
         assert_eq!(lines, vec!["hello".to_string(), "world".to_string()]);
+    }
+
+    #[test]
+    fn exact_fit_text_does_not_wrap() {
+        // A label sized to its natural width must stay on one line even when
+        // the running-width accumulation rounds the other way.
+        let measurer = ApproxTextMeasurer;
+        let width = measurer.measure_line("All Notes", 22.0);
+        let lines = wrap_text_with(&measurer, "All Notes", 22.0, width);
+        assert_eq!(lines, vec!["All Notes".to_string()]);
     }
 
     #[test]

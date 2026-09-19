@@ -69,6 +69,9 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Done
 
+- Exact-fit text no longer wraps from float rounding (the wrap loop sums
+  advances in a different order than the natural width); this fixes single-line
+  UI text like the "All Notes" list header wrapping at its space.
 - Rounded rectangles are first-class `DrawCommand`s with **per-corner radii**
   (`CornerRadii`); `draw_kit` surfaces use them instead of composing circles +
   rects. The demo's list items use square left / rounded right corners with a

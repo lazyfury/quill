@@ -968,6 +968,25 @@ mod tests {
     }
 
     #[test]
+    fn list_header_does_not_wrap() {
+        let app = laid_out(1100.0, 720.0);
+        let mut ctx = PaintContext::new();
+        app.paint(&mut ctx);
+        let list = ctx.into_draw_list();
+        let heading = TextSize::Heading.px();
+        let painted = list.commands().iter().any(|c| {
+            matches!(c, DrawCommand::DrawText { text, font_size, .. }
+                if text == "All Notes" && (*font_size - heading).abs() < 1e-3)
+        });
+        assert!(painted, "the 'All Notes' heading must stay on one line");
+        let wrapped = list.commands().iter().any(|c| {
+            matches!(c, DrawCommand::DrawText { text, font_size, .. }
+                if (text == "All" || text == "Notes") && (*font_size - heading).abs() < 1e-3)
+        });
+        assert!(!wrapped, "the heading wrapped at the space");
+    }
+
+    #[test]
     fn full_pipeline_records_a_draw_list_headlessly() {
         let app = laid_out(1100.0, 720.0);
         let viewport = app.viewport();
