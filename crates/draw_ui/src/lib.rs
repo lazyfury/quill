@@ -17,11 +17,13 @@ pub const CRATE: &str = "draw_ui";
 
 mod component;
 mod control;
+mod debug;
 mod ui;
 mod widget;
 
 pub use component::{Button, Component, ControlRef, HBox, Label, Panel, VBox};
 pub use control::{ControlData, MouseFilter};
+pub use debug::DebugDrawOptions;
 pub use ui::{ClickCallback, Ui};
 pub use widget::{estimate_text_size, BoxLayout, ButtonData, ButtonState, Widget};
 
@@ -165,5 +167,38 @@ mod tests {
             position: draw_core::Vec2::new(400.0, 590.0),
         });
         assert!(!ui.button_state(button).unwrap().hovered);
+    }
+
+    #[test]
+    fn paint_debug_draws_yellow_bounds_and_name_id_labels() {
+        let (ui, _panel, _label, _button) = build();
+        let mut ctx = draw_render::PaintContext::new();
+        ui.paint_debug(&mut ctx, &DebugDrawOptions::default());
+        let list = ctx.into_draw_list();
+
+        let strokes: Vec<draw_core::Color> = list
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                draw_render::DrawCommand::StrokeRect { paint, .. } => Some(paint.color),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(strokes.len(), 5);
+        assert!(strokes
+            .iter()
+            .all(|color| *color == draw_core::Color::YELLOW));
+
+        let labels: Vec<&str> = list
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                draw_render::DrawCommand::DrawText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels.len(), 5);
+        assert!(labels.iter().any(|text| text.starts_with("Button #")));
+        assert!(labels.iter().any(|text| text.starts_with("Panel #")));
     }
 }

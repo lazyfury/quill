@@ -1,27 +1,34 @@
-//! `draw_debug_ui` — a backend-neutral debug overlay for [`draw_profile`].
+//! `draw_debug_ui` — backend-neutral debug visuals for quill.
 //!
-//! Renders frame timing, structural counters and inspection findings as an
-//! ordinary [`draw_ui`] panel. It owns its own [`Ui`](draw_ui::Ui) tree and is
-//! painted after the application's UI, so it does not disturb the app's layout
-//! or hit-testing.
+//! Two independent overlays, both drawn as ordinary backend-neutral
+//! `DrawCommand`s (no browser/backend/GPU dependency, verified with native
+//! `cargo test`):
+//!
+//! - [`DebugOverlay`] — **component debug drawing**: a yellow border around
+//!   every visible `Control` plus a `Name #id` label in its top-left corner. It
+//!   wraps [`Ui::paint_debug`](draw_ui::Ui::paint_debug) and draws over the
+//!   application's own UI.
+//! - [`PerformanceOverlay`] — the frame-timing / inspection panel fed by
+//!   [`draw_profile`]; it owns its own `Ui` tree and is painted after the app UI.
 //!
 //! ```ignore
-//! let mut overlay = DebugOverlay::new();
+//! let mut debug = DebugOverlay::new();          // component bounds
+//! let mut perf = PerformanceOverlay::new();      // profiler panel
 //!
-//! // per frame, after painting the app into `ctx`:
-//! overlay.update(&profiler, &report, viewport);
-//! overlay.paint(&mut ctx);
+//! // per frame, after painting the app UI into `ctx`:
+//! debug.paint(&app_ui, &mut ctx);
+//! perf.update(&profiler, &report, viewport);
+//! perf.paint(&mut ctx);
 //! ```
-//!
-//! Like every `draw_*` core crate this has no browser/backend/GPU dependency, so
-//! the overlay is verified with native `cargo test`.
 
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_debug_ui";
 
-mod overlay;
+mod component;
+mod performance;
 
-pub use overlay::{Corner, DebugOverlay, OverlayConfig, OverlayText};
+pub use component::DebugOverlay;
+pub use performance::{Corner, OverlayConfig, OverlayText, PerformanceOverlay};
 
 #[cfg(test)]
 mod tests {

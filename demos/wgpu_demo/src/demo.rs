@@ -124,6 +124,11 @@ impl Demo {
         self.ui.control_count()
     }
 
+    /// The demo's UI tree, used by the component debug overlay.
+    pub fn ui(&self) -> &Ui {
+        &self.ui
+    }
+
     /// Emits this frame's `DrawList` into `ctx`.
     pub fn paint(&self, ctx: &mut PaintContext) {
         let size = self.viewport.logical_size();

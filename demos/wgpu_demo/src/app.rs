@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use draw_backend_wgpu::{wgpu, WgpuBackend};
 use draw_core::{InputEvent, Key, PointerButton, Size, Vec2, Viewport};
-use draw_debug_ui::DebugOverlay;
+use draw_debug_ui::{DebugOverlay, PerformanceOverlay};
 use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Profiler, StageTimes};
 use draw_render::{PaintContext, RenderBackend};
 use winit::application::ApplicationHandler;
@@ -15,13 +15,14 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{Window, WindowId};
 
+use crate::cli::Options;
 use crate::demo::Demo;
 
 /// Runs the demo until the window is closed.
-pub fn run() {
+pub fn run(options: Options) {
     let event_loop = EventLoop::new().expect("create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new();
+    let mut app = App::new(options);
     event_loop.run_app(&mut app).expect("run event loop");
 }
 
@@ -40,12 +41,23 @@ struct App {
     profiler: Profiler,
     /// Findings from inspecting the previous frame's `DrawList`.
     report: InspectionReport,
-    /// Performance panel, toggled with the backtick key.
-    overlay: DebugOverlay,
+    /// Component debug drawing (yellow bounds + `name#id`), toggled with F3 / ` / d.
+    debug: DebugOverlay,
+    /// Performance panel, toggled with F4 / p.
+    perf: PerformanceOverlay,
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(options: Options) -> Self {
+        // Profiler and overlay start in the state requested on the command line;
+        // both remain runtime-switchable (overlay: backtick key).
+        let mut profiler = Profiler::new();
+        profiler.set_enabled(options.profiler);
+        let mut debug = DebugOverlay::new();
+        debug.set_open(options.debug_ui);
+        let mut perf = PerformanceOverlay::new();
+        perf.set_open(options.performance);
+
         Self {
             instance: wgpu::Instance::default(),
             window: None,
@@ -56,9 +68,10 @@ impl App {
             cursor: Vec2::ZERO,
             demo: Demo::new(),
             last_frame: Instant::now(),
-            profiler: Profiler::new(),
+            profiler,
             report: InspectionReport::new(),
-            overlay: DebugOverlay::new(),
+            debug,
+            perf,
         }
     }
 
@@ -135,16 +148,30 @@ impl App {
     }
 
     fn feed(&mut self, event: &InputEvent) {
-        // Backtick toggles the debug overlay and is never routed further.
-        if let InputEvent::KeyDown {
-            key: Key::Character('`'),
-        } = event
-        {
-            self.overlay.toggle();
-            return;
+        // Debug shortcuts (never routed further):
+        //   F3 / ` / d -> toggle component debug drawing (yellow bounds + name#id)
+        //   F4 / p     -> toggle the performance panel
+        //   F5 / o     -> toggle the profiler
+        if let InputEvent::KeyDown { key } = event {
+            match key {
+                Key::F3 | Key::Character('`') | Key::Character('d') => {
+                    self.debug.toggle();
+                    return;
+                }
+                Key::F4 | Key::Character('p') => {
+                    self.perf.toggle();
+                    return;
+                }
+                Key::F5 | Key::Character('o') => {
+                    self.profiler.toggle();
+                    return;
+                }
+                _ => {}
+            }
         }
-        // The overlay sits on top: consume input over its panel, pass the rest on.
-        if self.overlay.handle_input(event).is_handled() {
+        // The performance panel sits on top: consume input over its panel,
+        // pass the rest on to the app UI.
+        if self.perf.handle_input(event).is_handled() {
             return;
         }
         self.demo.event(event);
@@ -181,9 +208,11 @@ impl App {
 
         let mut ctx = PaintContext::new();
         self.demo.paint(&mut ctx);
-        // Show last frame's findings, then paint the panel on top.
-        self.overlay.update(&self.profiler, &self.report, viewport);
-        self.overlay.paint(&mut ctx);
+        // 1) component debug bounds, drawn on top of the app UI.
+        self.debug.paint(self.demo.ui(), &mut ctx);
+        // 2) performance panel, drawn last so it stays readable.
+        self.perf.update(&self.profiler, &self.report, viewport);
+        self.perf.paint(&mut ctx);
         let list = ctx.into_draw_list();
         let paint_done = Instant::now();
 
@@ -234,7 +263,10 @@ impl App {
             ),
         };
         self.profiler.record(stats);
-        self.report = inspect(&list, &stats);
+        // Only audit when the performance panel can actually show it.
+        if self.perf.is_open() {
+            self.report = inspect(&list, &stats);
+        }
     }
 }
 
@@ -331,6 +363,18 @@ fn map_key(key: &WinitKey) -> Option<Key> {
         WinitKey::Named(NamedKey::ArrowDown) => Some(Key::ArrowDown),
         WinitKey::Named(NamedKey::ArrowLeft) => Some(Key::ArrowLeft),
         WinitKey::Named(NamedKey::ArrowRight) => Some(Key::ArrowRight),
+        WinitKey::Named(NamedKey::F1) => Some(Key::F1),
+        WinitKey::Named(NamedKey::F2) => Some(Key::F2),
+        WinitKey::Named(NamedKey::F3) => Some(Key::F3),
+        WinitKey::Named(NamedKey::F4) => Some(Key::F4),
+        WinitKey::Named(NamedKey::F5) => Some(Key::F5),
+        WinitKey::Named(NamedKey::F6) => Some(Key::F6),
+        WinitKey::Named(NamedKey::F7) => Some(Key::F7),
+        WinitKey::Named(NamedKey::F8) => Some(Key::F8),
+        WinitKey::Named(NamedKey::F9) => Some(Key::F9),
+        WinitKey::Named(NamedKey::F10) => Some(Key::F10),
+        WinitKey::Named(NamedKey::F11) => Some(Key::F11),
+        WinitKey::Named(NamedKey::F12) => Some(Key::F12),
         WinitKey::Character(text) => text.chars().next().map(Key::Character),
         _ => None,
     }

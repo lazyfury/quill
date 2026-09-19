@@ -91,6 +91,22 @@ ui.paint(&mut ctx);
 See `docs/components.md` for anchors, containers, events and custom components,
 and `demos/component_demo` for a runnable browser example.
 
+## Debug component bounds
+
+Outline every visible control in yellow with a `Name #id` label:
+
+```rust
+use draw_debug_ui::DebugOverlay;
+
+let mut debug = DebugOverlay::new();
+
+// per frame, after painting the UI into `ctx`:
+debug.paint(&ui, &mut ctx);
+```
+
+`draw_ui::Ui::paint_debug(&DebugDrawOptions)` does the drawing; `DebugOverlay` just
+adds an open/closed toggle. See `docs/debug.md`.
+
 ## Inspect performance
 
 Measure the pipeline phases, aggregate them, and show a debug panel:

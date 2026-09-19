@@ -17,7 +17,7 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 | `draw_ui` | `Control`, layout, containers, UI behavior |
 | `draw_render` | `DrawCommand`, `DrawList`, `PaintContext`, `RenderBackend` |
 | `draw_profile` | frame timing/counters, `Profiler`, `inspect` / `InspectionReport` |
-| `draw_debug_ui` | `DebugOverlay` performance panel (built on `draw_ui`) |
+| `draw_debug_ui` | component debug bounds (`DebugOverlay`) + performance panel (`PerformanceOverlay`) |
 | `draw_backend_canvas` | Canvas 2D backend |
 | `draw_backend_recording` | headless recording backend for tests |
 | `draw_backend_wgpu` | native `wgpu` backend (offscreen, pixel readback) |
@@ -40,7 +40,9 @@ offscreen texture and reads the pixels back for native `cargo test`; `draw_ui`
 provides `Control`, layout (anchors/offsets/containers), reusable components
 (`Panel`/`VBox`/`HBox`/`Label`/`Button`), hit-tested pointer/keyboard input, and
 click callbacks; `draw_profile` records per-phase timings/counters and audits
-frames; and `draw_debug_ui` renders that data as a toggleable debug panel.
+frames; `draw_ui::paint_debug` + `draw_debug_ui::DebugOverlay` draw yellow
+component bounds with `Name #id` labels; and `draw_debug_ui::PerformanceOverlay`
+renders the profiler as a toggleable panel.
 
 Three independent renderers consume the same `DrawList`:
 `draw_backend_canvas`, `draw_backend_recording`, and `draw_backend_wgpu`.
@@ -51,7 +53,7 @@ Three independent renderers consume the same `DrawList`:
 |---|---|
 | `demos/component_demo` | Recommended component API (compose, layout, `on_click`, state, WASM) |
 | `demos/web_demo` | Raw scene + UI API and the Canvas backend |
-| `demos/wgpu_demo` | Native window + `wgpu` backend (surface presentation) + debug overlay |
+| `demos/wgpu_demo` | Native window + `wgpu` backend (surface presentation) + component/perf debug overlays |
 
 ## Build & test
 
@@ -82,5 +84,6 @@ python3 -m http.server 8080 --directory demos/web_demo
 cargo run -p wgpu_demo --release
 ```
 
-See `demos/wgpu_demo/README.md` for details. Press `` ` `` to toggle the
-performance/debug overlay; see `docs/debug.md` for wiring it into your own app.
+See `demos/wgpu_demo/README.md` for details. Press **F3** / `` ` `` / **d** to
+toggle component debug bounds and **F4** / **p** for the performance panel; see
+`docs/debug.md` for wiring them into your own app.

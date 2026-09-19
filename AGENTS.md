@@ -100,7 +100,7 @@ textured-triangle pipeline handles solid shapes, registered images, and a
 built-in `8x8` bitmap-font atlas. `wgpu` must stay confined to this crate plus
 its own tests and the demo; core/scene/UI/render never see it.
 
-## Performance inspection (Stage 10, `draw_profile` + `draw_debug_ui`)
+## Debugging & performance inspection (Stage 10, `draw_profile` + `draw_debug_ui`)
 
 `draw_profile` is a backend-neutral observer of the pipeline. It depends only on
 `draw_core` + `draw_render` and never measures time itself: the host samples
@@ -119,13 +119,22 @@ unit-testable.
   opacity range, empty text, and command/frame-time/entity budgets
   (`InspectionConfig`, default 2048 commands / 16.7 ms / 10k entities).
 
-`draw_debug_ui::DebugOverlay` turns a `Profiler` + `InspectionReport` into an
-ordinary `draw_ui` panel (its own `Ui` tree, painted after the app UI). It is
-toggled by the host and is a no-op while closed. `demos/wgpu_demo` instruments
-its frame, runs `inspect`, and toggles the overlay with the backtick key.
+`draw_ui` gains `Ui::paint_debug(&DebugDrawOptions)`: a yellow border plus a
+`Name #id` label on every visible control. `draw_debug_ui` renders both tools as
+ordinary `DrawCommand`s:
 
-Like all core crates these two are verified with native `cargo test`; the window
-overlay itself is not screenshot-verified (see `docs/testing.md`).
+- `DebugOverlay` is **component debug drawing** — it wraps
+  `Ui::paint_debug(&DebugDrawOptions)`. It owns no tree, so it draws over the
+  application's own `Ui`.
+- `PerformanceOverlay` turns a `Profiler` + `InspectionReport` into a `draw_ui`
+  panel (its own `Ui` tree, painted after the app UI, no-op while closed).
+
+`demos/wgpu_demo` instruments its frame, runs `inspect`, draws component bounds
+with `DebugOverlay`, and shows `PerformanceOverlay`; shortcuts are F3 / ` / d
+(bounds), F4 / p (panel), F5 / o (profiler).
+
+Like all core crates these are verified with native `cargo test`; the window
+overlays themselves are not screenshot-verified (see `docs/testing.md`).
 
 ## API priority: API -> test -> implementation -> integration.
 

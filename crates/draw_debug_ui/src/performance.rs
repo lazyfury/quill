@@ -13,7 +13,7 @@ pub enum Corner {
     BottomRight,
 }
 
-/// Appearance and placement of a [`DebugOverlay`].
+/// Appearance and placement of a [`PerformanceOverlay`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OverlayConfig {
     pub corner: Corner,
@@ -63,8 +63,9 @@ impl Default for OverlayConfig {
 impl OverlayConfig {
     /// Number of text rows, including the reserved finding rows.
     pub fn row_count(&self) -> usize {
-        // title, fps, frame, update/layout, paint/render, commands, entities, findings
-        8 + self.max_finding_rows
+        // title, fps, frame, profiler, update/layout, paint/render, commands,
+        // entities, findings, shortcuts
+        10 + self.max_finding_rows
     }
 
     /// Total panel height implied by the row count.
@@ -104,12 +105,16 @@ pub struct OverlayText {
     pub title: String,
     pub fps: String,
     pub frame: String,
+    /// Profiler state (`on` / `paused`), so toggling it is visible.
+    pub profiler: String,
     pub update_layout: String,
     pub paint_render: String,
     pub commands: String,
     pub entities: String,
     pub findings: String,
     pub finding_rows: Vec<String>,
+    /// Key legend footer.
+    pub shortcuts: String,
 }
 
 #[derive(Debug, Clone)]
@@ -117,22 +122,24 @@ struct Rows {
     title: NodeId,
     fps: NodeId,
     frame: NodeId,
+    profiler: NodeId,
     update_layout: NodeId,
     paint_render: NodeId,
     commands: NodeId,
     entities: NodeId,
     findings: NodeId,
     finding_rows: Vec<NodeId>,
+    shortcuts: NodeId,
 }
 
 /// A togglable performance panel drawn from a [`Profiler`] and an
 /// [`InspectionReport`].
 ///
 /// The overlay owns a private [`Ui`](draw_ui::Ui); hosts keep their own UI and
-/// simply call [`update`](DebugOverlay::update) + [`paint`](DebugOverlay::paint)
+/// simply call [`update`](PerformanceOverlay::update) + [`paint`](PerformanceOverlay::paint)
 /// after painting the application. When closed, `update` and `paint` are no-ops
 /// and paint nothing.
-pub struct DebugOverlay {
+pub struct PerformanceOverlay {
     ui: Ui,
     panel: NodeId,
     open: bool,
@@ -141,13 +148,13 @@ pub struct DebugOverlay {
     text: OverlayText,
 }
 
-impl Default for DebugOverlay {
+impl Default for PerformanceOverlay {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl DebugOverlay {
+impl PerformanceOverlay {
     pub fn new() -> Self {
         Self::with_config(OverlayConfig::default())
     }
@@ -185,6 +192,7 @@ impl DebugOverlay {
         let title = add(&mut ui, "Performance", title_size, text_color);
         let fps = add(&mut ui, "FPS --", font_size, text_color);
         let frame = add(&mut ui, "frame -- ms", font_size, text_color);
+        let profiler = add(&mut ui, "profiler on  (F5 / o)", font_size, muted);
         let update_layout = add(&mut ui, "update --   layout --", font_size, muted);
         let paint_render = add(&mut ui, "paint --   render --", font_size, muted);
         let commands = add(&mut ui, "commands --", font_size, muted);
@@ -193,6 +201,12 @@ impl DebugOverlay {
         let finding_rows: Vec<NodeId> = (0..config.max_finding_rows)
             .map(|_| add(&mut ui, "(none)", font_size, muted))
             .collect();
+        let shortcuts = add(
+            &mut ui,
+            "F3 / ` / d bounds   F4 / p panel   F5 / o profiler",
+            font_size,
+            muted,
+        );
 
         Self {
             ui,
@@ -203,12 +217,14 @@ impl DebugOverlay {
                 title,
                 fps,
                 frame,
+                profiler,
                 update_layout,
                 paint_render,
                 commands,
                 entities,
                 findings,
                 finding_rows,
+                shortcuts,
             },
             text: OverlayText::default(),
         }
@@ -282,6 +298,7 @@ impl DebugOverlay {
         self.ui.set_text(self.rows.title, text.title.clone());
         self.ui.set_text(self.rows.fps, text.fps.clone());
         self.ui.set_text(self.rows.frame, text.frame.clone());
+        self.ui.set_text(self.rows.profiler, text.profiler.clone());
         self.ui
             .set_text(self.rows.update_layout, text.update_layout.clone());
         self.ui
@@ -292,6 +309,8 @@ impl DebugOverlay {
         for (id, row) in self.rows.finding_rows.iter().zip(&text.finding_rows) {
             self.ui.set_text(*id, row.clone());
         }
+        self.ui
+            .set_text(self.rows.shortcuts, text.shortcuts.clone());
     }
 }
 
@@ -359,6 +378,12 @@ fn build_text(profiler: &Profiler, report: &InspectionReport, max_rows: usize) -
         )
     };
 
+    let profiler_state = if profiler.enabled() {
+        "profiler on  (F5 / o)".to_string()
+    } else {
+        "profiler paused  (F5 / o)".to_string()
+    };
+
     let finding_rows = (0..max_rows)
         .map(|i| match report.findings().get(i) {
             Some(finding) => format!("{}: {}", finding.severity.label(), finding.summary()),
@@ -370,12 +395,14 @@ fn build_text(profiler: &Profiler, report: &InspectionReport, max_rows: usize) -
         title: "Performance".to_string(),
         fps,
         frame,
+        profiler: profiler_state,
         update_layout,
         paint_render,
         commands,
         entities,
         findings,
         finding_rows,
+        shortcuts: "F3 / ` / d bounds   F4 / p panel   F5 / o profiler".to_string(),
     }
 }
 
@@ -407,7 +434,7 @@ mod tests {
         profiler
     }
 
-    fn label_text(overlay: &DebugOverlay, id: NodeId) -> String {
+    fn label_text(overlay: &PerformanceOverlay, id: NodeId) -> String {
         overlay
             .ui()
             .widget(id)
@@ -419,7 +446,7 @@ mod tests {
     #[test]
     fn computes_metrics_and_mirrors_them_into_labels() {
         let profiler = profiler_with(&[(8.0, 10), (16.0, 30)]);
-        let mut overlay = DebugOverlay::new();
+        let mut overlay = PerformanceOverlay::new();
         overlay.update(&profiler, &clean_report(), viewport());
 
         let text = overlay.text();
@@ -435,6 +462,10 @@ mod tests {
         assert!(text.commands.contains("max 30"));
         assert!(text.entities.contains("nodes 12"));
         assert!(text.entities.contains("controls 7"));
+        assert!(text.profiler.starts_with("profiler on"));
+        assert!(text.profiler.contains("F5"));
+        assert!(text.shortcuts.contains("F3"));
+        assert!(text.shortcuts.contains("F4 / p panel"));
         assert_eq!(text.findings, "findings none");
         assert!(text.finding_rows.iter().all(|row| row == "(none)"));
 
@@ -459,7 +490,7 @@ mod tests {
             "Restore without matching Save",
         );
 
-        let mut overlay = DebugOverlay::new();
+        let mut overlay = PerformanceOverlay::new();
         overlay.update(&profiler, &report, viewport());
 
         let text = overlay.text();
@@ -475,7 +506,7 @@ mod tests {
     #[test]
     fn empty_profiler_uses_placeholders() {
         let overlay_profiler = Profiler::new();
-        let mut overlay = DebugOverlay::new();
+        let mut overlay = PerformanceOverlay::new();
         overlay.update(&overlay_profiler, &clean_report(), viewport());
         let text = overlay.text();
         assert_eq!(text.fps, "FPS --");
@@ -484,9 +515,26 @@ mod tests {
     }
 
     #[test]
+    fn profiler_state_is_visible_and_follows_the_profiler() {
+        let mut profiler = profiler_with(&[(16.0, 4)]);
+        let mut overlay = PerformanceOverlay::new();
+        overlay.update(&profiler, &clean_report(), viewport());
+        assert!(overlay.text().profiler.starts_with("profiler on"));
+
+        // F5 / o toggles this; the panel must change to prove it.
+        profiler.set_enabled(false);
+        overlay.update(&profiler, &clean_report(), viewport());
+        assert!(overlay.text().profiler.starts_with("profiler paused"));
+
+        profiler.set_enabled(true);
+        overlay.update(&profiler, &clean_report(), viewport());
+        assert!(overlay.text().profiler.starts_with("profiler on"));
+    }
+
+    #[test]
     fn closed_overlay_paints_nothing_and_keeps_text() {
         let profiler = profiler_with(&[(16.0, 4)]);
-        let mut overlay = DebugOverlay::new();
+        let mut overlay = PerformanceOverlay::new();
         overlay.update(&profiler, &clean_report(), viewport());
         let before = overlay.text().clone();
 
@@ -502,7 +550,7 @@ mod tests {
     #[test]
     fn open_overlay_paints_panel_and_text() {
         let profiler = profiler_with(&[(16.0, 4)]);
-        let mut overlay = DebugOverlay::new();
+        let mut overlay = PerformanceOverlay::new();
         overlay.update(&profiler, &clean_report(), viewport());
 
         let mut ctx = PaintContext::new();
@@ -523,7 +571,7 @@ mod tests {
 
     #[test]
     fn toggle_flips_state() {
-        let mut overlay = DebugOverlay::new();
+        let mut overlay = PerformanceOverlay::new();
         assert!(overlay.is_open());
         assert!(!overlay.toggle());
         assert!(!overlay.is_open());
@@ -539,7 +587,7 @@ mod tests {
             margin: 10.0,
             ..OverlayConfig::default()
         };
-        let mut overlay = DebugOverlay::with_config(config);
+        let mut overlay = PerformanceOverlay::with_config(config);
         overlay.update(&profiler_with(&[(16.0, 1)]), &clean_report(), viewport());
 
         let rect = overlay.ui().control(overlay.panel()).unwrap().rect;
@@ -547,7 +595,7 @@ mod tests {
         assert_eq!(rect.left(), viewport().logical_size().width - 310.0);
         assert_eq!(rect.top(), 10.0);
 
-        let mut bottom = DebugOverlay::with_config(OverlayConfig {
+        let mut bottom = PerformanceOverlay::with_config(OverlayConfig {
             corner: Corner::BottomLeft,
             ..config
         });
@@ -559,7 +607,7 @@ mod tests {
 
     #[test]
     fn pointer_over_panel_is_consumed() {
-        let mut overlay = DebugOverlay::new();
+        let mut overlay = PerformanceOverlay::new();
         overlay.update(&profiler_with(&[(16.0, 1)]), &clean_report(), viewport());
         let rect = overlay.ui().control(overlay.panel()).unwrap().rect;
         let inside = Vec2::new(rect.center().x, rect.center().y);

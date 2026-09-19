@@ -48,7 +48,7 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 - Stage 10 — performance inspection (`draw_profile`) + debug overlay
   (`draw_debug_ui`) [done]
 
-## Performance inspection (Stage 10)
+## Debugging & performance inspection (Stage 10)
 
 The pipeline stays backend-neutral, and so does observing it. `draw_profile`
 never measures time or touches a backend; hosts sample `Instant` per phase and
@@ -69,8 +69,11 @@ frame_start -> update -> layout -> paint -> render -> frame_done
 - `Profiler` keeps a bounded frame history and derives averages/min/max/FPS.
 - `inspect` produces severity-ranked `Finding`s (correctness, degenerate
   geometry, budgets) aggregated by `FindingCode`.
-- `DebugOverlay` renders the summary + findings as an ordinary `draw_ui` panel;
-  it is painted after the application UI and does not touch app layout or input.
+- `DebugOverlay` draws **component debug bounds**: a yellow border + `Name #id`
+  on every visible control, via `draw_ui::Ui::paint_debug`.
+- `PerformanceOverlay` renders the summary + findings as an ordinary `draw_ui`
+  panel; it is painted after the application UI and does not touch app layout or
+  input.
 
 See `docs/debug.md`.
 

@@ -10,6 +10,7 @@ use draw_scene::SceneTree;
 
 use crate::component::{Component, ControlRef};
 use crate::control::{ControlData, MouseFilter};
+use crate::debug::DebugDrawOptions;
 use crate::widget::{BoxLayout, ButtonData, ButtonState, Widget};
 
 /// A callback invoked when a control is activated (clicked / Enter).
@@ -389,6 +390,38 @@ impl Ui {
                 }
                 Widget::VBox(_) | Widget::HBox(_) => {}
             }
+        }
+    }
+
+    /// Draws debug bounds plus `name#id` labels for every visible control.
+    ///
+    /// Emits ordinary backend-neutral commands, so any backend renders it.
+    /// Typical use: paint the UI first, then call this so the yellow boxes sit
+    /// on top of the components.
+    pub fn paint_debug(&self, ctx: &mut PaintContext, options: &DebugDrawOptions) {
+        for id in self.tree.iter_visible() {
+            let Some(control) = self.controls.get(&id) else {
+                continue;
+            };
+            let rect = control.rect;
+            ctx.stroke_rect(rect, options.width, options.border_color);
+
+            let name = self.tree.get(id).map_or("", |node| node.name());
+            let label = options.label(name, id);
+            if label.is_empty() {
+                continue;
+            }
+            let position = Vec2::new(
+                rect.left() + options.label_offset.x,
+                rect.top() + options.label_offset.y + options.font_size,
+            );
+            ctx.draw_text(
+                label,
+                position,
+                options.font_size,
+                TextAlign::Left,
+                options.text_color,
+            );
         }
     }
 

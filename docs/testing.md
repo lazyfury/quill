@@ -12,8 +12,11 @@
 - Layout / hit-test / input tests — `draw_ui` unit tests.
 - Profiler / inspector tests — `draw_profile` (ring buffer, summary math, every
   `FindingCode`, budget escalation). Pure data, no clock.
-- Debug overlay tests — `draw_debug_ui` asserts the computed `OverlayText`, that
-  the UI labels mirror it, that the panel is pinned, and that paint emits the
+- Component debug tests — `draw_ui` asserts `paint_debug` emits one yellow
+  `StrokeRect` + a `Name #id` `DrawText` per visible control; `draw_debug_ui`
+  tests `DebugOverlay` (bounds, labels, open/closed, label options).
+- Performance panel tests — `draw_debug_ui` asserts the computed `OverlayText`,
+  that the labels mirror it, that the panel is pinned, and that paint emits the
   expected `DrawText`/`FillRect` commands (and nothing while closed).
 
 Core behavior must be testable with native `cargo test`, without a browser.
@@ -51,7 +54,8 @@ real window and cannot be verified without a display; it is compiled by
 `cargo check` and run manually, and the render path it uses is the same one
 covered by the readback tests.
 
-The `demos/wgpu_demo` performance overlay is host-wired: its panel text, layout
-and emitted commands are covered by `draw_debug_ui` tests, and the numbers it
-displays come from `draw_profile` (tested with injected durations). The windowed
-overlay itself is **not** screenshot-verified.
+The `demos/wgpu_demo` overlays are host-wired: the component bounds and the
+performance panel text, layout and emitted commands are covered by
+`draw_ui`/`draw_debug_ui` tests, and the numbers the panel displays come from
+`draw_profile` (tested with injected durations). The windowed overlays themselves
+are **not** screenshot-verified.
