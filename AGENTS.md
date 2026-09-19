@@ -190,6 +190,11 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       **Stage 25.12 (`Line` primitive):** `DrawCommand::Line { from, to, paint,
       width }` + `PaintContext::draw_line`, implemented in Canvas / wgpu /
       recording; `Divider` and column separators draw a real line.
+      **Stage 25.13 (drag + resize):** `GuiState.dragging` / `Control.drag_callback`
+      with pointer capture in `draw_app::handle_input`; `Component::on_drag` /
+      `draw_app::set_on_drag`; `draw_components::ResizeHandle` (a divider-styled
+      gutter that resizes a target pane's flex basis); `demo_app`'s sidebar is
+      draggable.
 
 ## Per-stage gate (must run)
 

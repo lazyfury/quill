@@ -18,7 +18,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use draw_core::{Color, Edges, NodeId, Rect, Size};
+use draw_core::{Color, Edges, NodeId, Rect, Size, Vec2};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
 use draw_ui::layout::{FlexDirection, FlexStyle, GridStyle, SizeBasis, Track};
@@ -39,6 +39,7 @@ pub struct Spec {
     pub background: Option<Box<dyn Fn(InteractState) -> SurfaceStyle>>,
     pub foreground: Option<Box<dyn Fn(&mut PaintContext, Rect, InteractState)>>,
     pub on_click: Option<Box<dyn FnMut()>>,
+    pub on_drag: Option<Box<dyn FnMut(&mut SceneTree, Vec2)>>,
     pub children: Vec<ChildFn>,
 }
 
@@ -49,6 +50,7 @@ impl Default for Spec {
             background: None,
             foreground: None,
             on_click: None,
+            on_drag: None,
             children: Vec::new(),
         }
     }
@@ -161,6 +163,13 @@ pub trait Component: Sized {
         self
     }
 
+    /// Runs `callback` on every pointer move while the node is held, with the
+    /// delta since the previous event. Gives the node pointer capture.
+    fn on_drag(mut self, callback: impl FnMut(&mut SceneTree, Vec2) + 'static) -> Self {
+        self.spec().on_drag = Some(Box::new(callback));
+        self
+    }
+
     /// Flex grow factor.
     fn grow(mut self, grow: f32) -> Self {
         self.spec().data.layout.grow = grow;
@@ -243,6 +252,9 @@ pub fn apply_spec(tree: &mut SceneTree, id: NodeId, spec: Spec) {
     if let Some(callback) = spec.on_click {
         set_on_click(tree, id, callback);
     }
+    if let Some(callback) = spec.on_drag {
+        set_on_drag(tree, id, callback);
+    }
     for child in spec.children {
         child(tree, id);
     }
@@ -261,6 +273,20 @@ where
     match tree.data_mut::<Control>(id) {
         Some(control) => {
             control.callback = Some(Rc::new(RefCell::new(callback)));
+            true
+        }
+        None => false,
+    }
+}
+
+/// Registers a pointer-drag callback on `id` (pointer capture while held).
+pub fn set_on_drag<F>(tree: &mut SceneTree, id: NodeId, callback: F) -> bool
+where
+    F: FnMut(&mut SceneTree, Vec2) + 'static,
+{
+    match tree.data_mut::<Control>(id) {
+        Some(control) => {
+            control.drag_callback = Some(Rc::new(RefCell::new(callback)));
             true
         }
         None => false,

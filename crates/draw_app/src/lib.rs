@@ -34,8 +34,8 @@ mod input;
 
 pub use app::App;
 pub use component::{
-    apply_spec, control_mut, set_on_click, set_text, update_control, Button, ChildFn, Column,
-    Component, Flex, Grid, HBox, Label, Panel, Row, Spec, VBox,
+    apply_spec, control_mut, set_on_click, set_on_drag, set_text, update_control, Button, ChildFn,
+    Column, Component, Flex, Grid, HBox, Label, Panel, Row, Spec, VBox,
 };
 pub use input::{
     focused, handle_input, hit_test, hovered, hovered_is_button, is_interactive, route_input,
@@ -64,7 +64,9 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use draw_core::{EventResult, InputEvent, PointerButton, Rect, Size, Vec2, ViewportSize};
+    use draw_core::{
+        Edges, EventResult, InputEvent, PointerButton, Rect, Size, Vec2, ViewportSize,
+    };
     use draw_scene::Visual;
     use draw_ui::{MouseFilter, SizeBasis};
 
@@ -159,6 +161,55 @@ mod tests {
         assert_eq!(clicks.get(), 1);
         assert_eq!(click_count(&tree, button), 1);
         assert_eq!(focused(&tree), Some(button));
+    }
+
+    #[test]
+    fn drag_callback_accumulates_deltas_and_captures_the_pointer() {
+        let (mut tree, root) = host();
+        let handle = tree.add_child(
+            root,
+            Panel::new()
+                .anchors(Edges::ZERO)
+                .offsets(Edges::new(0.0, 0.0, 20.0, 20.0)),
+        );
+        let total = Rc::new(Cell::new(0.0f32));
+        let acc = total.clone();
+        set_on_drag(&mut tree, handle, move |_tree, delta| {
+            acc.set(acc.get() + delta.x);
+        });
+        draw_ui::layout(&mut tree, viewport(200.0, 200.0));
+        tree.update();
+
+        handle_input(
+            &mut tree,
+            &InputEvent::PointerDown {
+                position: Vec2::new(10.0, 10.0),
+                button: PointerButton::Left,
+            },
+        );
+        // A move inside the handle, then one far outside it: pointer capture
+        // must keep routing to the handle.
+        handle_input(
+            &mut tree,
+            &InputEvent::PointerMove {
+                position: Vec2::new(20.0, 10.0),
+            },
+        );
+        handle_input(
+            &mut tree,
+            &InputEvent::PointerMove {
+                position: Vec2::new(60.0, 180.0),
+            },
+        );
+        handle_input(
+            &mut tree,
+            &InputEvent::PointerUp {
+                position: Vec2::new(60.0, 180.0),
+                button: PointerButton::Left,
+            },
+        );
+
+        assert!((total.get() - 50.0).abs() < 1e-3, "total = {}", total.get());
     }
 
     #[test]

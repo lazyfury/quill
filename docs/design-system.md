@@ -134,6 +134,7 @@ placeholders) and detail pane (toolbar, hero scene, body, actions).
 | `Text` | display/title/heading/subheading/body/small/caption; `tone`, `color`, wrapping. |
 | `Card` | column flex container with themed surface + hairline border. |
 | `Divider` | 1px horizontal/vertical rule. |
+| `ResizeHandle` | draggable divider; resizes the target pane's flex basis. |
 | `Badge` | metadata tag; `tone`, `pill`, `solid`. |
 | `Button` | `Primary`/`Secondary`/`Ghost`/`Destructive` variants with `on_click`. |
 | `CodeBlock` | code surface, optional filename/language. |

@@ -89,6 +89,13 @@ impl ControlData {
 /// A callback invoked when a control is activated (clicked / Enter).
 pub type ClickCallback = Rc<RefCell<dyn FnMut()>>;
 
+/// A callback invoked while a control owns a pointer drag.
+///
+/// It receives the owning tree and the **delta** since the previous pointer
+/// event (logical pixels), so a component can accumulate the drag without
+/// tracking the pointer itself.
+pub type DragCallback = Rc<RefCell<dyn FnMut(&mut SceneTree, Vec2)>>;
+
 /// Per-node UI runtime stored in a `SceneTree` node's extension slot.
 ///
 /// This is the control-side counterpart of [`ControlData`]: everything a
@@ -99,6 +106,8 @@ pub struct Control {
     pub data: ControlData,
     pub widget: Widget,
     pub callback: Option<ClickCallback>,
+    /// Pointer-drag callback (pointer capture while held).
+    pub drag_callback: Option<DragCallback>,
     /// Themed chrome attached by components (surfaces, foregrounds).
     pub decorations: Vec<DecorRef>,
     /// Set when this control's layout inputs changed; cleared as it is arranged.
@@ -111,6 +120,7 @@ impl Control {
             data,
             widget,
             callback: None,
+            drag_callback: None,
             decorations: Vec::new(),
             layout_dirty: true,
         }
@@ -121,11 +131,15 @@ impl Control {
 ///
 /// Stored in the root node's extension slot, so pointer hover / press / focus
 /// ownership belongs to the scene tree rather than to the UI namespace.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct GuiState {
     pub hovered: Option<draw_core::NodeId>,
     pub pressed: Option<draw_core::NodeId>,
     pub focused: Option<draw_core::NodeId>,
+    /// Node that owns the current pointer drag (pointer capture).
+    pub dragging: Option<draw_core::NodeId>,
+    /// Last pointer position observed while dragging (logical pixels).
+    pub drag_last: Vec2,
 }
 
 /// Reads the UI runtime bundle from a node's extension slot.

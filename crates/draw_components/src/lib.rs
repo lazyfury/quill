@@ -40,8 +40,8 @@ mod components;
 mod overlay;
 
 pub use components::{
-    Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, Switch, Terminal,
-    Text,
+    Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, ResizeHandle,
+    Switch, Terminal, Text,
 };
 pub use overlay::{OverlayId, Overlays, Placement};
 

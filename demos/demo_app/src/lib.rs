@@ -30,7 +30,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use draw_app::{Column, Component, Flex, Label, Panel, Row};
-use draw_components::{Badge, Button, Checkbox, Divider, Overlays, Switch, Text};
+use draw_components::{Badge, Button, Checkbox, Divider, Overlays, ResizeHandle, Switch, Text};
 use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize};
 use draw_render::{CornerRadii, PaintContext};
 use draw_scene::SceneTree;
@@ -44,10 +44,16 @@ use draw_ui::{
 pub const SIDEBAR_WIDTH: f32 = 220.0;
 /// Content-list width in logical pixels.
 pub const LIST_WIDTH: f32 = 324.0;
-/// Width of one column separator (a real 1px line in the split view).
+/// Width of a static column separator (a real 1px line in the split view).
 pub const SEPARATOR_WIDTH: f32 = 1.0;
-/// X offset where the detail pane starts (after two separators).
-pub const DETAIL_X: f32 = SIDEBAR_WIDTH + SEPARATOR_WIDTH + LIST_WIDTH + SEPARATOR_WIDTH;
+/// Pointer hit area of the sidebar resize gutter.
+pub const RESIZE_GUTTER: f32 = 6.0;
+/// Bounds the sidebar can be resized to.
+pub const SIDEBAR_MIN: f32 = 140.0;
+pub const SIDEBAR_MAX: f32 = 400.0;
+/// X offset where the detail pane starts (after the resize gutter and one
+/// separator).
+pub const DETAIL_X: f32 = SIDEBAR_WIDTH + RESIZE_GUTTER + LIST_WIDTH + SEPARATOR_WIDTH;
 
 /// A note shown in the list/detail panes.
 #[derive(Debug, Clone, Copy)]
@@ -133,6 +139,7 @@ pub struct DemoApp {
     primary_button: NodeId,
     selected: Rc<Cell<usize>>,
     selected_nav: Rc<Cell<usize>>,
+    sidebar_width: Rc<Cell<f32>>,
     clicks: Rc<Cell<u32>>,
     overlays: Overlays,
     delete_requested: Rc<Cell<bool>>,
@@ -173,12 +180,22 @@ impl DemoApp {
         let selected_nav = Rc::new(Cell::new(0));
         let delete_requested = Rc::new(Cell::new(false));
         let clicks = Rc::new(Cell::new(0));
+        let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
 
-        // Split view: panes and 1px separators are siblings in the flex row, so
-        // the dividers take part in layout instead of being overlaid on the
-        // column boundaries.
-        let (sidebar, nav_rows) = build_sidebar(&mut tree, split, theme, &selected_nav);
-        tree.add_child(split, Divider::vertical(theme).shrink(0.0));
+        // Split view: panes and separators are siblings in the flex row, so the
+        // dividers take part in layout instead of being overlaid on the column
+        // boundaries. The sidebar boundary is a draggable resize gutter; the
+        // list boundary is a static rule.
+        let (sidebar, nav_rows) =
+            build_sidebar(&mut tree, split, theme, &sidebar_width, &selected_nav);
+        tree.add_child(
+            split,
+            ResizeHandle::vertical(theme)
+                .target(sidebar)
+                .width(sidebar_width.clone())
+                .min(SIDEBAR_MIN)
+                .max(SIDEBAR_MAX),
+        );
         let (list, list_rows) = build_list(&mut tree, split, theme, &selected);
         tree.add_child(split, Divider::vertical(theme).shrink(0.0));
         let detail = build_detail(
@@ -208,6 +225,7 @@ impl DemoApp {
             selected_nav,
             clicks,
             overlays: Overlays::new(theme),
+            sidebar_width,
             delete_requested,
             deleted: Rc::new(Cell::new(false)),
             viewport: ViewportSize::new(Size::new(1100.0, 720.0)),
@@ -269,6 +287,11 @@ impl DemoApp {
 
     pub fn selected_nav(&self) -> usize {
         self.selected_nav.get()
+    }
+
+    /// Current sidebar width, in logical pixels (draggable via the gutter).
+    pub fn sidebar_width(&self) -> f32 {
+        self.sidebar_width.get()
     }
 
     /// Number of times the primary ("New Note") button has been clicked.
@@ -446,6 +469,7 @@ fn build_sidebar(
     tree: &mut SceneTree,
     root: NodeId,
     theme: Theme,
+    width: &Rc<Cell<f32>>,
     selected_nav: &Rc<Cell<usize>>,
 ) -> (NodeId, Vec<NodeId>) {
     let sidebar = tree.add_child(
@@ -453,7 +477,7 @@ fn build_sidebar(
         Column::new()
             .gap(space::MD)
             .padding(Edges::new(space::LG, space::MD, space::MD, space::MD))
-            .basis(SizeBasis::Px(SIDEBAR_WIDTH))
+            .basis(SizeBasis::Px(width.get()))
             .shrink(0.0)
             .surface(SurfaceStyle::new(theme.palette.surface)),
     );
@@ -867,7 +891,7 @@ mod tests {
         assert!(detail.size.width > 0.0);
 
         assert!((sidebar.left()).abs() < 1e-3);
-        assert!((list.left() - (SIDEBAR_WIDTH + SEPARATOR_WIDTH)).abs() < 1e-3);
+        assert!((list.left() - (SIDEBAR_WIDTH + RESIZE_GUTTER)).abs() < 1e-3);
         assert!((detail.left() - DETAIL_X).abs() < 1e-3);
 
         // Columns tile left-to-right without overlap.
@@ -896,6 +920,51 @@ mod tests {
         assert!((list.size.width - LIST_WIDTH).abs() < 1e-3);
         assert!(detail.size.width > detail_before);
         assert!((detail.right() - 1400.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn dragging_the_sidebar_gutter_resizes_the_sidebar() {
+        let mut app = laid_out(1100.0, 720.0);
+        let viewport = app.viewport();
+        assert!((app.sidebar_width() - SIDEBAR_WIDTH).abs() < 1e-3);
+
+        let gutter = |app: &DemoApp| Vec2::new(app.sidebar_width() + RESIZE_GUTTER / 2.0, 360.0);
+
+        // Drag right: the sidebar grows and the flex row re-adapts the rest.
+        let start = gutter(&app);
+        app.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        app.event(&InputEvent::PointerMove {
+            position: start + Vec2::new(40.0, 0.0),
+        });
+        app.event(&InputEvent::PointerUp {
+            position: start + Vec2::new(40.0, 0.0),
+            button: PointerButton::Left,
+        });
+        app.layout(viewport);
+
+        assert!((app.sidebar_width() - (SIDEBAR_WIDTH + 40.0)).abs() < 1e-3);
+        let sidebar = rect(&app, app.sidebar());
+        let list = rect(&app, app.list());
+        assert!((sidebar.size.width - (SIDEBAR_WIDTH + 40.0)).abs() < 1e-3);
+        assert!((list.left() - (SIDEBAR_WIDTH + 40.0 + RESIZE_GUTTER)).abs() < 1e-3);
+
+        // Drag far left: the sidebar clamps at its minimum.
+        let start = gutter(&app);
+        app.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        app.event(&InputEvent::PointerMove {
+            position: start - Vec2::new(1000.0, 0.0),
+        });
+        app.event(&InputEvent::PointerUp {
+            position: start - Vec2::new(1000.0, 0.0),
+            button: PointerButton::Left,
+        });
+        assert!((app.sidebar_width() - SIDEBAR_MIN).abs() < 1e-3);
     }
 
     #[test]

@@ -242,6 +242,11 @@ order for UI-less games, and `SceneTree::route_input_with(&mut dyn GuiInput, …
 inserts a GUI stage. `draw_ui::Ui` implements `draw_scene::GuiInput`, so the
 engine has no dependency on UI and an app without a HUD never needs
 `draw_ui`.
+GUI drags use pointer capture (`GuiState.dragging` + `Control.drag_callback`):
+on `PointerDown` a node with a drag callback captures the pointer, `PointerMove`
+is routed to it as a delta (even outside its rect) and `PointerUp` releases it.
+`draw_app::{set_on_drag}` and `Component::on_drag` expose it; `ResizeHandle`
+uses it for split-view resizing.
 `draw_core` gained `InputEvent::Wheel` and `InputState` (held buttons/keys +
 pointer position). Multi-touch / gamepad remain future work; GUI focus/hover
 were already in `Ui` and a cross-layer focus test was added.

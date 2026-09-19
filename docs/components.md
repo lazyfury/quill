@@ -12,7 +12,8 @@ the tree.
 
 `draw_app` owns the app-facing trait and the layout primitives (`Flex`, `Panel`,
 `Label`, `Button`, `Grid`, `VBox`, `HBox`, `Column`, `Row`). `draw_components`
-adds the themed library (`Text`, `Card`, `Button`, `Checkbox`, `Switch`, …).
+adds the themed library (`Text`, `Card`, `Button`, `Checkbox`, `Switch`,
+`ResizeHandle`, …).
 
 ## Create & compose components
 
@@ -227,6 +228,29 @@ let count = draw_app::click_count(&tree, button);
 Hit testing returns the topmost control under a point, honoring `MouseFilter`
 (`Stop`/`Pass`/`Ignore`) and visibility. Keyboard (`Enter`/`Space`) activates the
 focused button. MVP does target dispatch; capture/bubble is a future extension.
+
+### Drag / resize
+
+A node can own a pointer drag with `Component::on_drag` (or
+`draw_app::set_on_drag`). While held, the node captures the pointer: every
+`PointerMove` is routed to it (even outside its rect) as a delta in logical
+pixels, and `PointerUp` releases it.
+
+```rust
+tree.add_child(
+    split,
+    draw_components::ResizeHandle::vertical(theme)
+        .target(sidebar)                 // pane whose flex basis changes
+        .width(width.clone())            // Rc<Cell<f32>> current size
+        .min(140.0)
+        .max(400.0),
+);
+```
+
+`ResizeHandle` looks like a `Divider` (1px line) but its node is a wider gutter
+(`size`, default 6px) that can be grabbed. It sets the target's
+`LayoutStyle.basis` on drag; the surrounding `Flex` re-adapts the other panes.
+Fixed panes/gutters should use `shrink(0.0)`.
 
 ## Request redraw
 

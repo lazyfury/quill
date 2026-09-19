@@ -160,6 +160,9 @@ impl Component for Divider {
     fn prepare(&mut self) {
         let color = self.color.unwrap_or(self.theme.palette.border_subtle);
         let vertical = self.vertical;
+        // A fixed rule: never grow or shrink along the main axis.
+        self.spec.data.layout.grow = 0.0;
+        self.spec.data.layout.shrink = 0.0;
         self.spec.data.min_size = if vertical {
             Size::new(1.0, 0.0)
         } else {

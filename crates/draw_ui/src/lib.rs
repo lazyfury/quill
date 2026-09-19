@@ -34,7 +34,7 @@ mod paint;
 mod ui;
 mod widget;
 
-pub use control::{Control, ControlData, GuiState, MouseFilter};
+pub use control::{ClickCallback, Control, ControlData, DragCallback, GuiState, MouseFilter};
 pub use debug::DebugDrawOptions;
 pub use decor::{
     dynamic_surface_decor, foreground_decor, surface_decor, DecorRef, InteractState, NodeDecor,
