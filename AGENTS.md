@@ -29,7 +29,7 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 ```
 draw_core            (no draw_* deps)
 draw_scene    -> draw_core, draw_render
-draw_ui       -> draw_core, draw_scene
+draw_ui       -> draw_core, draw_scene, draw_render
 draw_render   -> draw_core
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core
@@ -50,7 +50,7 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 - [x] Stage 3 — DrawList / render IR
 - [x] Stage 4 — RecordingBackend / headless tests
 - [x] Stage 5 — Canvas2D backend + WASM
-- [ ] Stage 6 — Control / layout / input
+- [x] Stage 6 — Control / layout / input
 - [ ] Stage 7 — reusable component demo
 - [ ] Stage 8 — second backend validation
 
@@ -106,7 +106,17 @@ pipeline test lives in `draw_backend_recording/tests/pipeline.rs`.
 `Canvas2dBackend` maps `DrawCommand` to Canvas 2D. Logical coords are kept; the
 backing store is `logical * scale_factor` and every transform is multiplied by
 the scale factor, so DPR never reaches core/IR. `draw_wasm::start(canvas_id, app)`
-owns the RAF loop and `App::{update, paint}`. `ClipRect` is applied in device
+owns the RAF loop and `App::{update, paint, event}`. `ClipRect` is applied in device
 space then the logical transform is reapplied. Build/run the demo with
 `demos/web_demo/build.sh` + a static server. Only these two crates + the demo may
 touch `web-sys`/browser APIs.
+
+## UI (Stage 6, `draw_ui`)
+
+`Ui` owns a `SceneTree` of `Control` nodes plus `ControlData` (anchors/offsets/
+min_size/rect/mouse_filter) and `Widget` (Panel/Label/Button/VBox/HBox).
+`layout(viewport)` resolves absolute rects; `paint(ctx)` emits the DrawList;
+`handle_input(&InputEvent)` does topmost hit testing + target dispatch (capture/
+bubble reserved). Pointer position is computed from `clientX/Y` minus the canvas
+bounding rect. `InputEvent`/`EventResult` live in `draw_core`. Browser click path
+is verified in headless Chrome via `?selftest=1`.

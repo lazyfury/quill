@@ -19,11 +19,14 @@ python3 -m http.server 8080 --directory .
 
 ## What it shows
 
-- a filled + stroked rectangle,
-- a filled circle,
-- a rotated `Node2D` with a circular child (transform propagation),
-- centered text,
-- a resize-responsive panel and background.
+- a rotated `Node2D` with a circular child (scene transform propagation),
+- a `Panel { Label, Button }` UI with a live click counter,
+- pointer input (hover/click) and keyboard (Enter/Space) handling,
+- viewport-responsive layout (resize the window).
 
-The page sets `data-quill-status="painted"` after the first frame if real pixels
-were detected; useful for headless smoke checks.
+## Headless self-test
+
+The page sets `data-quill-status="painted"` after the first frame. It also
+reports `data-quill-button="x,y"` and `data-quill-clicks="n"`. Open with
+`?selftest=1` to dispatch real pointer events at the button and verify the click
+counter increments (`data-quill-status="clicked"`).

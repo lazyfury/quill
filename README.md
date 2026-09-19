@@ -25,13 +25,15 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 5 (Canvas 2D backend + WASM). `draw_core` provides math, colors, handles and
+Stage 6 (Control / Layout / Input). `draw_core` provides math, colors, handles and
 the viewport model; `draw_scene` provides the scene tree with transform/visibility
 propagation and a `SceneTree::paint` step; `draw_render` provides the
 backend-neutral IR (`DrawCommand`/`DrawList`/`PaintContext`) and the
 `RenderBackend` trait; `draw_backend_recording` records frames for the fully
 headless `Scene -> DrawList -> RenderBackend` test pipeline; `draw_backend_canvas`
-+ `draw_wasm` render that IR to an HTML Canvas with DPR handling.
++ `draw_wasm` render that IR to an HTML Canvas with DPR handling and input; and
+`draw_ui` provides `Control`, layout (anchors/offsets/containers), `Label`,
+`Button` and hit-tested pointer/keyboard input.
 
 ## Build & test
 

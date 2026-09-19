@@ -60,4 +60,28 @@ Then submit `list` to any `RenderBackend` (recording, Canvas 2D, ...). See
 
 ## Create your first control
 
-`Control` lands in Stage 6.
+```rust
+use draw_core::{InputEvent, PointerButton, Size, Viewport};
+use draw_ui::Ui;
+
+let mut ui = Ui::new();
+let panel = ui.add_panel(ui.root());
+let vbox = ui.add_vbox(panel);
+ui.add_label(vbox, "Hello");
+let button = ui.add_button(vbox, "Click me");
+ui.set_on_click(button, || println!("clicked!"));
+
+ui.layout(Viewport::new(Size::new(800.0, 600.0)));
+
+// Pointer/keyboard input (backend-neutral):
+ui.handle_input(&InputEvent::PointerDown {
+    position: draw_core::Vec2::new(100.0, 100.0),
+    button: PointerButton::Left,
+});
+
+// Paint into a DrawList:
+let mut ctx = draw_render::PaintContext::new();
+ui.paint(&mut ctx);
+```
+
+See `docs/components.md` for anchors, containers and events.

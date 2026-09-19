@@ -28,6 +28,9 @@ pub enum Visual {
 pub enum NodeKind {
     Node,
     Node2D,
+    /// A UI control. Like `Node2D` it is a canvas item, but its layout and
+    /// painting are owned by `draw_ui`.
+    Control,
 }
 
 /// Which derived values are stale and must be recomputed on the next update.
@@ -139,7 +142,7 @@ pub struct Node {
 
 impl Node {
     pub(crate) fn new(id: NodeId, name: impl Into<String>, kind: NodeKind, order: u64) -> Self {
-        let canvas = matches!(kind, NodeKind::Node2D).then(CanvasItem::new);
+        let canvas = matches!(kind, NodeKind::Node2D | NodeKind::Control).then(CanvasItem::new);
         Self {
             id,
             name: name.into(),

@@ -105,6 +105,14 @@ impl SceneTree {
         self.insert(parent, name, NodeKind::Node2D)
     }
 
+    /// Adds a `Control` canvas item under `parent`.
+    ///
+    /// # Panics
+    /// Panics if `parent` is not a live node.
+    pub fn add_control(&mut self, parent: NodeId, name: impl Into<String>) -> NodeId {
+        self.insert(parent, name, NodeKind::Control)
+    }
+
     fn insert(&mut self, parent: NodeId, name: impl Into<String>, kind: NodeKind) -> NodeId {
         assert!(self.contains(parent), "add: parent {parent} is not live");
         let id = self.allocator.alloc();
