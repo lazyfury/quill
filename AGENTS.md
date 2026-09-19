@@ -21,7 +21,10 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 2. `DrawCommand` holds only backend-neutral data (no Canvas/WebGL/WGPU objects).
 3. Scene/UI must be testable with native `cargo test`, no browser.
 4. Resources use handles (`NodeId`, `TextureId`), not backend objects.
-5. No ECS, shaders, render graph, particles, physics, editor in MVP.
+5. No ECS, shaders, render graph, particles, editor in MVP. Basic 2D
+   collision/physics IS allowed from Stage 25 (see `docs/godot-migration.md`);
+   a general rigid-body solver / editor remains out of scope until a later
+   explicit ask.
 6. Do not merge stages. Each stage ends with a report and waits for user approval.
 7. **No screenshot / screen-recording visual testing.** Never use
    `screencapture`, browser screenshots, screen recording, or any OS-level
@@ -37,6 +40,10 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
    Exact token names/paths matter: use `theme.palette.*` and `theme.surface(level)`
    rather than hard-coding hex values in components. Dark is a token swap, not a
    second code path, and dark values must stay within the documented palette.
+   **Migration exception (Stage 25+):** the Godot-style migration
+   (`docs/godot-migration.md`) may change `draw_scene` / `draw_ui` incompatible;
+   keep the compatibility layer green per phase and update
+   `docs/design-system.md` when component-facing APIs move.
 
 ## Dependency direction
 
@@ -145,6 +152,14 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       children; `demo_app` and the overlay popover content are built as view
       trees.
       Recorded in `docs/design-system.md`.
+- [ ] Stage 25 — Godot-style unified scene (planning approved; implementation
+      not started). One `SceneTree` for world + UI, `Viewport`/`Camera2D` driving
+      the world, and UI under a `CanvasLayer` in viewport coordinates. Full
+      phase plan, target architecture, decisions and open questions:
+      `docs/godot-migration.md`. Phases: 1 `draw_scene` extension point +
+      layers, 2 `Viewport`/`Camera2D`, 3 `CanvasLayer` painting, 4 `Control` into
+      the single tree, 5 unified lifecycle/input, 6 `draw_game` capabilities,
+      7 native continuous loop, 8 observability/tests/docs.
 
 ## Per-stage gate (must run)
 
@@ -184,6 +199,7 @@ Then emit the report and stop for approval.
 | Controls, layout, components | `docs/components.md` |
 | Design tokens, theme, component library | `docs/design-system.md` |
 | Roadmap / remaining primitives & components | `docs/plan.md` |
+| Godot-style unified scene migration (Stage 25+) | `docs/godot-migration.md` |
 | Profiler + debug overlays | `docs/debug.md` |
 | Benchmarks & regression baselines | `docs/benchmarking.md` |
 | Test layers, no-screenshot rule | `docs/testing.md` |

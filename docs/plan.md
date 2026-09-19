@@ -4,6 +4,13 @@ Working roadmap for the design system (`draw_theme` + `draw_components`), the dr
 primitives, and the demo. Keep this short and move finished items to the
 "Done" section rather than deleting them.
 
+> **Stage 25+ is a planned architecture migration** to a Godot-style unified
+> scene (single `SceneTree` for world + UI, `Viewport`/`Camera2D`, `CanvasLayer`
+> UI in viewport coordinates). That change is specified separately in
+> [`docs/godot-migration.md`](godot-migration.md); this file keeps the
+> day-to-day item lists below. Where they conflict for Stages 25+,
+> `godot-migration.md` wins.
+
 ## Drawing primitives
 
 The render IR (`draw_render::DrawCommand`) is the backend-neutral surface. Keep
@@ -73,7 +80,12 @@ polish, in priority order:
 6. **Migrate remaining imperative hosts** — `component_demo` and any lingering
    `ui.add` + `ui.set_*` construction; keep `Ui::set_*` runtime-internal only.
 
-## UI runtime — `Ui` boundary & lifecycle (Stage 25)
+## UI runtime — `Ui` boundary & lifecycle (folded into Stage 25)
+
+> This section is now part of the Godot-style migration; see
+> [`docs/godot-migration.md`](godot-migration.md) Phase 4 (single tree) and
+> Phase 5 (lifecycle/input). The items below are the constraints that phase
+> must satisfy.
 
 `Ui` is necessary as the retained UI document + layout/paint/input runtime, but
 it is currently a god object and overlaps `SceneTree` on "who owns a control".
