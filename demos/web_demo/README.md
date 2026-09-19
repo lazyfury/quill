@@ -19,10 +19,13 @@ python3 -m http.server 8080 --directory .
 
 ## What it shows
 
-- a rotated `Node2D` with a circular child (scene transform propagation),
-- a `Panel { Label, Button }` UI with a live click counter,
-- pointer input (hover/click) and keyboard (Enter/Space) handling,
-- viewport-responsive layout (resize the window).
+- a three-column, macOS-style notes app (sidebar / content list / detail) built
+  from `draw_kit` themed components (`Text`, `Badge`, `Divider`, `Button`,
+  `Checkbox`, `Switch`) on the shared `demo_app::DemoApp`,
+- monochrome rounded-square placeholders for icons and images,
+- a rotating `SceneTree` node clipped inside the detail hero,
+- selection state (click a note or nav row) reflected in the detail pane,
+- pointer input (hover/click) and viewport-responsive layout (resize the window).
 
 ## Headless self-test
 

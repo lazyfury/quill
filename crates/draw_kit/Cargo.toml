@@ -1,18 +1,15 @@
 [package]
-name = "demo_app"
+name = "draw_kit"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
 
 [dependencies]
 draw_core.workspace = true
-draw_render.workspace = true
-draw_scene.workspace = true
 draw_ui.workspace = true
+draw_render.workspace = true
 draw_theme.workspace = true
-draw_kit.workspace = true
 
 [dev-dependencies]
 draw_backend_recording.workspace = true

@@ -29,13 +29,23 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
    backend's own pixel buffer, assert `DrawList` command sequences, or read DOM
    state markers. If a claim cannot be verified without a screenshot, say so
    rather than capturing one.
+8. **The design-system layers do not extend the core.** `draw_theme` (tokens)
+   and `draw_kit` (components) may only use the public APIs of `draw_core`,
+   `draw_scene`, `draw_render` and `draw_ui`. Keep `draw_ui::Widget` and the
+   backend-neutral core frozen unless a change is genuinely required and
+   backward compatible; record any such change in `docs/design-system.md`.
+   Exact token names/paths matter: use `theme.palette.*` and `theme.surface(level)`
+   rather than hard-coding hex values in components. Dark is a token swap, not a
+   second code path, and dark values must stay within the documented palette.
 
 ## Dependency direction
 
 ```
 draw_core            (no draw_* deps)
+draw_theme   -> draw_core
 draw_scene    -> draw_core, draw_render
 draw_ui       -> draw_core, draw_scene, draw_render
+draw_kit      -> draw_core, draw_ui, draw_render, draw_theme
 draw_render   -> draw_core
 draw_profile  -> draw_core, draw_render
 draw_debug_ui -> draw_core, draw_render, draw_ui, draw_profile
@@ -95,9 +105,15 @@ discovery live only in `draw_backend_wgpu`; the core stays text-free.
       `ab_glyph`, dynamic atlas, device-pixel rasterization for crisp HiDPI) or
       `FontMode::Pixel` (built-in bitmap); `set_font_config` switches at runtime
       and `FontMetrics` lets `wgpu_demo` inject a matching `TextMeasurer`.
+- [x] Stage 20 — design system: `draw_theme` design tokens (light/dark
+      palettes, spacing/radius/type/motion scales) + `draw_kit` themed component
+      library (`Text`, `Card`, `Divider`, `Badge`, `Button`, `CodeBlock`,
+      `Terminal`, `EmptyState`, `Checkbox`, `Switch`) built on frozen `draw_ui`
+      primitives, plus the shared `demo_app` rewritten as a three-column
+      macOS-style notes app (icons/images are monochrome placeholder squares).
 
 Deferred by request (do not start without an explicit ask):
-- Stage 20 — a Canvas/WASM text measurer (`measureText`) and complex-script
+- Stage 21 — a Canvas/WASM text measurer (`measureText`) and complex-script
   shaping (ligatures, bidi). The Canvas demo keeps the proportional default
   estimate; only the wgpu backend measures with the real font.
 
@@ -137,6 +153,7 @@ Then emit the report and stop for approval.
 | Pipeline, coordinates, stage plan, backend replaceability | `docs/architecture.md` |
 | Backends (Canvas / wgpu / recording), adding a backend, browser boundary | `docs/backend.md` |
 | Controls, layout, components | `docs/components.md` |
+| Design tokens, theme, component library | `docs/design-system.md` |
 | Profiler + debug overlays | `docs/debug.md` |
 | Benchmarks & regression baselines | `docs/benchmarking.md` |
 | Test layers, no-screenshot rule | `docs/testing.md` |

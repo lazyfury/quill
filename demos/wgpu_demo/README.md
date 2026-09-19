@@ -19,14 +19,19 @@ cargo run -p wgpu_demo --release
 
 ## Controls
 
-- The rectangle in the scene rotates continuously.
-- The left panel is a layout showcase:
-  - a flex column with a wrapping, ellipsized paragraph,
-  - a row of two buttons that share leftover width via `flex_grow`
-    (**Click me** updates the counter; **Reset** is a plain button),
-  - a 2x2 `Grid` with `Fr` columns and auto rows.
-- Clicking **Click me** updates the status label; the click count changes text,
-  which invalidates layout (otherwise the resolved layout is cached).
+- A three-column, macOS-style notes app built from `draw_kit` components on the
+  `draw_ui` core:
+  - **sidebar** (220px): traffic lights, app title, search placeholder, nav
+    rows with selection, version badge,
+  - **content list** (324px): header, note rows with thumbnail placeholders,
+    selection highlight and an accent bar,
+  - **detail**: toolbar with icon buttons, a hero image placeholder that renders
+    a rotating `SceneTree` node (clipped to the hero rect), title/metadata,
+    wrapping body text, preference controls and action buttons.
+- Icons and images are monochrome rounded-square placeholders.
+- Clicking a note row (or the back/forward icon buttons) updates the detail
+  pane; clicking nav rows updates the sidebar selection; **New Note** increments
+  the click counter (the headless probe).
 - Resize the window (the UI re-lays out) or move it between displays with
   different DPRs.
 

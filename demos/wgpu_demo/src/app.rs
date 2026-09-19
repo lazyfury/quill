@@ -88,8 +88,8 @@ impl App {
             return;
         }
         let attributes = Window::default_attributes()
-            .with_title("quill — wgpu demo")
-            .with_inner_size(LogicalSize::new(900.0, 620.0));
+            .with_title("quill — Notes")
+            .with_inner_size(LogicalSize::new(1200.0, 780.0));
         let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
 
         let surface = self
@@ -129,7 +129,7 @@ impl App {
 
         self.scale_factor = window.scale_factor();
         backend.set_scale_factor(self.scale_factor as f32);
-        backend.set_clear_color(draw_core::Color::new(0.09, 0.10, 0.13, 1.0));
+        backend.set_clear_color(draw_core::Color::new(0.039, 0.039, 0.039, 1.0));
 
         // Measure UI text with the backend's actual font.
         let font_config = FontConfig {

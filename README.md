@@ -54,8 +54,8 @@ Three independent renderers consume the same `DrawList`:
 | Demo | Shows |
 |---|---|
 | `demos/component_demo` | Recommended component API (compose, layout, `on_click`, state, WASM) |
-| `demos/web_demo` | Raw scene + UI API and the Canvas backend |
-| `demos/wgpu_demo` | Native window + `wgpu` backend (surface presentation) + component/perf debug overlays |
+| `demos/web_demo` | Three-column macOS-style notes app (`demo_app`) on the Canvas backend |
+| `demos/wgpu_demo` | The same app on a native `wgpu` surface + component/perf debug overlays |
 
 ## Build & test
 
