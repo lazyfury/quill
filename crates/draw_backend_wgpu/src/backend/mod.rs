@@ -1,0 +1,446 @@
+//! A [`RenderBackend`] that rasterizes a [`DrawList`] with `wgpu`.
+//!
+//! The backend renders to an offscreen `Rgba8Unorm` texture. That keeps the
+//! whole `DrawList -> pixels` path verifiable with native `cargo test` (no
+//! window, no browser, no screenshot): render a frame, then read the target's
+//! pixels back and assert on them via [`WgpuBackend::read_pixels`].
+//!
+//! # How the IR maps onto the GPU
+//!
+//! Transform, opacity and clip are resolved on the CPU while tessellating so
+//! the shader stays a trivial textured-quad pass:
+//!
+//! - `SetTransform` / `SetOpacity` / `ClipRect` update a state stack.
+//! - `FillRect` / `StrokeRect` / `FillCircle` / `StrokeCircle` tessellate into
+//!   triangles; positions are converted to NDC and opacity is folded into the
+//!   vertex color.
+//! - `ClipRect` becomes a scissor rectangle per draw range.
+//! - `DrawImage` samples a texture registered with
+//!   [`WgpuBackend::register_texture`].
+//! - `DrawText` samples the built-in bitmap-font atlas ([`crate::font`]).
+//!
+//! No `DrawCommand` is modified and no backend type leaks into the IR.
+//!
+//! # Layout
+//!
+//! This module owns the backend's types and public surface; the logic lives in
+//! sibling modules so each file stays small:
+//!
+//! - [`init`] — adapter/device selection and initial GPU resources.
+//! - [`frame`] — the offscreen target and the per-frame render pass.
+//! - [`tessellate`] — turning `DrawCommand`s into vertices and draw ranges.
+//! - [`pipeline`] — the render pipeline and texture/bind-group helpers.
+
+mod frame;
+mod init;
+mod pipeline;
+mod tessellate;
+
+use std::collections::HashMap;
+use std::fmt;
+use std::ops::Range;
+use std::sync::mpsc;
+
+use bytemuck::{Pod, Zeroable};
+
+use draw_core::{Color, Rect, Transform2D, Vec2, Viewport};
+use draw_render::{DrawList, Paint, RenderBackend, TextureId};
+
+use pipeline::{bind_group, upload_texture};
+
+/// Formats the offscreen render target uses.
+const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Circle tessellation resolution.
+const CIRCLE_SEGMENTS: u32 = 48;
+/// UVs used when sampling the 1x1 white texture (any UV works).
+const SOLID_UV: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+
+/// Errors from the wgpu backend.
+#[derive(Debug)]
+pub enum WgpuError {
+    /// No adapter matching the requested options was found.
+    NoAdapter,
+    /// Creating or using the logical device failed.
+    Device(String),
+    /// `begin_frame` was called while a frame is already open.
+    AlreadyInFrame,
+    /// `submit` / `end_frame` was called with no open frame.
+    NotInFrame,
+    /// No render target exists (no `begin_frame` has completed).
+    NoTarget,
+    /// A registered texture had zero size or too little pixel data.
+    InvalidTexture(String),
+}
+
+impl fmt::Display for WgpuError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoAdapter => f.write_str("no suitable wgpu adapter found"),
+            Self::Device(message) => write!(f, "wgpu device error: {message}"),
+            Self::AlreadyInFrame => f.write_str("begin_frame called while a frame is already open"),
+            Self::NotInFrame => f.write_str("submit/end_frame called with no open frame"),
+            Self::NoTarget => f.write_str("no render target (begin_frame has not completed)"),
+            Self::InvalidTexture(message) => write!(f, "invalid texture: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for WgpuError {}
+
+/// RGBA8 pixels read back from the render target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PixelBuffer {
+    pub width: u32,
+    pub height: u32,
+    /// Tightly packed RGBA rows (`width * height * 4` bytes).
+    pub data: Vec<u8>,
+}
+
+impl PixelBuffer {
+    /// Returns the RGBA pixel at `(x, y)`, or `None` when out of bounds.
+    pub fn pixel(&self, x: u32, y: u32) -> Option<[u8; 4]> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let offset = ((y * self.width + x) * 4) as usize;
+        Some([
+            self.data[offset],
+            self.data[offset + 1],
+            self.data[offset + 2],
+            self.data[offset + 3],
+        ])
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+pub(super) struct Vertex {
+    /// Normalized device coordinates.
+    pub(super) position: [f32; 2],
+    pub(super) uv: [f32; 2],
+    pub(super) color: [f32; 4],
+}
+
+impl Vertex {
+    pub(super) const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
+
+    pub(super) fn layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: core::mem::size_of::<Self>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES,
+        }
+    }
+}
+
+/// Which texture a draw range samples.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Surface {
+    /// The 1x1 white texture, tinted by the vertex color.
+    Solid,
+    /// A texture registered with [`WgpuBackend::register_texture`].
+    Texture(TextureId),
+    /// The built-in bitmap-font atlas.
+    Font,
+}
+
+/// A contiguous vertex range plus the state it is drawn under.
+#[derive(Debug, Clone)]
+pub(super) struct DrawRange {
+    pub(super) vertices: Range<u32>,
+    pub(super) surface: Surface,
+    /// `None` means "full target"; otherwise `[x, y, width, height]`.
+    pub(super) scissor: Option<[u32; 4]>,
+}
+
+/// The clip after resolving the current state against the target.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ClipResult {
+    Full,
+    Scissor([u32; 4]),
+    Empty,
+}
+
+/// CPU-side paint state mirroring `Save` / `Restore`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct State {
+    pub(super) transform: Transform2D,
+    pub(super) opacity: f32,
+    pub(super) clip: Option<Rect>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            transform: Transform2D::IDENTITY,
+            opacity: 1.0,
+            clip: None,
+        }
+    }
+}
+
+/// The persistent offscreen render target, recreated only when the size changes.
+pub(super) struct OffscreenTarget {
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) texture: wgpu::Texture,
+    pub(super) view: wgpu::TextureView,
+}
+
+/// The render target of the frame currently being built.
+///
+/// Offscreen frames point at [`OffscreenTarget::view`]; window frames point at
+/// the surface texture view supplied by the caller.
+pub(super) struct Frame {
+    pub(super) view: wgpu::TextureView,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) format: wgpu::TextureFormat,
+    pub(super) offscreen: bool,
+}
+
+/// A `wgpu` [`RenderBackend`] rendering to an offscreen texture or a surface.
+pub struct WgpuBackend {
+    pub(super) instance: wgpu::Instance,
+    pub(super) adapter: wgpu::Adapter,
+    pub(super) device: wgpu::Device,
+    pub(super) queue: wgpu::Queue,
+    pub(super) shader: wgpu::ShaderModule,
+    pub(super) bind_group_layout: wgpu::BindGroupLayout,
+    /// One pipeline per color-target format (offscreen plus surface formats).
+    pub(super) pipelines: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+
+    pub(super) white_bind_group: wgpu::BindGroup,
+    pub(super) font_bind_group: wgpu::BindGroup,
+    pub(super) image_sampler: wgpu::Sampler,
+    pub(super) textures: HashMap<TextureId, wgpu::BindGroup>,
+    pub(super) texture_sizes: HashMap<TextureId, (u32, u32)>,
+
+    pub(super) offscreen: Option<OffscreenTarget>,
+    pub(super) frame: Option<Frame>,
+
+    // Per-frame CPU staging.
+    pub(super) in_frame: bool,
+    pub(super) viewport: Viewport,
+    pub(super) scale_factor: f32,
+    pub(super) clear: Color,
+    pub(super) device_width: f32,
+    pub(super) device_height: f32,
+    pub(super) state: State,
+    pub(super) stack: Vec<State>,
+    pub(super) vertices: Vec<Vertex>,
+    pub(super) ranges: Vec<DrawRange>,
+}
+
+impl WgpuBackend {
+    /// Sets the logical-to-device scale factor (DPR). Core/IR stay logical.
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor.max(0.0);
+    }
+
+    /// Returns the [`wgpu::Instance`] the backend uses.
+    pub fn instance(&self) -> &wgpu::Instance {
+        &self.instance
+    }
+
+    /// Returns the adapter the backend selected. Use it to query surface
+    /// capabilities or adapter info.
+    pub fn adapter(&self) -> &wgpu::Adapter {
+        &self.adapter
+    }
+
+    /// Returns the logical device used for rendering.
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// Returns the queue used for submissions and texture uploads.
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Returns the current scale factor.
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
+    }
+
+    /// Returns the viewport of the most recent [`RenderBackend::begin_frame`].
+    pub fn viewport(&self) -> Viewport {
+        self.viewport
+    }
+
+    /// Sets the color the render target is cleared to each frame.
+    pub fn set_clear_color(&mut self, color: Color) {
+        self.clear = color;
+    }
+
+    /// Registers an RGBA8 image so `DrawImage` can reference it by [`TextureId`].
+    pub fn register_texture(
+        &mut self,
+        id: TextureId,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<(), WgpuError> {
+        if width == 0 || height == 0 {
+            return Err(WgpuError::InvalidTexture("zero width or height".into()));
+        }
+        let expected = width as usize * height as usize * 4;
+        if rgba.len() < expected {
+            return Err(WgpuError::InvalidTexture(format!(
+                "expected at least {expected} bytes, got {}",
+                rgba.len()
+            )));
+        }
+        let texture = upload_texture(
+            &self.device,
+            &self.queue,
+            "draw_backend_wgpu.texture",
+            &rgba[..expected],
+            width,
+            height,
+        );
+        let view = texture.create_view(&Default::default());
+        let group = bind_group(
+            &self.device,
+            &self.bind_group_layout,
+            &view,
+            &self.image_sampler,
+            "texture",
+        );
+        self.textures.insert(id, group);
+        self.texture_sizes.insert(id, (width, height));
+        Ok(())
+    }
+
+    /// Reads the current offscreen render target back into RGBA8 pixels.
+    ///
+    /// Call after [`RenderBackend::end_frame`] with an offscreen frame (see
+    /// [`WgpuBackend::is_offscreen_frame`]). Blocks until the GPU work has
+    /// completed, so the returned pixels are deterministic.
+    pub fn read_pixels(&self) -> Result<PixelBuffer, WgpuError> {
+        let target = self.offscreen.as_ref().ok_or(WgpuError::NoTarget)?;
+        self.read_texture(&target.texture, target.width, target.height)
+    }
+
+    /// Reads an arbitrary texture of this backend's device back into RGBA8
+    /// pixels. `texture` must have been created with `COPY_SRC`.
+    pub fn read_texture(
+        &self,
+        texture: &wgpu::Texture,
+        width: u32,
+        height: u32,
+    ) -> Result<PixelBuffer, WgpuError> {
+        let unpadded = width * 4;
+        let padded = unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw_backend_wgpu.readback"),
+            size: (padded as u64) * (height as u64),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("draw_backend_wgpu.readback_encoder"),
+            });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = buffer.slice(..);
+        let (sender, receiver) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        let _ = self.device.poll(wgpu::Maintain::Wait);
+        receiver
+            .recv()
+            .map_err(|error| WgpuError::Device(error.to_string()))?
+            .map_err(|error| WgpuError::Device(format!("{error:?}")))?;
+
+        let mapped = slice.get_mapped_range();
+        let mut data = Vec::with_capacity((unpadded * height) as usize);
+        for row in 0..height {
+            let start = (row * padded) as usize;
+            data.extend_from_slice(&mapped[start..start + unpadded as usize]);
+        }
+        drop(mapped);
+        buffer.unmap();
+
+        Ok(PixelBuffer {
+            width,
+            height,
+            data,
+        })
+    }
+}
+
+impl RenderBackend for WgpuBackend {
+    type Error = WgpuError;
+
+    fn begin_frame(&mut self, viewport: Viewport) -> Result<(), Self::Error> {
+        let size = viewport.device_size(self.scale_factor);
+        let width = size.width.round().max(1.0) as u32;
+        let height = size.height.round().max(1.0) as u32;
+        self.ensure_offscreen(width, height);
+        self.ensure_pipeline(TARGET_FORMAT);
+        self.start_frame(viewport, width, height)?;
+        let view = self
+            .offscreen
+            .as_ref()
+            .expect("offscreen target created above")
+            .view
+            .clone();
+        self.frame = Some(Frame {
+            view,
+            width,
+            height,
+            format: TARGET_FORMAT,
+            offscreen: true,
+        });
+        Ok(())
+    }
+
+    fn submit(&mut self, list: &DrawList) -> Result<(), Self::Error> {
+        if !self.in_frame {
+            return Err(WgpuError::NotInFrame);
+        }
+        for command in list.commands() {
+            self.execute(command);
+        }
+        Ok(())
+    }
+
+    fn end_frame(&mut self) -> Result<(), Self::Error> {
+        if !self.in_frame {
+            return Err(WgpuError::NotInFrame);
+        }
+        self.in_frame = false;
+        self.render_frame();
+        Ok(())
+    }
+}
