@@ -40,10 +40,10 @@ cargo run -p wgpu_demo --release
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--debug-ui` / `--debug` | on | Draw component bounds at startup |
-| `--no-debug-ui` / `--no-debug` | | Start without component debug drawing |
-| `--performance` / `--perf` | off | Show the performance panel |
-| `--no-performance` / `--no-perf` | | Hide the performance panel |
+| `--debug-ui` / `--debug` | | Draw component bounds at startup |
+| `--no-debug-ui` / `--no-debug` | on | Start without component debug drawing |
+| `--performance` / `--perf` | | Show the performance panel |
+| `--no-performance` / `--no-perf` | on | Hide the performance panel |
 | `--profiler` / `--profile` | on | Collect frame stats into the profiler |
 | `--no-profiler` / `--no-profile` | | Disable the profiler (the panel shows placeholders) |
 | `-h`, `--help` | | Print help and exit |
@@ -52,13 +52,16 @@ cargo run -p wgpu_demo --release
 Examples:
 
 ```bash
-# default: component bounds on, performance panel off
+# default: no overlays (press d / p at runtime to show them)
 cargo run -p wgpu_demo --release
 
-# component bounds + performance panel
-cargo run -p wgpu_demo --release -- --performance
+# component bounds only
+cargo run -p wgpu_demo --release -- --debug-ui
 
-# window only, no overlay and no audit cost
+# component bounds + performance panel
+cargo run -p wgpu_demo --release -- --debug-ui --performance
+
+# window only, no overlays and no audit cost
 cargo run -p wgpu_demo --release -- --no-debug-ui --no-profiler
 ```
 

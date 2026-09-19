@@ -18,7 +18,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            debug_ui: true,
+            debug_ui: false,
             performance: false,
             profiler: true,
         }
@@ -44,8 +44,8 @@ USAGE:
     wgpu_demo [OPTIONS]
 
 OPTIONS:
-        --debug-ui        Draw component bounds (yellow name#id) (default)
-        --no-debug-ui     Start without component debug drawing
+        --debug-ui        Draw component bounds (yellow name#id)
+        --no-debug-ui     Start without component debug drawing (default)
         --performance     Show the performance panel
         --no-performance  Start without the performance panel (default)
         --profiler        Collect frame stats (default)
@@ -100,11 +100,11 @@ mod tests {
     }
 
     #[test]
-    fn defaults_enable_debug_ui_and_profiler_only() {
+    fn defaults_are_all_off_except_the_profiler() {
         assert_eq!(
             options(&[]),
             Options {
-                debug_ui: true,
+                debug_ui: false,
                 performance: false,
                 profiler: true,
             }

@@ -206,9 +206,9 @@ demo.paint -> debug.paint(component bounds) -> perf.paint -> submit
 ```
 
 ```bash
-cargo run -p wgpu_demo --release
-cargo run -p wgpu_demo --release -- --no-debug-ui          # hide component bounds
-cargo run -p wgpu_demo --release -- --performance          # show the perf panel
+cargo run -p wgpu_demo --release                    # no overlays by default
+cargo run -p wgpu_demo --release -- --debug-ui      # show component bounds
+cargo run -p wgpu_demo --release -- --performance   # show the perf panel
 ```
 
 Shortcuts: **F3** / `` ` `` / **d** toggles component bounds, **F4** / **p**

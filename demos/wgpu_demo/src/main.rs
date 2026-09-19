@@ -13,8 +13,9 @@
 //! cargo run -p wgpu_demo --release
 //! ```
 //!
-//! Flags: `--no-debug-ui` and `--no-profiler` disable the overlay / profiler
-//! (both default on); `--help` lists everything.
+//! Flags: `--debug-ui` and `--performance` show the component-bounds and
+//! performance overlays (both off by default); `--profiler` controls stats
+//! collection (default on); `--help` lists everything.
 //!
 //! This is the only place that owns a window/event loop; the backend itself
 //! stays window-agnostic and is also exercised headlessly in its own tests. The
