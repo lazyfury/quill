@@ -211,6 +211,44 @@ fn stroke_rect_outline_leaves_the_center_empty() {
 }
 
 #[test]
+fn rounded_rect_fills_the_center_but_not_the_corner() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+
+    let mut ctx = PaintContext::new();
+    ctx.fill_rounded_rect(
+        Rect::from_min_size(Vec2::new(4.0, 4.0), Size::splat(24.0)),
+        8.0,
+        Color::RED,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 16, 16, [255, 0, 0, 255]); // center
+    assert_pixel(&pixels, 16, 5, [255, 0, 0, 255]); // top edge
+    assert_pixel(&pixels, 4, 4, [0, 0, 0, 0]); // rounded-away corner
+}
+
+#[test]
+fn stroke_rounded_rect_leaves_the_center_empty() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+
+    let mut ctx = PaintContext::new();
+    ctx.stroke_rounded_rect(
+        Rect::from_min_size(Vec2::new(4.0, 4.0), Size::splat(24.0)),
+        8.0,
+        2.0,
+        Color::WHITE,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 16, 5, [255, 255, 255, 255]); // top edge
+    assert_pixel(&pixels, 16, 16, [0, 0, 0, 0]); // hole in the middle
+}
+
+#[test]
 fn draw_image_samples_a_registered_texture() {
     let Some(mut backend) = backend() else {
         return;

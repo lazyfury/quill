@@ -161,7 +161,8 @@ backward-compatible addition and record it here.
 
 ## Deferred
 
-Inputs, selects, tabs, tooltips, tables, lists, modals and toasts are staged
-next. Rounded *strokes* are approximated by filling a border-colored rounded
-rect and insetting the fill; a first-class rounded-rect command would be a
-`draw_render` addition.
+Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /
+`StrokeRoundedRect`), implemented by the canvas, wgpu and recording backends, so
+surfaces no longer compose circles + rects by hand. Inputs, selects, tabs,
+tooltips, tables, lists, modals and toasts are staged next; see `docs/plan.md`
+for the full roadmap.

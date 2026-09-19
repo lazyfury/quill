@@ -2,7 +2,7 @@
 
 use draw_core::{Color, Edges, NodeId, Size};
 use draw_theme::{control, radius, TextSize};
-use draw_ui::{estimate_text_size, Label, Panel, TextOptions};
+use draw_ui::{Align, Flex, Justify, Label, TextOptions};
 
 use crate::paint::SurfaceStyle;
 use crate::{detach, Component, ControlRef, Kit, Ui};
@@ -70,15 +70,20 @@ impl Component for Button {
         let theme = *kit.theme();
         let font = self.font_size;
         let pad = control::PADDING_X;
-        let text_size = estimate_text_size(&self.text, font);
-        let size = Size::new(
-            text_size.width + pad * 2.0,
-            text_size.height.max(control::HEIGHT),
-        );
 
-        let node = ui.add(parent, Panel::new().color(Color::TRANSPARENT).flat());
+        // A centered row: the label is intrinsically sized by the active text
+        // measurer and centred both ways, so the button re-measures when the
+        // host swaps the measurer (e.g. for a real font).
+        let node = ui.add(
+            parent,
+            Flex::row()
+                .align(Align::Center)
+                .justify(Justify::Center)
+                .gap(0.0)
+                .padding(Edges::symmetric(pad, 0.0)),
+        );
         detach(ui, node.id());
-        ui.set_min_size(node.id(), size);
+        ui.set_min_size(node.id(), Size::new(0.0, control::HEIGHT));
 
         let variant = self.variant;
         kit.dynamic_surface(node.id(), move |theme, st| {
@@ -119,15 +124,13 @@ impl Component for Button {
             ButtonVariant::Primary => theme.palette.on_accent,
             _ => theme.palette.foreground,
         };
-        let label = ui.add(
+        ui.add(
             node.id(),
             Label::new(self.text)
                 .font_size(font)
                 .color(color)
                 .text_options(TextOptions::no_wrap()),
         );
-        ui.set_anchors(label.id(), Edges::new(0.0, 0.5, 1.0, 0.5));
-        ui.set_offsets(label.id(), Edges::new(pad, -font * 0.72, -pad, font * 0.72));
 
         if let Some(callback) = self.on_click {
             kit.on_click(node.id(), callback);

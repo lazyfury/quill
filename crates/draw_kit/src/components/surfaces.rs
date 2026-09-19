@@ -3,7 +3,7 @@
 use draw_core::{Color, Edges, NodeId, Size, Vec2};
 use draw_render::PaintContext;
 use draw_theme::{radius, space, TextSize};
-use draw_ui::{estimate_text_size, Align, Flex, Label, Panel, TextOptions};
+use draw_ui::{Align, Flex, Justify, Label, TextOptions};
 
 use crate::paint::{self, SurfaceStyle};
 use crate::tone::{SurfaceTone, Tone};
@@ -183,15 +183,16 @@ impl Component for Badge {
         let font = TextSize::Caption.px();
         let accent = self.tone.color(&theme);
         let pad = Edges::symmetric(space::SM, space::XXS);
-        let text_size = estimate_text_size(&self.text, font);
-        let size = Size::new(
-            text_size.width + pad.horizontal(),
-            text_size.height.max(font * 1.4) + pad.vertical(),
-        );
 
-        let node = ui.add(parent, Panel::new().color(Color::TRANSPARENT).flat());
+        let node = ui.add(
+            parent,
+            Flex::row()
+                .align(Align::Center)
+                .justify(Justify::Center)
+                .gap(0.0)
+                .padding(pad),
+        );
         crate::detach(ui, node.id());
-        ui.set_min_size(node.id(), size);
 
         let style = if self.solid {
             SurfaceStyle::new(accent).radius(self.radius)
@@ -207,17 +208,12 @@ impl Component for Badge {
         } else {
             accent
         };
-        let label = ui.add(
+        ui.add(
             node.id(),
             Label::new(&self.text)
                 .font_size(font)
                 .color(text_color)
                 .text_options(TextOptions::no_wrap()),
-        );
-        ui.set_anchors(label.id(), Edges::new(0.0, 0.0, 1.0, 1.0));
-        ui.set_offsets(
-            label.id(),
-            Edges::new(pad.left, pad.top, -pad.right, -pad.bottom),
         );
         node
     }
@@ -459,7 +455,7 @@ mod tests {
         assert!(list
             .commands()
             .iter()
-            .any(|c| matches!(c, DrawCommand::FillRect { .. })));
+            .any(|c| matches!(c, DrawCommand::FillRoundedRect { .. })));
     }
 
     #[test]

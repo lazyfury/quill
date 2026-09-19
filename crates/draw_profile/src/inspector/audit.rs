@@ -105,6 +105,30 @@ pub fn inspect_draw_list(
                 check_radius(*radius, "stroke circle", report);
                 check_stroke_width(*width, "stroke circle", report);
             }
+            DrawCommand::FillRoundedRect { rect, radius, .. } => {
+                if check_rect(*rect, "fill rounded rect", report) && is_degenerate(*rect) {
+                    report.report(
+                        FindingCode::DegenerateRect,
+                        "fill rounded rect has zero/negative area",
+                    );
+                }
+                check_radius(*radius, "fill rounded rect", report);
+            }
+            DrawCommand::StrokeRoundedRect {
+                rect,
+                radius,
+                width,
+                ..
+            } => {
+                if check_rect(*rect, "stroke rounded rect", report) && is_degenerate(*rect) {
+                    report.report(
+                        FindingCode::DegenerateRect,
+                        "stroke rounded rect has zero/negative area",
+                    );
+                }
+                check_radius(*radius, "stroke rounded rect", report);
+                check_stroke_width(*width, "stroke rounded rect", report);
+            }
             DrawCommand::DrawImage {
                 destination,
                 source,

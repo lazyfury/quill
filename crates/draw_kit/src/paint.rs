@@ -1,8 +1,7 @@
-//! Backend-neutral drawing helpers used by the component library.
+//! Backend-neutral surface helpers used by the component library.
 //!
-//! The render IR has axis-aligned rects and circles but no rounded rect. We
-//! compose one out of non-overlapping rects and corner circles so translucent
-//! fills do not double-blend.
+//! Rounded rectangles are a first-class [`DrawCommand`](draw_render::DrawCommand)
+//! now, so surfaces map almost directly onto the IR.
 
 use draw_core::{Color, Rect, Vec2};
 use draw_render::PaintContext;
@@ -48,59 +47,37 @@ impl SurfaceStyle {
     }
 }
 
-/// Fills a rounded rectangle. `radius` is clamped to half the smaller side.
+/// Fills a rounded rectangle (radius is clamped by the backend).
 pub fn fill_rounded_rect(ctx: &mut PaintContext, rect: Rect, radius: f32, color: Color) {
     if color.is_transparent() || rect.size.width <= 0.0 || rect.size.height <= 0.0 {
         return;
     }
-    let r = radius
-        .max(0.0)
-        .min(rect.size.width * 0.5)
-        .min(rect.size.height * 0.5);
-    if r <= 0.0 {
-        ctx.fill_rect(rect, color);
-        return;
-    }
-
-    let (left, top) = (rect.left(), rect.top());
-    let (right, bottom) = (rect.right(), rect.bottom());
-
-    // Interior plus straight edges (no overlaps).
-    ctx.fill_rect(
-        Rect::from_min_max(Vec2::new(left + r, top), Vec2::new(right - r, bottom)),
-        color,
-    );
-    ctx.fill_rect(
-        Rect::from_min_max(Vec2::new(left, top + r), Vec2::new(left + r, bottom - r)),
-        color,
-    );
-    ctx.fill_rect(
-        Rect::from_min_max(Vec2::new(right - r, top + r), Vec2::new(right, bottom - r)),
-        color,
-    );
-    // Corner quarters.
-    for center in [
-        Vec2::new(left + r, top + r),
-        Vec2::new(right - r, top + r),
-        Vec2::new(left + r, bottom - r),
-        Vec2::new(right - r, bottom - r),
-    ] {
-        ctx.fill_circle(center, r, color);
-    }
+    ctx.fill_rounded_rect(rect, radius, color);
 }
 
-/// Draws a rounded surface (border first, then the inset fill).
+/// Draws a rounded surface: the fill fills the rect; the border is stroked
+/// just inside its bounds so it never bleeds outside the component.
 pub fn surface(ctx: &mut PaintContext, rect: Rect, style: &SurfaceStyle) {
     match style.border {
         Some(border) if style.border_width > 0.0 => {
-            fill_rounded_rect(ctx, rect, style.radius, border);
-            let inner = inset(rect, style.border_width);
-            if inner.size.width > 0.0 && inner.size.height > 0.0 {
-                fill_rounded_rect(
-                    ctx,
-                    inner,
-                    (style.radius - style.border_width).max(0.0),
-                    style.fill,
+            if !style.fill.is_transparent() {
+                let inner = inset(rect, style.border_width);
+                if inner.size.width > 0.0 && inner.size.height > 0.0 {
+                    ctx.fill_rounded_rect(
+                        inner,
+                        (style.radius - style.border_width).max(0.0),
+                        style.fill,
+                    );
+                }
+            }
+            let half = style.border_width * 0.5;
+            let outline = inset(rect, half);
+            if outline.size.width > 0.0 && outline.size.height > 0.0 {
+                ctx.stroke_rounded_rect(
+                    outline,
+                    (style.radius - half).max(0.0),
+                    style.border_width,
+                    border,
                 );
             }
         }
@@ -125,27 +102,20 @@ mod tests {
         Rect::from_min_max(Vec2::new(10.0, 20.0), Vec2::new(110.0, 60.0))
     }
 
-    #[test]
-    fn zero_radius_falls_back_to_plain_rect() {
-        let mut ctx = PaintContext::new();
-        fill_rounded_rect(&mut ctx, rect(), 0.0, Color::WHITE);
-        let list = ctx.into_draw_list();
-        assert_eq!(list.len(), 1);
-        assert!(matches!(list.commands()[0], DrawCommand::FillRect { .. }));
+    fn count(list: &draw_render::DrawList, f: impl Fn(&DrawCommand) -> bool) -> usize {
+        list.commands().iter().filter(|c| f(c)).count()
     }
 
     #[test]
-    fn rounded_fill_emits_rects_and_circles() {
+    fn rounded_fill_emits_one_command() {
         let mut ctx = PaintContext::new();
         fill_rounded_rect(&mut ctx, rect(), 6.0, Color::WHITE);
         let list = ctx.into_draw_list();
-        let circles = list
-            .commands()
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::FillCircle { .. }))
-            .count();
-        assert_eq!(circles, 4, "expected four corner circles");
-        assert!(list.len() > 4);
+        assert_eq!(list.len(), 1);
+        assert!(matches!(
+            list.commands()[0],
+            DrawCommand::FillRoundedRect { .. }
+        ));
     }
 
     #[test]
@@ -156,19 +126,30 @@ mod tests {
     }
 
     #[test]
-    fn surface_with_border_draws_border_and_inset_fill() {
+    fn surface_with_border_fills_inside_and_strokes_inside() {
         let mut ctx = PaintContext::new();
         let style = SurfaceStyle::new(Color::WHITE)
             .border(Color::BLACK)
             .radius(6.0);
         surface(&mut ctx, rect(), &style);
-        // Border pass (rounded) + fill pass (rounded) are both present.
-        let fills = ctx
-            .into_draw_list()
-            .commands()
-            .iter()
-            .filter(|c| matches!(c, DrawCommand::FillRect { .. }))
-            .count();
-        assert!(fills >= 6);
+        let list = ctx.into_draw_list();
+        assert_eq!(
+            count(&list, |c| matches!(c, DrawCommand::FillRoundedRect { .. })),
+            1
+        );
+        assert_eq!(
+            count(&list, |c| matches!(
+                c,
+                DrawCommand::StrokeRoundedRect { .. }
+            )),
+            1
+        );
+        // The stroke outline stays inside the surface bounds.
+        if let DrawCommand::StrokeRoundedRect { rect: outline, .. } = list.commands()[1] {
+            assert!(outline.left() >= rect().left());
+            assert!(outline.right() <= rect().right());
+        } else {
+            panic!("expected a rounded stroke");
+        }
     }
 }

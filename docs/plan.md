@@ -1,0 +1,75 @@
+# Plan
+
+Working roadmap for the design system (`draw_theme` + `draw_kit`), the drawing
+primitives, and the demo. Keep this short and move finished items to the
+"Done" section rather than deleting them.
+
+## Drawing primitives
+
+The render IR (`draw_render::DrawCommand`) is the backend-neutral surface. Keep
+it monochrome/solid-paint only until a real need appears.
+
+| Primitive | Status | Notes |
+|---|---|---|
+| `FillRect` / `StrokeRect` | done | axis-aligned |
+| `FillCircle` / `StrokeCircle` | done | tessellated fan / ring |
+| `FillRoundedRect` / `StrokeRoundedRect` | done | radius clamped to half the smaller side |
+| `Line` | planned | needed for dividers, diagrams, chart axes |
+| `Arc` / `Ellipse` | planned | spinners, progress rings, gauges |
+| `Path` (polyline/polygon) | planned | charts, icons, freeform shapes |
+| Rounded `ClipRect` | planned | rounded image masks / cards |
+| Gradients / patterns | later | `Paint` grows variants without changing command shapes |
+
+Every new primitive must be implemented in **all** backends
+(`draw_backend_canvas`, `draw_backend_wgpu`, `draw_backend_recording`) and
+audited by `draw_profile`'s inspector, or it is not "done".
+
+## Components (`draw_kit`)
+
+| Component | Status | Notes |
+|---|---|---|
+| `Text`, `Card`, `Divider`, `Badge`, `Button`, `CodeBlock`, `Terminal`, `EmptyState` | done | |
+| `Checkbox`, `Switch` | done | shared `Rc<Cell<_>>` state |
+| `Radio` / `RadioGroup` | next | same interaction layer as `Checkbox` |
+| `Tabs` | next | active indicator, keyboard focus |
+| `Input` / `TextArea` | next | placeholder, caret, selection, focus ring; needs core text editing or a Kit-owned editor |
+| `Select` / `Dropdown` | next | menu surface + selected state |
+| `Tooltip` | next | floating surface + delay |
+| `List` / `Table` | next | header row, column alignment, hover, selection |
+| `Toolbar` | next | grouped icon buttons + separators |
+| `Modal` / `Toast` | next | floating surface + scrim / transient surface |
+| `Progress`, `Spinner`, `Skeleton` | later | uses `Arc`/rounded primitives |
+| `ScrollView` | later | needs a clip + offset model |
+
+## Theme
+
+- `Theme` currently resolves at mount time; static surfaces/labels keep their
+  colors. Support a **runtime light/dark toggle** by resolving colors at paint
+  time (or remounting). `dynamic_surface` already resolves per frame.
+- Font weights are not modeled (no weight axis yet) — add `FontWeight` tokens
+  when the backends can render them.
+
+## Demo (`demos/demo_app`)
+
+- Light/dark toggle in the sidebar.
+- Scrollable note list (depends on `ScrollView`).
+- Keyboard navigation (arrow keys move list selection; `⌘K` command palette).
+- Command palette overlay using the `List`/`Input` components.
+
+## Invariants
+
+- The core (`draw_core`, `draw_scene`, `draw_render`, `draw_ui`) stays
+  backend-neutral; new layers only use public APIs.
+- API -> test -> implementation -> integration.
+- No screenshot/screen-recording verification; assert `DrawList` commands,
+  layout rects, callbacks and backend pixel buffers.
+- Run the per-stage gate before merging: `cargo fmt --all -- --check`,
+  `cargo check --workspace`, `cargo test --workspace`,
+  `cargo bench --workspace --no-run`.
+
+## Done
+
+- Rounded rectangles are first-class `DrawCommand`s; `draw_kit` surfaces use
+  them instead of composing circles + rects.
+- Centered button/badge text via centered flex labels (measurer-driven, so it
+  stays centered after a host injects a real font).

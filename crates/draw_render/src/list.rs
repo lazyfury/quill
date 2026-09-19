@@ -213,6 +213,31 @@ impl PaintContext {
         });
     }
 
+    /// Fills a rounded rectangle. `radius` is clamped to half the smaller side.
+    pub fn fill_rounded_rect(&mut self, rect: Rect, radius: f32, paint: impl Into<Paint>) {
+        self.commands.push(DrawCommand::FillRoundedRect {
+            rect,
+            radius,
+            paint: paint.into(),
+        });
+    }
+
+    /// Strokes a rounded rectangle (outer corner `radius`, stroke `width`).
+    pub fn stroke_rounded_rect(
+        &mut self,
+        rect: Rect,
+        radius: f32,
+        width: f32,
+        paint: impl Into<Paint>,
+    ) {
+        self.commands.push(DrawCommand::StrokeRoundedRect {
+            rect,
+            radius,
+            paint: paint.into(),
+            width,
+        });
+    }
+
     pub fn stroke_circle(
         &mut self,
         center: Vec2,
@@ -268,6 +293,23 @@ mod tests {
 
     fn rect(w: f32, h: f32) -> Rect {
         Rect::from_min_size(Vec2::ZERO, Size::new(w, h))
+    }
+
+    #[test]
+    fn rounded_rect_helpers_record_commands() {
+        let mut ctx = PaintContext::new();
+        ctx.fill_rounded_rect(rect(40.0, 24.0), 6.0, Color::WHITE);
+        ctx.stroke_rounded_rect(rect(40.0, 24.0), 6.0, 1.0, Color::BLACK);
+        let list = ctx.into_draw_list();
+        assert_eq!(list.len(), 2);
+        assert!(matches!(
+            list.commands()[0],
+            DrawCommand::FillRoundedRect { radius, .. } if (radius - 6.0).abs() < 1e-5
+        ));
+        assert!(matches!(
+            list.commands()[1],
+            DrawCommand::StrokeRoundedRect { width, .. } if (width - 1.0).abs() < 1e-5
+        ));
     }
 
     #[test]

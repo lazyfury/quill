@@ -153,6 +153,25 @@ impl Canvas2dBackend {
                 self.path_circle(*center, *radius);
                 self.ctx.stroke();
             }
+            DrawCommand::FillRoundedRect {
+                rect,
+                radius,
+                paint,
+            } => {
+                self.set_fill(paint);
+                self.path_rounded_rect(*rect, *radius);
+                self.ctx.fill();
+            }
+            DrawCommand::StrokeRoundedRect {
+                rect,
+                radius,
+                paint,
+                width,
+            } => {
+                self.set_stroke(paint, *width);
+                self.path_rounded_rect(*rect, *radius);
+                self.ctx.stroke();
+            }
             DrawCommand::DrawImage {
                 texture,
                 destination,
@@ -216,6 +235,37 @@ impl Canvas2dBackend {
             0.0,
             std::f64::consts::TAU,
         );
+    }
+
+    /// Builds a rounded-rectangle path with four quarter-circle corners.
+    fn path_rounded_rect(&self, rect: draw_core::Rect, radius: f32) {
+        let r = radius
+            .max(0.0)
+            .min(rect.size.width * 0.5)
+            .min(rect.size.height * 0.5) as f64;
+        let (left, top) = (rect.left() as f64, rect.top() as f64);
+        let (right, bottom) = (rect.right() as f64, rect.bottom() as f64);
+        let half_pi = std::f64::consts::FRAC_PI_2;
+
+        self.ctx.begin_path();
+        if r <= 0.0 {
+            self.ctx.rect(left, top, right - left, bottom - top);
+            return;
+        }
+        self.ctx.move_to(left + r, top);
+        self.ctx.line_to(right - r, top);
+        let _ = self.ctx.arc(right - r, top + r, r, -half_pi, 0.0);
+        self.ctx.line_to(right, bottom - r);
+        let _ = self.ctx.arc(right - r, bottom - r, r, 0.0, half_pi);
+        self.ctx.line_to(left + r, bottom);
+        let _ = self
+            .ctx
+            .arc(left + r, bottom - r, r, half_pi, 2.0 * half_pi);
+        self.ctx.line_to(left, top + r);
+        let _ = self
+            .ctx
+            .arc(left + r, top + r, r, 2.0 * half_pi, 3.0 * half_pi);
+        self.ctx.close_path();
     }
 }
 

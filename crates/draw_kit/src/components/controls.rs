@@ -297,12 +297,19 @@ mod tests {
         let mut ctx = draw_render::PaintContext::new();
         kit.paint_foreground(&ui, &mut ctx);
         let list = ctx.into_draw_list();
-        let circles = list
+        let rounded = list
             .commands()
             .iter()
-            .filter(|c| matches!(c, DrawCommand::FillCircle { .. }))
+            .filter(|c| matches!(c, DrawCommand::FillRoundedRect { .. }))
             .count();
-        assert_eq!(circles, 12, "border + fill + check mark corner circles");
+        // The box fill plus the inner check mark.
+        assert_eq!(rounded, 2, "box fill and check mark are rounded rects");
+        let strokes = list
+            .commands()
+            .iter()
+            .filter(|c| matches!(c, DrawCommand::StrokeRoundedRect { .. }))
+            .count();
+        assert_eq!(strokes, 1, "box border is a rounded stroke");
     }
 
     #[test]
@@ -332,13 +339,17 @@ mod tests {
         assert!(ui.control(switch.id()).is_some());
         let mut ctx = draw_render::PaintContext::new();
         kit.paint_foreground(&ui, &mut ctx);
-        let circles = ctx
-            .into_draw_list()
+        let list = ctx.into_draw_list();
+        let circles = list
             .commands()
             .iter()
             .filter(|c| matches!(c, DrawCommand::FillCircle { .. }))
             .count();
-        // Border + fill corner circles for the track, plus the knob.
-        assert_eq!(circles, 9);
+        // Only the knob is a circle now; the track is a rounded surface.
+        assert_eq!(circles, 1);
+        assert!(list
+            .commands()
+            .iter()
+            .any(|c| matches!(c, DrawCommand::FillRoundedRect { .. })));
     }
 }

@@ -92,6 +92,20 @@ pub enum DrawCommand {
         paint: Paint,
         width: f32,
     },
+    /// A filled rounded rectangle. `radius` is clamped to half the smaller side.
+    FillRoundedRect {
+        rect: Rect,
+        radius: f32,
+        paint: Paint,
+    },
+    /// A stroked rounded rectangle. `width` is the stroke thickness; `radius`
+    /// refers to the outer corners and is clamped to half the smaller side.
+    StrokeRoundedRect {
+        rect: Rect,
+        radius: f32,
+        paint: Paint,
+        width: f32,
+    },
     DrawImage {
         texture: TextureId,
         /// Destination rectangle in the current transform space.

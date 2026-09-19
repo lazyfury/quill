@@ -154,6 +154,7 @@ Then emit the report and stop for approval.
 | Backends (Canvas / wgpu / recording), adding a backend, browser boundary | `docs/backend.md` |
 | Controls, layout, components | `docs/components.md` |
 | Design tokens, theme, component library | `docs/design-system.md` |
+| Roadmap / remaining primitives & components | `docs/plan.md` |
 | Profiler + debug overlays | `docs/debug.md` |
 | Benchmarks & regression baselines | `docs/benchmarking.md` |
 | Test layers, no-screenshot rule | `docs/testing.md` |

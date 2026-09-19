@@ -89,7 +89,7 @@ fn style_guide_renders_surfaces_borders_text_and_indicators() {
 
     assert!(commands
         .iter()
-        .any(|c| matches!(c, DrawCommand::FillRect { .. })));
+        .any(|c| matches!(c, DrawCommand::FillRoundedRect { .. })));
     assert!(commands
         .iter()
         .any(|c| matches!(c, DrawCommand::FillCircle { .. })));

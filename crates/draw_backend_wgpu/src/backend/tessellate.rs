@@ -54,6 +54,23 @@ impl WgpuBackend {
                 let color = self.solid_color(paint);
                 self.stroke_circle(*center, *radius, *width, color);
             }
+            DrawCommand::FillRoundedRect {
+                rect,
+                radius,
+                paint,
+            } => {
+                let color = self.solid_color(paint);
+                self.fill_rounded_rect(*rect, *radius, color);
+            }
+            DrawCommand::StrokeRoundedRect {
+                rect,
+                radius,
+                paint,
+                width,
+            } => {
+                let color = self.solid_color(paint);
+                self.stroke_rounded_rect(*rect, *radius, *width, color);
+            }
             DrawCommand::DrawImage {
                 texture,
                 destination,
@@ -250,6 +267,76 @@ impl WgpuBackend {
         self.finish(geometry, Surface::Solid);
     }
 
+    /// Tessellates a filled rounded rectangle as a triangle fan around its
+    /// center (the shape is convex).
+    pub(super) fn fill_rounded_rect(&mut self, rect: Rect, radius: f32, color: [f32; 4]) {
+        if rect.is_empty() {
+            return;
+        }
+        let Some(geometry) = self.begin() else {
+            return;
+        };
+        let points = rounded_rect_points(rect, radius);
+        let center = rect.center();
+        for index in 0..points.len() {
+            let next = (index + 1) % points.len();
+            self.push_vertex(center, [0.5, 0.5], color);
+            self.push_vertex(points[index], [0.5, 0.5], color);
+            self.push_vertex(points[next], [0.5, 0.5], color);
+        }
+        self.finish(geometry, Surface::Solid);
+    }
+
+    /// Tessellates a stroked rounded rectangle as a ring between the outer and
+    /// inset polygons.
+    pub(super) fn stroke_rounded_rect(
+        &mut self,
+        rect: Rect,
+        radius: f32,
+        width: f32,
+        color: [f32; 4],
+    ) {
+        if width <= 0.0 || rect.is_empty() {
+            return;
+        }
+        let outer = rounded_rect_points(rect, radius);
+        let center = rect.center();
+        let inner_rect = Rect::from_min_max(
+            Vec2::new(
+                (rect.left() + width).min(center.x),
+                (rect.top() + width).min(center.y),
+            ),
+            Vec2::new(
+                (rect.right() - width).max(center.x),
+                (rect.bottom() - width).max(center.y),
+            ),
+        );
+        if inner_rect.is_empty() {
+            self.fill_rounded_rect(rect, radius, color);
+            return;
+        }
+        let inner = rounded_rect_points(inner_rect, (radius - width).max(0.0));
+        if outer.len() != inner.len() {
+            self.fill_rounded_rect(rect, radius, color);
+            return;
+        }
+        let Some(geometry) = self.begin() else {
+            return;
+        };
+        for index in 0..outer.len() {
+            let next = (index + 1) % outer.len();
+            let (o0, o1) = (outer[index], outer[next]);
+            let (i0, i1) = (inner[index], inner[next]);
+            self.push_vertex(o0, [0.5, 0.5], color);
+            self.push_vertex(i0, [0.5, 0.5], color);
+            self.push_vertex(i1, [0.5, 0.5], color);
+            self.push_vertex(o0, [0.5, 0.5], color);
+            self.push_vertex(i1, [0.5, 0.5], color);
+            self.push_vertex(o1, [0.5, 0.5], color);
+        }
+        self.finish(geometry, Surface::Solid);
+    }
+
     pub(super) fn image_uv(&self, texture: TextureId, source: Option<Rect>) -> Option<[f32; 4]> {
         let &(width, height) = self.texture_sizes.get(&texture)?;
         if width == 0 || height == 0 {
@@ -320,4 +407,44 @@ pub(super) fn circle_point(center: Vec2, radius: f32, angle: f32) -> Vec2 {
         center.x + angle.cos() * radius,
         center.y + angle.sin() * radius,
     )
+}
+
+/// Segments per rounded corner (kept small; UI radii are a few pixels).
+const CORNER_SEGMENTS: usize = 5;
+
+/// Polygon outline of a rounded rectangle, clockwise in y-down space.
+///
+/// Consecutive points are joined by straight edges, so the four straight sides
+/// fall out of connecting one corner's last point to the next corner's first.
+fn rounded_rect_points(rect: Rect, radius: f32) -> Vec<Vec2> {
+    let min = rect.min();
+    let max = rect.max();
+    if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
+        return Vec::new();
+    }
+    let r = radius
+        .max(0.0)
+        .min(rect.size.width * 0.5)
+        .min(rect.size.height * 0.5);
+    if r <= 0.0 {
+        return vec![min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
+    }
+
+    let half_pi = std::f32::consts::FRAC_PI_2;
+    let pi = std::f32::consts::PI;
+    let corners = [
+        (Vec2::new(min.x + r, min.y + r), pi, pi + half_pi),
+        (Vec2::new(max.x - r, min.y + r), pi + half_pi, pi * 2.0),
+        (Vec2::new(max.x - r, max.y - r), 0.0, half_pi),
+        (Vec2::new(min.x + r, max.y - r), half_pi, pi),
+    ];
+
+    let mut points = Vec::with_capacity(CORNER_SEGMENTS * corners.len() + 1);
+    for (center, start, end) in corners {
+        for step in 0..=CORNER_SEGMENTS {
+            let t = start + (end - start) * (step as f32 / CORNER_SEGMENTS as f32);
+            points.push(circle_point(center, r, t));
+        }
+    }
+    points
 }
