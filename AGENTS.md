@@ -41,7 +41,7 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 
 - [x] Stage 0 — workspace skeleton
 - [x] Stage 1 — core types / math
-- [ ] Stage 2 — SceneTree / Node / CanvasItem
+- [x] Stage 2 — SceneTree / Node / CanvasItem
 - [ ] Stage 3 — DrawList / render IR
 - [ ] Stage 4 — RecordingBackend / headless tests
 - [ ] Stage 5 — Canvas2D backend + WASM
@@ -68,3 +68,12 @@ Then emit the fixed report format and stop for approval.
 Conventions: origin top-left, +X right, +Y down, logical pixels, radians,
 positive rotation +X -> +Y. Rect membership is half-open `[min, max)`.
 DPR never enters core: `Viewport::device_size(scale)` is a pure helper.
+
+## Scene (Stage 2, `draw_scene`)
+
+`SceneTree` arena over `Node` + `NodeId`. `NodeKind::{Node, Node2D}`; `Node2D`
+owns a `CanvasItem` (local transform, visibility, z-index). `SceneTree::update()`
+derives `world_transform` / `world_visible` using `DirtyFlags` (returns number of
+recomputed transforms; 0 when clean). Child lists are kept sorted by
+`(z_index, creation order)` for deterministic traversal. Transform propagation:
+`world = parent_world * local`.

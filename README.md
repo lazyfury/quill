@@ -25,7 +25,7 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 1 (core types / math). Public API surfaces are intentionally empty; they
+Stage 2 (SceneTree / Node / CanvasItem). Public API surfaces are intentionally empty; they
 are filled in one stage at a time. See the stage checklist in `AGENTS.md`.
 
 ## Build & test

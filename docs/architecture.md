@@ -37,7 +37,7 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 
 - Stage 0 — workspace skeleton
 - Stage 1 — core types / math (`Vec2`, `Rect`, `Transform2D`, `Color`, `NodeId`) [done]
-- Stage 2 — `SceneTree` / `Node` / `CanvasItem` / `Node2D`
+- Stage 2 — `SceneTree` / `Node` / `CanvasItem` / `Node2D` [done]
 - Stage 3 — `DrawList` / render IR
 - Stage 4 — `RecordingBackend` / headless pipeline
 - Stage 5 — Canvas 2D backend + WASM

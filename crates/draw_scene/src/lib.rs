@@ -1,10 +1,24 @@
-//! `draw_scene` — scene tree: `Node`, `SceneTree`, `CanvasItem`, `Node2D`.
+//! `draw_scene` — the scene tree: [`Node`], [`SceneTree`], [`CanvasItem`] and
+//! `Node2D` (via [`NodeKind::Node2D`]).
 //!
-//! May depend on `draw_core`. Must not depend on `draw_render` or any browser API.
-//! Concrete types arrive in Stage 2.
+//! May depend on `draw_core`. Must not depend on `draw_render` or any browser
+//! API, so the whole scene graph stays testable with native `cargo test`.
+//!
+//! # Model
+//!
+//! Nodes live in a [`SceneTree`] arena and are addressed by [`draw_core::NodeId`].
+//! A `Node2D` carries a [`CanvasItem`] with a local [`draw_core::Transform2D`],
+//! visibility and z-index. [`SceneTree::update`] walks the tree once and derives
+//! `world_transform` / `world_visible`, using [`DirtyFlags`] to skip clean nodes.
 
-/// Crate name, used by Stage 0 smoke tests.
+/// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_scene";
+
+mod node;
+mod tree;
+
+pub use node::{CanvasItem, DirtyFlags, Node, NodeKind};
+pub use tree::{PreorderIter, SceneTree};
 
 #[cfg(test)]
 mod tests {
