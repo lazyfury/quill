@@ -252,8 +252,10 @@ Additive, outside the frozen core where possible.
 
 - Sprites/textures: `Sprite2D` (or `Visual::Image`) with atlas / animation /
   flip / 9-slice; texture registration already exists in the backends.
-- Primitives: `Line` / `Path` / `Arc` / `Ellipse` in all three backends +
-  inspector.
+- Primitives: `Path` / `Arc` / `Ellipse` in all three backends + inspector.
+  (`Line` landed early in Stage 25.12: `DrawCommand::Line { from, to, paint,
+  width }` + `PaintContext::draw_line`, Canvas/wgpu/recording, and `Divider`/
+  column separators now use it.)
 - Collision: basic AABB / circle queries and `Area` triggers first; rigid bodies
   later (needs rule 5 relaxed — done in this stage).
 - Timers / tweens / lightweight signals.

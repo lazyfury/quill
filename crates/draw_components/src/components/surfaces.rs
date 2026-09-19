@@ -159,12 +159,31 @@ impl Component for Divider {
 
     fn prepare(&mut self) {
         let color = self.color.unwrap_or(self.theme.palette.border_subtle);
-        self.spec.data.min_size = if self.vertical {
+        let vertical = self.vertical;
+        self.spec.data.min_size = if vertical {
             Size::new(1.0, 0.0)
         } else {
             Size::new(0.0, 1.0)
         };
-        self.spec.background = Some(Box::new(move |_| SurfaceStyle::new(color)));
+        // A real 1px line (not a filled rect), drawn along the node's center so
+        // it lands on a device-pixel edge.
+        self.spec.foreground = Some(Box::new(move |ctx, rect, _| {
+            if vertical {
+                ctx.draw_line(
+                    Vec2::new(rect.center().x, rect.top()),
+                    Vec2::new(rect.center().x, rect.bottom()),
+                    1.0,
+                    color,
+                );
+            } else {
+                ctx.draw_line(
+                    Vec2::new(rect.left(), rect.center().y),
+                    Vec2::new(rect.right(), rect.center().y),
+                    1.0,
+                    color,
+                );
+            }
+        }));
     }
 }
 

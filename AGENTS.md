@@ -187,6 +187,9 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       `SceneTree::add_child`; `draw_app::Component` carries a `Spec` and exposes
       modifiers as methods; `draw_components` components take the `Theme` as a
       `Copy` value; the theme is no longer stored on the tree.
+      **Stage 25.12 (`Line` primitive):** `DrawCommand::Line { from, to, paint,
+      width }` + `PaintContext::draw_line`, implemented in Canvas / wgpu /
+      recording; `Divider` and column separators draw a real line.
 
 ## Per-stage gate (must run)
 

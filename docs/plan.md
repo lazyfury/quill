@@ -21,7 +21,7 @@ it monochrome/solid-paint only until a real need appears.
 | `FillRect` / `StrokeRect` | done | axis-aligned |
 | `FillCircle` / `StrokeCircle` | done | tessellated fan / ring |
 | `FillRoundedRect` / `StrokeRoundedRect` | done | radius clamped to half the smaller side |
-| `Line` | planned | needed for dividers, diagrams, chart axes |
+| `Line` | done | `from`/`to`/`width`; square caps; thin quad on wgpu |
 | `Arc` / `Ellipse` | planned | spinners, progress rings, gauges |
 | `Path` (polyline/polygon) | planned | charts, icons, freeform shapes |
 | Rounded `ClipRect` | planned | rounded image masks / cards |
@@ -119,6 +119,10 @@ The layout cache, GUI interaction state and text measurer live on the root; the
 
 ## Done
 
+- `Line` primitive: `DrawCommand::Line { from, to, paint, width }` +
+  `PaintContext::draw_line`, implemented in Canvas (`moveTo`/`lineTo`/`stroke`),
+  wgpu (thin quad) and recording. `Divider`/column separators now draw a real
+  line instead of a filled rect; the profiler audits line geometry.
 - Component-native composition (Stage 25): `SceneTree::add_child` is the single
   attachment point and every `draw_app::Component` supports `.child()` and the
   other modifiers directly. The `View`/`ViewExt`/`BuildContext`/`Modify` layer

@@ -91,6 +91,13 @@ pub fn inspect_draw_list(
                 }
                 check_stroke_width(*width, "stroke rect", report);
             }
+            DrawCommand::Line {
+                from, to, width, ..
+            } => {
+                check_vec(*from, "line start", report);
+                check_vec(*to, "line end", report);
+                check_stroke_width(*width, "line", report);
+            }
             DrawCommand::FillCircle { center, radius, .. } => {
                 check_vec(*center, "circle center", report);
                 check_radius(*radius, "fill circle", report);

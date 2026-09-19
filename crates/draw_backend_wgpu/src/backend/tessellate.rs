@@ -37,6 +37,15 @@ impl WgpuBackend {
                 let color = self.solid_color(paint);
                 self.stroke_rect(*rect, *width, color);
             }
+            DrawCommand::Line {
+                from,
+                to,
+                paint,
+                width,
+            } => {
+                let color = self.solid_color(paint);
+                self.line(*from, *to, *width, color);
+            }
             DrawCommand::FillCircle {
                 center,
                 radius,
@@ -220,6 +229,30 @@ impl WgpuBackend {
             color,
             Surface::Solid,
         );
+    }
+
+    /// Tessellates a line segment as a thin quad with square caps. A degenerate
+    /// segment (zero length) is drawn as a small dot so round joins/caps stay
+    /// visible.
+    pub(super) fn line(&mut self, from: Vec2, to: Vec2, width: f32, color: [f32; 4]) {
+        if width <= 0.0 {
+            return;
+        }
+        let direction = to - from;
+        let length = direction.length();
+        if length <= f32::EPSILON {
+            self.fill_circle(from, width * 0.5, color);
+            return;
+        }
+        let normal = Vec2::new(-direction.y, direction.x) / length * (width * 0.5);
+        let Some(geometry) = self.begin() else {
+            return;
+        };
+        let corners = [from + normal, from - normal, to - normal, to + normal];
+        for index in [0usize, 1, 2, 0, 2, 3] {
+            self.push_vertex(corners[index], [0.5, 0.5], color);
+        }
+        self.finish(geometry, Surface::Solid);
     }
 
     pub(super) fn fill_circle(&mut self, center: Vec2, radius: f32, color: [f32; 4]) {

@@ -205,6 +205,22 @@ impl PaintContext {
         });
     }
 
+    /// Strokes a line segment from `from` to `to`, `width` logical pixels wide.
+    pub fn draw_line(
+        &mut self,
+        from: draw_core::Vec2,
+        to: draw_core::Vec2,
+        width: f32,
+        paint: impl Into<Paint>,
+    ) {
+        self.commands.push(DrawCommand::Line {
+            from,
+            to,
+            paint: paint.into(),
+            width,
+        });
+    }
+
     pub fn fill_circle(&mut self, center: Vec2, radius: f32, paint: impl Into<Paint>) {
         self.commands.push(DrawCommand::FillCircle {
             center,
@@ -342,6 +358,22 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert!(matches!(list.commands()[0], DrawCommand::FillRect { .. }));
         assert!(matches!(list.commands()[1], DrawCommand::StrokeRect { .. }));
+    }
+
+    #[test]
+    fn draw_line_records_endpoints_width_and_paint() {
+        let mut ctx = PaintContext::new();
+        ctx.draw_line(Vec2::new(1.0, 2.0), Vec2::new(3.0, 4.0), 2.0, Color::BLUE);
+        let list = ctx.into_draw_list();
+        assert_eq!(
+            list.commands(),
+            &[DrawCommand::Line {
+                from: Vec2::new(1.0, 2.0),
+                to: Vec2::new(3.0, 4.0),
+                paint: Paint::new(Color::BLUE),
+                width: 2.0,
+            }]
+        );
     }
 
     #[test]

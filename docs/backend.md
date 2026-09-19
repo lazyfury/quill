@@ -32,6 +32,7 @@ begin_frame(ViewportSize) -> submit(&DrawList) (0..n) -> end_frame()
 | `SetOpacity` | `ctx.globalAlpha` |
 | `ClipRect` | `beginPath` + `rect` + `clip` |
 | `FillRect` / `StrokeRect` | `fillRect` / `strokeRect` |
+| `Line` | `beginPath` + `moveTo` + `lineTo` + `stroke` |
 | `FillCircle` / `StrokeCircle` | `arc` + `fill` / `stroke` |
 | `DrawImage` | `drawImage` with a registered `TextureId` |
 | `DrawText` | `font` + `textAlign` + `fillText` |
@@ -42,12 +43,12 @@ object ever appears in `draw_core` / `draw_scene` / `draw_ui` / `draw_render`.
 `DrawText` positions are baselines. `draw_backend_canvas::font_spec` is the
 single font spec the backend draws with; `draw_wasm::CanvasTextMeasurer` measures
 with the same spec (`measureText`, whole runs for shaping/kerning) and is
-injected via `Ui::set_text_measurer`, so layout ascents, run widths and painted
-baselines agree.
+injected via `draw_ui::set_text_measurer`, so layout ascents, run widths and
+painted baselines agree.
 
 The runner also reflects hover feedback: `App::pointer_cursor` (usually
-`Ui::hovered_is_button` or `Ui::is_interactive`) drives the canvas CSS `cursor`
-property (`pointer` / `default`).
+`draw_app::hovered_is_button` or `draw_app::is_interactive`) drives the canvas
+CSS `cursor` property (`pointer` / `default`).
 
 ## Recording (`draw_backend_recording`)
 
@@ -74,8 +75,9 @@ the GPU pass is a single textured-triangle pipeline (`src/shader.wgsl`):
   folded into the vertex color's alpha.
 - `ClipRect` (viewport/logical space) becomes a per-draw scissor rectangle,
   converted to device pixels and clamped to the target.
-- `FillRect` / `StrokeRect` / `FillCircle` / `StrokeCircle` tessellate into
-  triangles and sample a 1x1 white texture.
+- `FillRect` / `StrokeRect` / `Line` / `FillCircle` / `StrokeCircle` tessellate
+  into triangles and sample a 1x1 white texture. `Line` becomes a thin quad
+  with square caps.
 - `DrawImage` samples a texture registered with `WgpuBackend::register_texture`
   (destination and optional source sub-rect map to UVs).
 - `DrawText` uses a real font loaded at startup with `ab_glyph` (`QUILL_FONT`

@@ -404,12 +404,21 @@ fn thumb(size: f32, theme: Theme, shade: f32) -> Panel {
         })
 }
 
-fn separator_view(theme: Theme, x: f32) -> Panel {
-    Panel::new()
-        .color(theme.palette.border_subtle)
-        .flat()
+/// A 1px vertical column separator, drawn as a real line primitive.
+fn separator_view(theme: Theme, x: f32) -> Flex {
+    Flex::new()
+        .padding(Edges::ZERO)
         .anchors(Edges::new(0.0, 0.0, 0.0, 1.0))
         .offsets(Edges::new(x, 0.0, x + 1.0, 0.0))
+        .foreground(move |ctx, rect, _| {
+            let center = rect.center().x;
+            ctx.draw_line(
+                Vec2::new(center, rect.top()),
+                Vec2::new(center, rect.bottom()),
+                1.0,
+                theme.palette.border_subtle,
+            );
+        })
 }
 
 fn nav_row_view(theme: Theme, label: &str, index: usize, selected: &Rc<Cell<usize>>) -> Row {

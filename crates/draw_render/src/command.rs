@@ -146,6 +146,13 @@ pub enum DrawCommand {
         paint: Paint,
         width: f32,
     },
+    /// A stroked line segment from `from` to `to`, `width` logical pixels wide.
+    Line {
+        from: Vec2,
+        to: Vec2,
+        paint: Paint,
+        width: f32,
+    },
     FillCircle {
         center: Vec2,
         radius: f32,

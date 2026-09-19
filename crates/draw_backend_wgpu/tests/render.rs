@@ -211,6 +211,26 @@ fn stroke_rect_outline_leaves_the_center_empty() {
 }
 
 #[test]
+fn line_covers_its_segment_but_not_the_sides() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_line(
+        Vec2::new(4.0, 16.0),
+        Vec2::new(28.0, 16.0),
+        2.0,
+        Color::WHITE,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 16, 16, [255, 255, 255, 255]); // on the segment
+    assert_pixel(&pixels, 16, 4, [0, 0, 0, 0]); // above it
+    assert_pixel(&pixels, 2, 16, [0, 0, 0, 0]); // before the start
+}
+
+#[test]
 fn rounded_rect_fills_the_center_but_not_the_corner() {
     let Some(mut backend) = backend() else {
         return;

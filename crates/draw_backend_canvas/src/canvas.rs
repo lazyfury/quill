@@ -142,6 +142,18 @@ impl Canvas2dBackend {
                     rect.size.height as f64,
                 );
             }
+            DrawCommand::Line {
+                from,
+                to,
+                paint,
+                width,
+            } => {
+                self.set_stroke(paint, *width);
+                self.ctx.begin_path();
+                self.ctx.move_to(from.x as f64, from.y as f64);
+                self.ctx.line_to(to.x as f64, to.y as f64);
+                self.ctx.stroke();
+            }
             DrawCommand::FillCircle {
                 center,
                 radius,
