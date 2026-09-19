@@ -9,7 +9,7 @@
 
 use draw_backend_wgpu::{wgpu, FontConfig, FontMode, PixelBuffer, WgpuBackend};
 use draw_core::{Color, Rect, Size, Vec2, Viewport};
-use draw_render::{Paint, PaintContext, RenderBackend, TextAlign, TextureId};
+use draw_render::{CornerRadii, Paint, PaintContext, RenderBackend, TextAlign, TextureId};
 
 /// Attempts to create a backend; `None` means "skip, no GPU adapter".
 fn backend() -> Option<WgpuBackend> {
@@ -227,6 +227,26 @@ fn rounded_rect_fills_the_center_but_not_the_corner() {
     assert_pixel(&pixels, 16, 16, [255, 0, 0, 255]); // center
     assert_pixel(&pixels, 16, 5, [255, 0, 0, 255]); // top edge
     assert_pixel(&pixels, 4, 4, [0, 0, 0, 0]); // rounded-away corner
+}
+
+#[test]
+fn rounded_rect_supports_mixed_corners() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+
+    let mut ctx = PaintContext::new();
+    ctx.fill_rounded_rect_corners(
+        Rect::from_min_size(Vec2::new(4.0, 4.0), Size::splat(24.0)),
+        CornerRadii::new(0.0, 8.0, 8.0, 0.0),
+        Color::RED,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 4, 4, [255, 0, 0, 255]); // square top-left
+    assert_pixel(&pixels, 4, 27, [255, 0, 0, 255]); // square bottom-left
+    assert_pixel(&pixels, 27, 4, [0, 0, 0, 0]); // rounded top-right
+    assert_pixel(&pixels, 27, 27, [0, 0, 0, 0]); // rounded bottom-right
 }
 
 #[test]

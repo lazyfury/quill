@@ -5,7 +5,7 @@ use super::finding::{FindingCode, Severity};
 use super::report::{InspectionConfig, InspectionReport};
 use crate::stats::FrameStats;
 use draw_core::{Rect, Transform2D, Vec2};
-use draw_render::{DrawCommand, DrawList};
+use draw_render::{CornerRadii, DrawCommand, DrawList};
 
 /// Inspects `list` and `stats` with the default [`InspectionConfig`].
 pub fn inspect(list: &DrawList, stats: &FrameStats) -> InspectionReport {
@@ -105,18 +105,18 @@ pub fn inspect_draw_list(
                 check_radius(*radius, "stroke circle", report);
                 check_stroke_width(*width, "stroke circle", report);
             }
-            DrawCommand::FillRoundedRect { rect, radius, .. } => {
+            DrawCommand::FillRoundedRect { rect, corners, .. } => {
                 if check_rect(*rect, "fill rounded rect", report) && is_degenerate(*rect) {
                     report.report(
                         FindingCode::DegenerateRect,
                         "fill rounded rect has zero/negative area",
                     );
                 }
-                check_radius(*radius, "fill rounded rect", report);
+                check_corner_radii(*corners, "fill rounded rect", report);
             }
             DrawCommand::StrokeRoundedRect {
                 rect,
-                radius,
+                corners,
                 width,
                 ..
             } => {
@@ -126,7 +126,7 @@ pub fn inspect_draw_list(
                         "stroke rounded rect has zero/negative area",
                     );
                 }
-                check_radius(*radius, "stroke rounded rect", report);
+                check_corner_radii(*corners, "stroke rounded rect", report);
                 check_stroke_width(*width, "stroke rounded rect", report);
             }
             DrawCommand::DrawImage {
@@ -271,6 +271,24 @@ fn check_radius(radius: f32, what: &str, report: &mut InspectionReport) {
             FindingCode::DegenerateCircle,
             format!("{what} radius {radius} is not positive"),
         );
+    }
+}
+
+/// Rounded-rect corners may be zero (square); only non-finite or negative
+/// values are findings.
+fn check_corner_radii(corners: CornerRadii, what: &str, report: &mut InspectionReport) {
+    for (label, value) in [
+        ("top-left", corners.top_left),
+        ("top-right", corners.top_right),
+        ("bottom-right", corners.bottom_right),
+        ("bottom-left", corners.bottom_left),
+    ] {
+        if !value.is_finite() || value < 0.0 {
+            report.report(
+                FindingCode::NonFiniteGeometry,
+                format!("{what} {label} radius {value} is not a non-negative number"),
+            );
+        }
     }
 }
 

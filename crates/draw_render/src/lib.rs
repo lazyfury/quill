@@ -22,7 +22,7 @@ mod list;
 mod texture;
 
 pub use backend::RenderBackend;
-pub use command::{DrawCommand, Paint, TextAlign};
+pub use command::{CornerRadii, DrawCommand, Paint, TextAlign};
 pub use list::{DrawList, PaintContext};
 pub use texture::TextureId;
 

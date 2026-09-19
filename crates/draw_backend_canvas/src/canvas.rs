@@ -4,7 +4,7 @@ use std::fmt;
 use web_sys::{CanvasRenderingContext2d, HtmlImageElement};
 
 use draw_core::{Color, Transform2D, Viewport};
-use draw_render::{DrawCommand, DrawList, Paint, RenderBackend, TextAlign, TextureId};
+use draw_render::{CornerRadii, DrawCommand, DrawList, Paint, RenderBackend, TextAlign, TextureId};
 
 /// Errors from the Canvas 2D backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,21 +155,21 @@ impl Canvas2dBackend {
             }
             DrawCommand::FillRoundedRect {
                 rect,
-                radius,
+                corners,
                 paint,
             } => {
                 self.set_fill(paint);
-                self.path_rounded_rect(*rect, *radius);
+                self.path_rounded_rect(*rect, *corners);
                 self.ctx.fill();
             }
             DrawCommand::StrokeRoundedRect {
                 rect,
-                radius,
+                corners,
                 paint,
                 width,
             } => {
                 self.set_stroke(paint, *width);
-                self.path_rounded_rect(*rect, *radius);
+                self.path_rounded_rect(*rect, *corners);
                 self.ctx.stroke();
             }
             DrawCommand::DrawImage {
@@ -237,34 +237,42 @@ impl Canvas2dBackend {
         );
     }
 
-    /// Builds a rounded-rectangle path with four quarter-circle corners.
-    fn path_rounded_rect(&self, rect: draw_core::Rect, radius: f32) {
-        let r = radius
-            .max(0.0)
-            .min(rect.size.width * 0.5)
-            .min(rect.size.height * 0.5) as f64;
+    /// Builds a rounded-rectangle path with per-corner quarter-circle corners.
+    fn path_rounded_rect(&self, rect: draw_core::Rect, corners: CornerRadii) {
+        let half_pi = std::f64::consts::FRAC_PI_2;
         let (left, top) = (rect.left() as f64, rect.top() as f64);
         let (right, bottom) = (rect.right() as f64, rect.bottom() as f64);
-        let half_pi = std::f64::consts::FRAC_PI_2;
+        let max = (rect.size.width * 0.5).min(rect.size.height * 0.5);
+        let radii = corners.clamp(max);
+        let (tl, tr, br, bl) = (
+            radii.top_left as f64,
+            radii.top_right as f64,
+            radii.bottom_right as f64,
+            radii.bottom_left as f64,
+        );
 
         self.ctx.begin_path();
-        if r <= 0.0 {
-            self.ctx.rect(left, top, right - left, bottom - top);
-            return;
+        self.ctx.move_to(left + tl, top);
+        self.ctx.line_to(right - tr, top);
+        if tr > 0.0 {
+            let _ = self.ctx.arc(right - tr, top + tr, tr, -half_pi, 0.0);
         }
-        self.ctx.move_to(left + r, top);
-        self.ctx.line_to(right - r, top);
-        let _ = self.ctx.arc(right - r, top + r, r, -half_pi, 0.0);
-        self.ctx.line_to(right, bottom - r);
-        let _ = self.ctx.arc(right - r, bottom - r, r, 0.0, half_pi);
-        self.ctx.line_to(left + r, bottom);
-        let _ = self
-            .ctx
-            .arc(left + r, bottom - r, r, half_pi, 2.0 * half_pi);
-        self.ctx.line_to(left, top + r);
-        let _ = self
-            .ctx
-            .arc(left + r, top + r, r, 2.0 * half_pi, 3.0 * half_pi);
+        self.ctx.line_to(right, bottom - br);
+        if br > 0.0 {
+            let _ = self.ctx.arc(right - br, bottom - br, br, 0.0, half_pi);
+        }
+        self.ctx.line_to(left + bl, bottom);
+        if bl > 0.0 {
+            let _ = self
+                .ctx
+                .arc(left + bl, bottom - bl, bl, half_pi, 2.0 * half_pi);
+        }
+        self.ctx.line_to(left, top + tl);
+        if tl > 0.0 {
+            let _ = self
+                .ctx
+                .arc(left + tl, top + tl, tl, 2.0 * half_pi, 3.0 * half_pi);
+        }
         self.ctx.close_path();
     }
 }

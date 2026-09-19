@@ -48,6 +48,71 @@ pub enum TextAlign {
     Right,
 }
 
+/// Per-corner radii for a rounded rectangle, in logical pixels.
+///
+/// Order is clockwise from the top-left. A value of `0.0` is a square corner,
+/// which lets one shape mix square and rounded corners (for example a list item
+/// with square left corners and rounded right corners).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CornerRadii {
+    pub top_left: f32,
+    pub top_right: f32,
+    pub bottom_right: f32,
+    pub bottom_left: f32,
+}
+
+impl CornerRadii {
+    /// All corners square.
+    pub const ZERO: Self = Self::uniform(0.0);
+
+    pub const fn new(top_left: f32, top_right: f32, bottom_right: f32, bottom_left: f32) -> Self {
+        Self {
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
+        }
+    }
+
+    /// The same radius on every corner.
+    pub const fn uniform(radius: f32) -> Self {
+        Self::new(radius, radius, radius, radius)
+    }
+
+    pub fn is_zero(self) -> bool {
+        self.top_left == 0.0
+            && self.top_right == 0.0
+            && self.bottom_right == 0.0
+            && self.bottom_left == 0.0
+    }
+
+    /// Clamps every corner to `max` (typically half the smaller side).
+    pub fn clamp(self, max: f32) -> Self {
+        Self::new(
+            self.top_left.clamp(0.0, max),
+            self.top_right.clamp(0.0, max),
+            self.bottom_right.clamp(0.0, max),
+            self.bottom_left.clamp(0.0, max),
+        )
+    }
+
+    /// Shrinks every corner by `amount` (never below zero).
+    pub fn inset(self, amount: f32) -> Self {
+        Self::new(
+            (self.top_left - amount).max(0.0),
+            (self.top_right - amount).max(0.0),
+            (self.bottom_right - amount).max(0.0),
+            (self.bottom_left - amount).max(0.0),
+        )
+    }
+}
+
+impl From<f32> for CornerRadii {
+    fn from(radius: f32) -> Self {
+        Self::uniform(radius)
+    }
+}
+
 /// A single backend-neutral draw operation.
 ///
 /// Commands are interpreted in order, and `Save`/`Restore` form a balanced
@@ -92,17 +157,18 @@ pub enum DrawCommand {
         paint: Paint,
         width: f32,
     },
-    /// A filled rounded rectangle. `radius` is clamped to half the smaller side.
+    /// A filled rounded rectangle. Corner radii are clamped to half the smaller
+    /// side.
     FillRoundedRect {
         rect: Rect,
-        radius: f32,
+        corners: CornerRadii,
         paint: Paint,
     },
-    /// A stroked rounded rectangle. `width` is the stroke thickness; `radius`
-    /// refers to the outer corners and is clamped to half the smaller side.
+    /// A stroked rounded rectangle. `width` is the stroke thickness; corner
+    /// radii refer to the outer corners.
     StrokeRoundedRect {
         rect: Rect,
-        radius: f32,
+        corners: CornerRadii,
         paint: Paint,
         width: f32,
     },

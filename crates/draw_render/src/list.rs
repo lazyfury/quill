@@ -1,6 +1,6 @@
 use draw_core::{Rect, Transform2D, Vec2};
 
-use crate::command::{DrawCommand, Paint, TextAlign};
+use crate::command::{CornerRadii, DrawCommand, Paint, TextAlign};
 use crate::texture::TextureId;
 
 /// An ordered, backend-neutral list of [`DrawCommand`]s.
@@ -213,16 +213,26 @@ impl PaintContext {
         });
     }
 
-    /// Fills a rounded rectangle. `radius` is clamped to half the smaller side.
+    /// Fills a rounded rectangle with a uniform radius.
     pub fn fill_rounded_rect(&mut self, rect: Rect, radius: f32, paint: impl Into<Paint>) {
+        self.fill_rounded_rect_corners(rect, CornerRadii::uniform(radius), paint);
+    }
+
+    /// Fills a rounded rectangle with per-corner radii.
+    pub fn fill_rounded_rect_corners(
+        &mut self,
+        rect: Rect,
+        corners: CornerRadii,
+        paint: impl Into<Paint>,
+    ) {
         self.commands.push(DrawCommand::FillRoundedRect {
             rect,
-            radius,
+            corners,
             paint: paint.into(),
         });
     }
 
-    /// Strokes a rounded rectangle (outer corner `radius`, stroke `width`).
+    /// Strokes a rounded rectangle with a uniform outer radius.
     pub fn stroke_rounded_rect(
         &mut self,
         rect: Rect,
@@ -230,9 +240,20 @@ impl PaintContext {
         width: f32,
         paint: impl Into<Paint>,
     ) {
+        self.stroke_rounded_rect_corners(rect, CornerRadii::uniform(radius), width, paint);
+    }
+
+    /// Strokes a rounded rectangle with per-corner outer radii.
+    pub fn stroke_rounded_rect_corners(
+        &mut self,
+        rect: Rect,
+        corners: CornerRadii,
+        width: f32,
+        paint: impl Into<Paint>,
+    ) {
         self.commands.push(DrawCommand::StrokeRoundedRect {
             rect,
-            radius,
+            corners,
             paint: paint.into(),
             width,
         });
@@ -304,7 +325,7 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert!(matches!(
             list.commands()[0],
-            DrawCommand::FillRoundedRect { radius, .. } if (radius - 6.0).abs() < 1e-5
+            DrawCommand::FillRoundedRect { corners, .. } if (corners.top_left - 6.0).abs() < 1e-5
         ));
         assert!(matches!(
             list.commands()[1],

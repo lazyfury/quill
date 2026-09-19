@@ -69,7 +69,9 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Done
 
-- Rounded rectangles are first-class `DrawCommand`s; `draw_kit` surfaces use
-  them instead of composing circles + rects.
+- Rounded rectangles are first-class `DrawCommand`s with **per-corner radii**
+  (`CornerRadii`); `draw_kit` surfaces use them instead of composing circles +
+  rects. The demo's list items use square left / rounded right corners with a
+  full-height accent bar.
 - Centered button/badge text via centered flex labels (measurer-driven, so it
   stays centered after a host injects a real font).

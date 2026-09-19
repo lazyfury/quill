@@ -30,8 +30,8 @@ use std::rc::Rc;
 
 use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, Viewport};
 use draw_kit::{
-    fill_rounded_rect, inset, Badge, Button, Checkbox, Divider, Kit, SurfaceStyle, Switch, Text,
-    Tone,
+    fill_rounded_rect, fill_rounded_rect_corners, inset, Badge, Button, Checkbox, CornerRadii,
+    Divider, Kit, SurfaceStyle, Switch, Text, Tone,
 };
 use draw_render::PaintContext;
 use draw_scene::{SceneTree, Visual};
@@ -726,6 +726,7 @@ fn add_note_row(
 
     let state = selected.clone();
     let current = index;
+    // Square left corners, rounded right corners (a macOS-style list item).
     kit.dynamic_surface(row.id(), move |theme, interact| {
         let fill = if state.get() == current {
             theme.palette.selection
@@ -734,18 +735,24 @@ fn add_note_row(
         } else {
             Color::TRANSPARENT
         };
-        SurfaceStyle::new(fill).radius(radius::MD)
+        SurfaceStyle::new(fill).corners(CornerRadii::new(0.0, radius::MD, radius::MD, 0.0))
     });
 
     let state = selected.clone();
     let current = index;
+    // A full-height accent bar marks the selected item.
     kit.foreground(row.id(), move |ctx, rect, theme, _| {
         if state.get() == current {
             let bar = Rect::from_min_max(
-                Vec2::new(rect.left() + 2.0, rect.top() + 8.0),
-                Vec2::new(rect.left() + 5.0, rect.bottom() - 8.0),
+                Vec2::new(rect.left(), rect.top()),
+                Vec2::new(rect.left() + 3.0, rect.bottom()),
             );
-            fill_rounded_rect(ctx, bar, 1.5, theme.palette.accent);
+            fill_rounded_rect_corners(
+                ctx,
+                bar,
+                CornerRadii::new(0.0, 1.5, 1.5, 0.0),
+                theme.palette.accent,
+            );
         }
     });
 
@@ -910,6 +917,54 @@ mod tests {
         for row in app.nav_rows() {
             assert!(rect(&app, app.sidebar()).contains_rect(rect(&app, *row)));
         }
+    }
+
+    #[test]
+    fn selected_note_row_has_square_left_round_right_and_a_full_height_bar() {
+        let app = laid_out(1100.0, 720.0);
+        let row = app.list_rows()[0];
+        let row_rect = rect(&app, row);
+
+        let mut ctx = PaintContext::new();
+        app.kit.paint_surfaces(&app.ui, &mut ctx);
+        app.kit.paint_foreground(&app.ui, &mut ctx);
+        let list = ctx.into_draw_list();
+
+        // The selection surface is square on the left and rounded on the right.
+        let corners = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                DrawCommand::FillRoundedRect { rect, corners, .. } if *rect == row_rect => {
+                    Some(*corners)
+                }
+                _ => None,
+            })
+            .expect("selected row surface");
+        assert_eq!(corners.top_left, 0.0);
+        assert_eq!(corners.bottom_left, 0.0);
+        assert!(corners.top_right > 0.0 && corners.bottom_right > 0.0);
+
+        // The accent bar spans the full item height.
+        let bar = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                DrawCommand::FillRoundedRect {
+                    rect,
+                    corners,
+                    paint,
+                } if paint.color == app.theme.palette.accent
+                    && (rect.size.height - row_rect.size.height).abs() < 1e-3
+                    && row_rect.contains_rect(*rect) =>
+                {
+                    Some(*corners)
+                }
+                _ => None,
+            })
+            .expect("full-height accent bar");
+        assert_eq!(bar.top_left, 0.0);
+        assert_eq!(bar.bottom_left, 0.0);
     }
 
     #[test]

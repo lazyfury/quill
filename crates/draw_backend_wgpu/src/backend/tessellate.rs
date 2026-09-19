@@ -7,7 +7,7 @@
 
 use super::*;
 use draw_core::Size;
-use draw_render::{DrawCommand, TextAlign};
+use draw_render::{CornerRadii, DrawCommand, TextAlign};
 
 impl WgpuBackend {
     pub(super) fn bind_group_for(&self, surface: Surface) -> &wgpu::BindGroup {
@@ -56,20 +56,20 @@ impl WgpuBackend {
             }
             DrawCommand::FillRoundedRect {
                 rect,
-                radius,
+                corners,
                 paint,
             } => {
                 let color = self.solid_color(paint);
-                self.fill_rounded_rect(*rect, *radius, color);
+                self.fill_rounded_rect(*rect, *corners, color);
             }
             DrawCommand::StrokeRoundedRect {
                 rect,
-                radius,
+                corners,
                 paint,
                 width,
             } => {
                 let color = self.solid_color(paint);
-                self.stroke_rounded_rect(*rect, *radius, *width, color);
+                self.stroke_rounded_rect(*rect, *corners, *width, color);
             }
             DrawCommand::DrawImage {
                 texture,
@@ -269,14 +269,14 @@ impl WgpuBackend {
 
     /// Tessellates a filled rounded rectangle as a triangle fan around its
     /// center (the shape is convex).
-    pub(super) fn fill_rounded_rect(&mut self, rect: Rect, radius: f32, color: [f32; 4]) {
+    pub(super) fn fill_rounded_rect(&mut self, rect: Rect, corners: CornerRadii, color: [f32; 4]) {
         if rect.is_empty() {
             return;
         }
         let Some(geometry) = self.begin() else {
             return;
         };
-        let points = rounded_rect_points(rect, radius);
+        let points = rounded_rect_points(rect, corners);
         let center = rect.center();
         for index in 0..points.len() {
             let next = (index + 1) % points.len();
@@ -292,14 +292,14 @@ impl WgpuBackend {
     pub(super) fn stroke_rounded_rect(
         &mut self,
         rect: Rect,
-        radius: f32,
+        corners: CornerRadii,
         width: f32,
         color: [f32; 4],
     ) {
         if width <= 0.0 || rect.is_empty() {
             return;
         }
-        let outer = rounded_rect_points(rect, radius);
+        let outer = rounded_rect_points(rect, corners);
         let center = rect.center();
         let inner_rect = Rect::from_min_max(
             Vec2::new(
@@ -312,12 +312,12 @@ impl WgpuBackend {
             ),
         );
         if inner_rect.is_empty() {
-            self.fill_rounded_rect(rect, radius, color);
+            self.fill_rounded_rect(rect, corners, color);
             return;
         }
-        let inner = rounded_rect_points(inner_rect, (radius - width).max(0.0));
+        let inner = rounded_rect_points(inner_rect, corners.inset(width));
         if outer.len() != inner.len() {
-            self.fill_rounded_rect(rect, radius, color);
+            self.fill_rounded_rect(rect, corners, color);
             return;
         }
         let Some(geometry) = self.begin() else {
@@ -416,34 +416,51 @@ const CORNER_SEGMENTS: usize = 5;
 ///
 /// Consecutive points are joined by straight edges, so the four straight sides
 /// fall out of connecting one corner's last point to the next corner's first.
-fn rounded_rect_points(rect: Rect, radius: f32) -> Vec<Vec2> {
+/// Each corner always contributes the same number of points (even at radius
+/// zero) so outer and inner rings line up for stroking.
+fn rounded_rect_points(rect: Rect, corners: CornerRadii) -> Vec<Vec2> {
     let min = rect.min();
     let max = rect.max();
     if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
         return Vec::new();
     }
-    let r = radius
-        .max(0.0)
-        .min(rect.size.width * 0.5)
-        .min(rect.size.height * 0.5);
-    if r <= 0.0 {
-        return vec![min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
-    }
+    let limit = (rect.size.width * 0.5).min(rect.size.height * 0.5);
+    let radii = corners.clamp(limit);
 
     let half_pi = std::f32::consts::FRAC_PI_2;
     let pi = std::f32::consts::PI;
     let corners = [
-        (Vec2::new(min.x + r, min.y + r), pi, pi + half_pi),
-        (Vec2::new(max.x - r, min.y + r), pi + half_pi, pi * 2.0),
-        (Vec2::new(max.x - r, max.y - r), 0.0, half_pi),
-        (Vec2::new(min.x + r, max.y - r), half_pi, pi),
+        (
+            Vec2::new(min.x + radii.top_left, min.y + radii.top_left),
+            pi,
+            pi + half_pi,
+            radii.top_left,
+        ),
+        (
+            Vec2::new(max.x - radii.top_right, min.y + radii.top_right),
+            pi + half_pi,
+            pi * 2.0,
+            radii.top_right,
+        ),
+        (
+            Vec2::new(max.x - radii.bottom_right, max.y - radii.bottom_right),
+            0.0,
+            half_pi,
+            radii.bottom_right,
+        ),
+        (
+            Vec2::new(min.x + radii.bottom_left, max.y - radii.bottom_left),
+            half_pi,
+            pi,
+            radii.bottom_left,
+        ),
     ];
 
     let mut points = Vec::with_capacity(CORNER_SEGMENTS * corners.len() + 1);
-    for (center, start, end) in corners {
+    for (center, start, end, radius) in corners {
         for step in 0..=CORNER_SEGMENTS {
             let t = start + (end - start) * (step as f32 / CORNER_SEGMENTS as f32);
-            points.push(circle_point(center, r, t));
+            points.push(circle_point(center, radius, t));
         }
     }
     points

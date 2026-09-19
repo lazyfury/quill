@@ -162,7 +162,8 @@ backward-compatible addition and record it here.
 ## Deferred
 
 Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /
-`StrokeRoundedRect`), implemented by the canvas, wgpu and recording backends, so
-surfaces no longer compose circles + rects by hand. Inputs, selects, tabs,
-tooltips, tables, lists, modals and toasts are staged next; see `docs/plan.md`
-for the full roadmap.
+`StrokeRoundedRect`) with per-corner radii (`CornerRadii`, so one shape can mix
+square and rounded corners), implemented by the canvas, wgpu and recording
+backends, so surfaces no longer compose circles + rects by hand. Inputs, selects,
+tabs, tooltips, tables, lists, modals and toasts are staged next; see
+`docs/plan.md` for the full roadmap.

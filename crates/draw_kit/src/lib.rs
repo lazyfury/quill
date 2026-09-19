@@ -47,9 +47,10 @@ pub use components::{
     Text,
 };
 pub use kit::{InteractState, Kit};
-pub use paint::{fill_rounded_rect, inset, surface, SurfaceStyle};
+pub use paint::{fill_rounded_rect, fill_rounded_rect_corners, inset, surface, SurfaceStyle};
 pub use tone::{SurfaceTone, Tone};
 
+pub use draw_render::CornerRadii;
 pub use draw_theme::{self as theme, Theme};
 pub use draw_ui::{ControlRef, Ui};
 

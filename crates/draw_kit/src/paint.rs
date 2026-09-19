@@ -1,18 +1,18 @@
 //! Backend-neutral surface helpers used by the component library.
 //!
 //! Rounded rectangles are a first-class [`DrawCommand`](draw_render::DrawCommand)
-//! now, so surfaces map almost directly onto the IR.
+//! with per-corner radii, so surfaces map almost directly onto the IR.
 
 use draw_core::{Color, Rect, Vec2};
-use draw_render::PaintContext;
+use draw_render::{CornerRadii, PaintContext};
 
-/// A rounded surface: fill, optional hairline border and corner radius.
+/// A rounded surface: fill, optional hairline border and per-corner radii.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurfaceStyle {
     pub fill: Color,
     pub border: Option<Color>,
     pub border_width: f32,
-    pub radius: f32,
+    pub corners: CornerRadii,
 }
 
 impl SurfaceStyle {
@@ -22,7 +22,7 @@ impl SurfaceStyle {
             fill,
             border: None,
             border_width: 1.0,
-            radius: 0.0,
+            corners: CornerRadii::ZERO,
         }
     }
 
@@ -41,18 +41,35 @@ impl SurfaceStyle {
         self
     }
 
+    /// Sets the same radius on every corner.
     pub const fn radius(mut self, radius: f32) -> Self {
-        self.radius = radius;
+        self.corners = CornerRadii::uniform(radius);
+        self
+    }
+
+    /// Sets per-corner radii (e.g. square left, rounded right).
+    pub const fn corners(mut self, corners: CornerRadii) -> Self {
+        self.corners = corners;
         self
     }
 }
 
-/// Fills a rounded rectangle (radius is clamped by the backend).
+/// Fills a rounded rectangle with a uniform radius.
 pub fn fill_rounded_rect(ctx: &mut PaintContext, rect: Rect, radius: f32, color: Color) {
+    fill_rounded_rect_corners(ctx, rect, CornerRadii::uniform(radius), color);
+}
+
+/// Fills a rounded rectangle with per-corner radii.
+pub fn fill_rounded_rect_corners(
+    ctx: &mut PaintContext,
+    rect: Rect,
+    corners: CornerRadii,
+    color: Color,
+) {
     if color.is_transparent() || rect.size.width <= 0.0 || rect.size.height <= 0.0 {
         return;
     }
-    ctx.fill_rounded_rect(rect, radius, color);
+    ctx.fill_rounded_rect_corners(rect, corners, color);
 }
 
 /// Draws a rounded surface: the fill fills the rect; the border is stroked
@@ -63,9 +80,9 @@ pub fn surface(ctx: &mut PaintContext, rect: Rect, style: &SurfaceStyle) {
             if !style.fill.is_transparent() {
                 let inner = inset(rect, style.border_width);
                 if inner.size.width > 0.0 && inner.size.height > 0.0 {
-                    ctx.fill_rounded_rect(
+                    ctx.fill_rounded_rect_corners(
                         inner,
-                        (style.radius - style.border_width).max(0.0),
+                        style.corners.inset(style.border_width),
                         style.fill,
                     );
                 }
@@ -73,15 +90,15 @@ pub fn surface(ctx: &mut PaintContext, rect: Rect, style: &SurfaceStyle) {
             let half = style.border_width * 0.5;
             let outline = inset(rect, half);
             if outline.size.width > 0.0 && outline.size.height > 0.0 {
-                ctx.stroke_rounded_rect(
+                ctx.stroke_rounded_rect_corners(
                     outline,
-                    (style.radius - half).max(0.0),
+                    style.corners.inset(half),
                     style.border_width,
                     border,
                 );
             }
         }
-        _ => fill_rounded_rect(ctx, rect, style.radius, style.fill),
+        _ => fill_rounded_rect_corners(ctx, rect, style.corners, style.fill),
     }
 }
 
@@ -115,6 +132,20 @@ mod tests {
         assert!(matches!(
             list.commands()[0],
             DrawCommand::FillRoundedRect { .. }
+        ));
+    }
+
+    #[test]
+    fn per_corner_fill_keeps_square_left_corners() {
+        let mut ctx = PaintContext::new();
+        let corners = CornerRadii::new(0.0, 6.0, 6.0, 0.0);
+        fill_rounded_rect_corners(&mut ctx, rect(), corners, Color::WHITE);
+        let list = ctx.into_draw_list();
+        assert!(matches!(
+            list.commands()[0],
+            DrawCommand::FillRoundedRect { corners, .. }
+                if corners.top_left == 0.0 && corners.bottom_left == 0.0
+                    && corners.top_right == 6.0 && corners.bottom_right == 6.0
         ));
     }
 
