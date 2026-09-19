@@ -366,11 +366,10 @@ impl WgpuBackend {
         if font_size <= 0.0 || text.is_empty() {
             return;
         }
-        // Total advance drives horizontal alignment.
-        let total: f32 = text
-            .chars()
-            .map(|ch| self.font.advance(ch, font_size))
-            .sum();
+        // Shaped advances drive both alignment and glyph placement (kerning,
+        // ligatures and bidi are resolved by the font under the given size).
+        let glyphs = self.font.shape(text, font_size);
+        let total: f32 = glyphs.iter().map(|slot| slot.advance).sum();
         let mut pen = match align {
             TextAlign::Left => position.x,
             TextAlign::Center => position.x - total * 0.5,
@@ -385,8 +384,7 @@ impl WgpuBackend {
         let scale = self.scale_factor.max(f32::MIN_POSITIVE);
         let snap = |value: f32| (value * scale).round() / scale;
 
-        for ch in text.chars() {
-            let slot = self.font.glyph(ch, font_size);
+        for slot in glyphs {
             if slot.size[0] > 0.0 && slot.size[1] > 0.0 {
                 // `position` is the baseline; `offset` is relative to the pen
                 // with y down, so it already accounts for the font's ascent.

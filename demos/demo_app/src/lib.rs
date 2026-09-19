@@ -828,6 +828,37 @@ mod tests {
     }
 
     #[test]
+    fn note_rows_fit_within_the_list_column() {
+        let app = laid_out(1100.0, 720.0);
+        let list = rect(&app, app.list());
+        for &row in app.list_rows() {
+            let item = rect(&app, row);
+            assert!(
+                item.left() >= list.left() - 0.5 && item.right() <= list.right() + 0.5,
+                "row {item:?} escapes list {list:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn note_rows_fit_with_a_wide_measurer() {
+        let viewport = Viewport::new(Size::new(1100.0, 720.0));
+        let mut app = DemoApp::new();
+        app.ui_mut()
+            .set_text_measurer(std::rc::Rc::new(draw_ui::FixedWidthTextMeasurer::default()));
+        app.update(viewport, 0.016);
+        app.layout(viewport);
+        let list = rect(&app, app.list());
+        for &row in app.list_rows() {
+            let item = rect(&app, row);
+            assert!(
+                item.left() >= list.left() - 0.5 && item.right() <= list.right() + 0.5,
+                "row {item:?} escapes list {list:?}"
+            );
+        }
+    }
+
+    #[test]
     fn three_columns_are_side_by_side() {
         let app = laid_out(1100.0, 720.0);
         let sidebar = rect(&app, app.sidebar());

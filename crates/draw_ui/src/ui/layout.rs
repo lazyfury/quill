@@ -340,6 +340,10 @@ impl Ui {
 
         for (line_index, line) in lines.iter().enumerate() {
             let (line_offset, line_cross) = line_sizes[line_index];
+            // A definite cross size caps stretch: `Stretch` items fill the
+            // container instead of growing it when their min-content is
+            // wider/taller (e.g. a long unbreakable word).
+            let stretch_cross = line_cross.min(content_cross);
             flex_line_sizes(&mut items, line, content_main, style.gap);
 
             let used: f32 = line.iter().map(|i| items[*i].main).sum::<f32>()
@@ -350,7 +354,7 @@ impl Ui {
             for &index in line {
                 let item = &items[index];
                 let cross_size = if item.align == Align::Stretch {
-                    line_cross
+                    stretch_cross
                 } else {
                     item.cross.min(line_cross)
                 };
@@ -1111,6 +1115,37 @@ mod tests {
         }
         ui.layout(viewport(200.0, 200.0));
         assert!(rect(&ui, ids[0]).top() < rect(&ui, ids[2]).top());
+    }
+
+    #[test]
+    fn stretch_does_not_grow_a_definite_cross_axis() {
+        // A fixed-width column must not widen when a child's preferred width
+        // exceeds it (a fixed sibling plus a wrapping label); the child stays at
+        // the column width.
+        let mut ui = Ui::new();
+        let column = ui.add_flex(ui.root(), FlexStyle::column().gap(0.0).padding(Edges::ZERO));
+        ui.set_anchors(column, Edges::new(0.0, 0.0, 0.0, 1.0));
+        ui.set_offsets(column, Edges::new(0.0, 0.0, 100.0, 0.0));
+
+        let row = ui.add_flex(column, FlexStyle::row().gap(0.0).padding(Edges::ZERO));
+        let fixed = panel(&mut ui, row, "fixed");
+        ui.set_layout_style(
+            fixed,
+            LayoutStyle::new().basis(SizeBasis::Px(44.0)).shrink(0.0),
+        );
+        // Words stay short (min-content fits) but the line wants to be wider.
+        label(&mut ui, row, "label", "aaaa bbbb cccc dddd eeee ffff", 20.0);
+
+        ui.layout(viewport(200.0, 200.0));
+        let column_rect = rect(&ui, column);
+        let row_rect = rect(&ui, row);
+        assert!((column_rect.size.width - 100.0).abs() < 1e-3);
+        assert!(
+            (row_rect.size.width - column_rect.size.width).abs() < 1e-3,
+            "row {} escaped column {}",
+            row_rect.size.width,
+            column_rect.size.width
+        );
     }
 
     #[test]

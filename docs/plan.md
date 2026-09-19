@@ -69,6 +69,16 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Done
 
+- Fixed flex cross-axis `Stretch` overflowing a definite container: items now
+  fill the container's inner cross size instead of growing to their content's
+  preferred width, so a fixed-width column's items no longer push past its edge.
+  Covered by `draw_ui::ui::layout::stretch_does_not_grow_a_definite_cross_axis`
+  and `demo_app::note_rows_fit_with_a_wide_measurer`.
+- Stage 21 (complex-script shaping): the wgpu backend shapes each line with
+  `rustybuzz` (kerning, ligatures, contextual forms) and `unicode-bidi` (visual
+  run ordering), rasterizes by glyph id, and aligns by shaped advances.
+  `TextMeasurer::measure_run` is the backend-neutral hook so layout measures with
+  the same shaping; Canvas/WASM `measureText` measures whole runs too.
 - Button cursor feedback: `Ui::hovered_is_button` / `Kit::hovered` feed
   `App::pointer_cursor`, so the Canvas runner sets a `pointer` CSS cursor while
   the pointer is over a clickable control (and `default` otherwise);

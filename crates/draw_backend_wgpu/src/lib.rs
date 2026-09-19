@@ -53,7 +53,7 @@ mod shader;
 #[cfg(not(target_arch = "wasm32"))]
 pub use backend::{PixelBuffer, WgpuBackend, WgpuError};
 #[cfg(not(target_arch = "wasm32"))]
-pub use font::{FontConfig, FontMetrics, FontMode};
+pub use font::{FontConfig, FontMetrics, FontMode, PIXEL_GLYPH_RATIO};
 
 /// Re-export of the `wgpu` version this backend is built against, so callers
 /// (e.g. window runners) can create surfaces, adapters and device resources

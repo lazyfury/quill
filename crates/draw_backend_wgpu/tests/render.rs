@@ -7,7 +7,7 @@
 //! If no adapter is available (e.g. a GPU-less CI box) the tests skip rather
 //! than fail, so the rest of the workspace still builds and tests.
 
-use draw_backend_wgpu::{wgpu, FontConfig, FontMode, PixelBuffer, WgpuBackend};
+use draw_backend_wgpu::{wgpu, FontConfig, FontMode, PixelBuffer, WgpuBackend, PIXEL_GLYPH_RATIO};
 use draw_core::{Color, Rect, Size, Vec2, Viewport};
 use draw_render::{CornerRadii, Paint, PaintContext, RenderBackend, TextAlign, TextureId};
 
@@ -363,8 +363,11 @@ fn font_config_switches_to_pixel_mode() {
 
     let metrics = backend.text_metrics();
     assert!(!metrics.is_system());
-    assert_eq!(metrics.advance('i', 16.0), 16.0);
-    assert_eq!(metrics.advance('W', 16.0), 16.0);
+    // Pixel glyphs are scaled down from the em and rounded to whole pixels, so
+    // they match a proportional font's visual size at the same `font_size`.
+    let cell = (16.0 * PIXEL_GLYPH_RATIO).round();
+    assert!((metrics.advance('i', 16.0) - cell).abs() < 1e-4);
+    assert!((metrics.advance('W', 16.0) - cell).abs() < 1e-4);
 
     // Pixel mode still renders ink (CJK -> missing-glyph box).
     backend.set_clear_color(Color::BLACK);
@@ -474,16 +477,18 @@ fn pixel_font_maps_glyph_texels_one_to_one() {
         .unwrap();
     backend.set_clear_color(Color::BLACK);
 
-    // `size` 8 draws the 8x8 cell at 1:1, so every texel is one pixel. `_`, `|`
-    // and `A` include ink in the first/last columns, which the old half-texel
-    // UV inset used to drop.
+    // The cell is a fraction of the em, so pick the font size that yields an
+    // 8px cell; `pixel_cell` rounds, so this is exactly 1:1. `_`, `|` and `A`
+    // include ink in the first/last columns, which the old half-texel UV inset
+    // used to drop.
     use font8x8::UnicodeFonts;
+    let font_size = 8.0 / PIXEL_GLYPH_RATIO;
     for ch in ['L', '_', '|', 'A', 'W'] {
         let mut ctx = PaintContext::new();
         ctx.draw_text(
             &ch.to_string(),
             Vec2::new(0.0, 8.0),
-            8.0,
+            font_size,
             TextAlign::Left,
             Paint::new(Color::WHITE),
         );

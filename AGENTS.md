@@ -66,8 +66,9 @@ scene. This does not weaken backend replaceability.
 Browser APIs only in `draw_backend_canvas`, `draw_wasm`, and the WASM demos
 (`demos/web_demo`, `demos/component_demo`).
 `winit` only in `demos/wgpu_demo`. `wgpu` only in `draw_backend_wgpu` (plus its
-tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`) and system-font
-discovery live only in `draw_backend_wgpu`; the core stays text-free.
+tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
+(`rustybuzz`, `unicode-bidi`) and system-font discovery live only in
+`draw_backend_wgpu`; the core stays text-free.
 
 ## Stages
 
@@ -112,11 +113,12 @@ discovery live only in `draw_backend_wgpu`; the core stays text-free.
       `Terminal`, `EmptyState`, `Checkbox`, `Switch`) built on frozen `draw_ui`
       primitives, plus the shared `demo_app` rewritten as a three-column
       macOS-style notes app (icons/images are monochrome placeholder squares).
-
-Deferred by request (do not start without an explicit ask):
-- Stage 21 — complex-script shaping (ligatures, bidi). The Canvas/WASM demos now
-  inject a real `measureText`-based `draw_wasm::CanvasTextMeasurer`; only wgpu
-  does full shaping.
+- [x] Stage 21 — complex-script shaping: the wgpu backend shapes each line with
+      `rustybuzz` (kerning, ligatures, contextual forms) and `unicode-bidi`
+      (visual run ordering), rasterizing by glyph id and reusing shaped advances
+      for alignment. `TextMeasurer::measure_run` (default: sum of advances) lets
+      layout measure with the same shaping; the Canvas/WASM `measureText`
+      measurer uses it too. The core stays text-free.
 
 ## Per-stage gate (must run)
 

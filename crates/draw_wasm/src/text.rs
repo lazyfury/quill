@@ -24,6 +24,7 @@ use web_sys::CanvasRenderingContext2d;
 pub struct CanvasTextMeasurer {
     ctx: CanvasRenderingContext2d,
     advances: RefCell<HashMap<(u32, u32), f32>>,
+    runs: RefCell<HashMap<(u32, String), f32>>,
     metrics: RefCell<HashMap<u32, FontMetrics>>,
 }
 
@@ -39,6 +40,7 @@ impl CanvasTextMeasurer {
         Self {
             ctx,
             advances: RefCell::new(HashMap::new()),
+            runs: RefCell::new(HashMap::new()),
             metrics: RefCell::new(HashMap::new()),
         }
     }
@@ -98,6 +100,26 @@ impl CanvasTextMeasurer {
         self.advances.borrow_mut().insert(key, advance);
         advance
     }
+
+    fn measure_run(&self, text: &str, font_size: f32) -> f32 {
+        let key = (font_size.to_bits(), text.to_string());
+        if let Some(width) = self.runs.borrow().get(&key) {
+            return *width;
+        }
+
+        self.ctx.set_font(&font_spec(font_size));
+        // `measureText` on the whole run applies browser shaping (kerning,
+        // ligatures, bidi), unlike summing per-character advances.
+        let width = self
+            .ctx
+            .measure_text(text)
+            .ok()
+            .map(|measured| measured.width() as f32)
+            .filter(|width| width.is_finite() && *width >= 0.0)
+            .unwrap_or_else(|| text.chars().map(|ch| self.advance_for(ch, font_size)).sum());
+        self.runs.borrow_mut().insert(key, width);
+        width
+    }
 }
 
 impl TextMeasurer for CanvasTextMeasurer {
@@ -111,6 +133,10 @@ impl TextMeasurer for CanvasTextMeasurer {
 
     fn ascent(&self, font_size: f32) -> f32 {
         self.metrics_for(font_size).ascent
+    }
+
+    fn measure_run(&self, text: &str, font_size: f32) -> f32 {
+        CanvasTextMeasurer::measure_run(self, text, font_size)
     }
 }
 

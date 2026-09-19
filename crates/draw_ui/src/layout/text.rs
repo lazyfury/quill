@@ -39,6 +39,16 @@ pub trait TextMeasurer {
 
     /// Width of `text` on a single line.
     fn measure_line(&self, text: &str, font_size: f32) -> f32 {
+        self.measure_run(text, font_size)
+    }
+
+    /// Advance width of `text` as one run, applying shaping (kerning,
+    /// ligatures) where the host supports it.
+    ///
+    /// Defaults to summing [`TextMeasurer::advance`]. A host with a real shaper
+    /// overrides this so layout width matches the shaped width a backend
+    /// renders (see the wgpu backend's `FontMetrics::measure_run`).
+    fn measure_run(&self, text: &str, font_size: f32) -> f32 {
         text.chars().map(|ch| self.advance(ch, font_size)).sum()
     }
 }
@@ -527,5 +537,32 @@ mod tests {
         let m = ApproxTextMeasurer;
         let lines = layout_text(&m, "hello world\nagain", 10.0, 20.0, TextOptions::no_wrap());
         assert_eq!(lines, vec!["hello world".to_string(), "again".to_string()]);
+    }
+
+    #[test]
+    fn wrapping_uses_the_shaped_run_advance() {
+        /// Reports half the width for a whole run, emulating kerning/ligatures.
+        struct Shaper;
+
+        impl TextMeasurer for Shaper {
+            fn advance(&self, _ch: char, font_size: f32) -> f32 {
+                font_size * 0.5
+            }
+
+            fn line_height(&self, font_size: f32) -> f32 {
+                font_size * 1.2
+            }
+
+            fn measure_run(&self, text: &str, font_size: f32) -> f32 {
+                text.chars()
+                    .map(|ch| self.advance(ch, font_size))
+                    .sum::<f32>()
+                    * 0.5
+            }
+        }
+
+        // "ab" measures 10 unshaped (would hard-break) but 5 shaped, so it fits.
+        let lines = wrap_text_with(&Shaper, "ab cd", 10.0, 8.0);
+        assert_eq!(lines, vec!["ab".to_string(), "cd".to_string()]);
     }
 }

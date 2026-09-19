@@ -32,6 +32,20 @@ pub enum FontMode {
     Pixel,
 }
 
+/// Pixel-font glyph cell size as a fraction of `font_size`.
+///
+/// `font8x8` fills its full 8x8 cell (close to a whole em), so drawing it at
+/// `font_size` makes glyphs look much larger than a proportional font at the
+/// same size. Render the cell at this fraction (roughly a typical cap height),
+/// rounded to a whole pixel for crisp output, while keeping the layout line box
+/// at `font_size`.
+pub const PIXEL_GLYPH_RATIO: f32 = 0.75;
+
+/// Rounded glyph cell size in logical pixels for `font_size`.
+fn pixel_cell(font_size: f32) -> f32 {
+    (font_size * PIXEL_GLYPH_RATIO).round().max(1.0)
+}
+
 /// Font configuration for a [`WgpuBackend`](crate::WgpuBackend).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FontConfig {
@@ -74,7 +88,7 @@ impl GlyphSlot {
 }
 
 enum Engine {
-    System(system::SystemFont),
+    System(Box<system::SystemFont>),
     Bitmap,
 }
 
@@ -99,7 +113,7 @@ impl Font {
             FontMode::System => match system::SystemFont::load() {
                 Some(font) => {
                     let name = font.name().to_string();
-                    (Engine::System(font), Some(name))
+                    (Engine::System(Box::new(font)), Some(name))
                 }
                 None => (Engine::Bitmap, None),
             },
@@ -169,7 +183,7 @@ impl Font {
                 let (px, divisor) = self.raster_params(font_size);
                 font.advance_px(ch, px) / divisor
             }
-            Engine::Bitmap => font_size,
+            Engine::Bitmap => pixel_cell(font_size),
         }
     }
 
@@ -189,7 +203,8 @@ impl Font {
                 let (px, divisor) = self.raster_params(font_size);
                 font.ascent_px(px) / divisor
             }
-            Engine::Bitmap => font_size,
+            // Keep the (smaller) pixel cell centred in the `font_size` line box.
+            Engine::Bitmap => font_size * 0.5 + pixel_cell(font_size) * 0.5,
         }
     }
 
@@ -204,12 +219,47 @@ impl Font {
                 slot.offset = [slot.offset[0] / divisor, slot.offset[1] / divisor];
                 slot
             }
-            Engine::Bitmap => GlyphSlot {
-                uv: bitmap::glyph_uv(ch),
-                size: [font_size, font_size],
-                offset: [0.0, -font_size],
-                advance: font_size,
-            },
+            Engine::Bitmap => {
+                let cell = pixel_cell(font_size);
+                GlyphSlot {
+                    uv: bitmap::glyph_uv(ch),
+                    size: [cell, cell],
+                    offset: [0.0, -cell],
+                    advance: cell,
+                }
+            }
+        }
+    }
+
+    /// Shapes `text` at `font_size` into glyphs in visual order (logical
+    /// units). System fonts apply kerning/ligatures and bidi reordering; the
+    /// bitmap font maps one slot per character.
+    pub fn shape(&self, text: &str, font_size: f32) -> Vec<GlyphSlot> {
+        match &self.engine {
+            Engine::System(font) => {
+                let (px, divisor) = self.raster_params(font_size);
+                font.shape_px(text, px)
+                    .into_iter()
+                    .map(|mut slot| {
+                        slot.advance /= divisor;
+                        slot.size = [slot.size[0] / divisor, slot.size[1] / divisor];
+                        slot.offset = [slot.offset[0] / divisor, slot.offset[1] / divisor];
+                        slot
+                    })
+                    .collect()
+            }
+            Engine::Bitmap => text.chars().map(|ch| self.glyph(ch, font_size)).collect(),
+        }
+    }
+
+    /// Shaped advance width of `text` (logical units).
+    pub fn advance_run(&self, text: &str, font_size: f32) -> f32 {
+        match &self.engine {
+            Engine::System(font) => {
+                let (px, divisor) = self.raster_params(font_size);
+                font.advance_run_px(text, px) / divisor
+            }
+            Engine::Bitmap => text.chars().count() as f32 * pixel_cell(font_size),
         }
     }
 
@@ -275,6 +325,11 @@ impl FontMetrics {
         self.font.ascent(font_size)
     }
 
+    /// Shaped advance width of `text`, matching what the backend draws.
+    pub fn measure_run(&self, text: &str, font_size: f32) -> f32 {
+        self.font.advance_run(text, font_size)
+    }
+
     pub fn is_system(&self) -> bool {
         self.font.is_system()
     }
@@ -302,11 +357,26 @@ mod tests {
         let font = Font::bitmap();
         assert!(!font.is_system());
         assert_eq!(font.mode(), FontMode::Pixel);
-        assert_eq!(font.advance('i', 16.0), 16.0);
-        assert_eq!(font.advance('W', 16.0), 16.0);
+        let cell = pixel_cell(16.0);
+        assert_eq!(font.advance('i', 16.0), cell);
+        assert_eq!(font.advance('W', 16.0), cell);
         assert_eq!(font.line_height(16.0), 16.0);
         // CJK falls back to the missing-glyph box but still advances.
-        assert_eq!(font.glyph('中', 16.0).advance, 16.0);
+        assert_eq!(font.glyph('中', 16.0).advance, cell);
+    }
+
+    #[test]
+    fn pixel_glyph_is_smaller_than_the_em_and_centred() {
+        let font = Font::bitmap();
+        let slot = font.glyph('A', 16.0);
+        let line_height = font.line_height(16.0);
+        let ascent = font.ascent(16.0);
+        // The 8x8 cell would otherwise fill the whole em and look oversized.
+        assert!(slot.size[1] < line_height);
+        // Equal space above and below keeps labels vertically centred.
+        let above = ascent - slot.size[1];
+        let below = line_height - ascent;
+        assert!((above - below).abs() < 1e-4, "above={above} below={below}");
     }
 
     #[test]
@@ -403,5 +473,39 @@ mod tests {
         font.set_scale(2.0);
         let advance_2x = font.advance('M', 16.0);
         assert!((advance_1x - advance_2x).abs() < 1e-4);
+    }
+
+    #[test]
+    fn shaped_advance_matches_shaped_glyph_slots() {
+        let font = Font::load_with(FontConfig::default());
+        if !font.is_system() {
+            return; // bitmap font has no shaping
+        }
+        let text = "AVfi";
+        let total: f32 = font.shape(text, 24.0).iter().map(|slot| slot.advance).sum();
+        assert!(
+            (font.advance_run(text, 24.0) - total).abs() < 1e-3,
+            "advance_run must match the shaped glyph slots"
+        );
+    }
+
+    #[test]
+    fn shaping_does_not_widen_a_latin_run() {
+        let Some(font) = system::SystemFont::load() else {
+            return;
+        };
+        // Kerning may tighten a pair but must never add width here; ligatures
+        // may replace glyphs but keep the run covered.
+        let pair = font.advance_run_px("AV", 64.0);
+        let separate = font.advance_px('A', 64.0) + font.advance_px('V', 64.0);
+        assert!(
+            pair <= separate + 1.0,
+            "shaping widened \"AV\": {pair} > {separate}"
+        );
+
+        let slots = font.shape_px("ffi", 64.0);
+        assert!(!slots.is_empty());
+        let run: f32 = slots.iter().map(|slot| slot.advance).sum();
+        assert!((run - font.advance_run_px("ffi", 64.0)).abs() < 1e-3);
     }
 }

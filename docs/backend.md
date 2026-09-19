@@ -41,8 +41,9 @@ object ever appears in `draw_core` / `draw_scene` / `draw_ui` / `draw_render`.
 
 `DrawText` positions are baselines. `draw_backend_canvas::font_spec` is the
 single font spec the backend draws with; `draw_wasm::CanvasTextMeasurer` measures
-with the same spec (`measureText`) and is injected via `Ui::set_text_measurer`,
-so layout ascents and painted baselines agree.
+with the same spec (`measureText`, whole runs for shaping/kerning) and is
+injected via `Ui::set_text_measurer`, so layout ascents, run widths and painted
+baselines agree.
 
 The runner also reflects hover feedback: `App::pointer_cursor` (usually
 `Ui::hovered_is_button` or `Kit::hovered`) drives the canvas CSS `cursor`
@@ -77,18 +78,24 @@ the GPU pass is a single textured-triangle pipeline (`src/shader.wgsl`):
   triangles and sample a 1x1 white texture.
 - `DrawImage` samples a texture registered with `WgpuBackend::register_texture`
   (destination and optional source sub-rect map to UVs).
-- `DrawText` uses a real font loaded at startup with `ab_glyph`: `QUILL_FONT`
-  if set, otherwise a per-OS candidate list (macOS `Arial Unicode`, Linux
-  `DejaVuSans`/Noto CJK, Windows Arial/MSYH). Glyphs are rasterized on demand at
-  the requested size into a `1024x1024` shelf-packed atlas, which is uploaded to
-  the GPU after each `submit`; UVs, per-glyph advances and baselines come from
-  the font. `WgpuBackend::text_metrics()` exposes the same metrics as a
-  `FontMetrics` so hosts can build a matching `draw_ui::TextMeasurer`.
+- `DrawText` uses a real font loaded at startup with `ab_glyph` (`QUILL_FONT`
+  if set, otherwise a per-OS candidate list: macOS `Arial Unicode`, Linux
+  `DejaVuSans`/Noto CJK, Windows Arial/MSYH) and shaped with `rustybuzz` plus
+  `unicode-bidi`. Bidi runs are reordered into visual order; each run is shaped
+  so kerning, ligatures and contextual forms apply; glyphs are rasterized by
+  glyph id on demand at the requested size into a `1024x1024` shelf-packed
+  atlas uploaded to the GPU after each `submit`. UVs, shaped advances and
+  baselines come from the font. `WgpuBackend::text_metrics()` exposes the same
+  metrics as a `FontMetrics` so hosts can build a matching
+  `draw_ui::TextMeasurer` (whose `measure_run` sums shaped advances).
 - `FontConfig` chooses the look: `FontMode::System` (default) or
   `FontMode::Pixel` (the built-in bitmap), plus
   `device_pixel_rasterization` (default `true`) which rasterizes system glyphs
   at `font_size * scale` for crisp HiDPI text while keeping logical metrics.
-  `WgpuBackend::set_font_config` rebuilds the atlas at runtime.
+  `WgpuBackend::set_font_config` rebuilds the atlas at runtime. In pixel mode the
+  8x8 cell is drawn at `PIXEL_GLYPH_RATIO * font_size` (default 0.75, rounded to
+  whole pixels; advances scale likewise) so it matches a proportional font's
+  visual size instead of filling the whole em.
 - If no font file loads, `System` mode falls back to the built-in `8x8` ASCII
   bitmap atlas (from the public-domain `font8x8`); unsupported characters then
   sample a box-shaped "missing glyph" cell.
@@ -103,8 +110,8 @@ logical pixels before feeding `InputEvent`s to the UI.
 `demos/wgpu_demo` is a `winit` runner around the shared backend-neutral
 `demos/demo_app` app: it maps window events to `draw_core` `InputEvent`s, calls
 `DemoApp::update/layout`, renders with `WgpuBackend::begin_frame_with_view`, and
-presents the surface. It injects a `FixedWidthTextMeasurer` matching the bitmap
-font. The backend stays the only `wgpu` renderer; the demo only drives the window
+presents the surface. It injects the backend's `FontMetrics` as a
+`draw_ui::TextMeasurer` (shaping included). The backend stays the only `wgpu` renderer; the demo only drives the window
 and the surface lifecycle. The same `DemoApp` runs under `demos/web_demo` on the
 Canvas backend.
 

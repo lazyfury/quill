@@ -32,6 +32,10 @@ impl TextMeasurer for BackendTextMeasurer {
     fn ascent(&self, font_size: f32) -> f32 {
         self.metrics.ascent(font_size)
     }
+
+    fn measure_run(&self, text: &str, font_size: f32) -> f32 {
+        self.metrics.measure_run(text, font_size)
+    }
 }
 
 /// Application state owned by the window runner.

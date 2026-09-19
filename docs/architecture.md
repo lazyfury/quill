@@ -94,11 +94,12 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
   `WgpuBackend::set_font_config` switches at runtime. Advance/line/ascent metrics
   are exposed as `FontMetrics` so hosts can build a matching
   `draw_ui::TextMeasurer`. The core stays text-free.
-
-Deferred by request (Stage 20, do not start without an explicit ask): a
-Canvas/WASM `measureText` measurer and complex-script shaping. The Canvas demo
-keeps the proportional default estimate; only the wgpu backend measures with the
-real font.
+- Stage 21 — complex-script shaping [done]: the wgpu backend shapes each line
+  with `rustybuzz` (kerning, ligatures, contextual forms) and `unicode-bidi`
+  (visual run ordering), rasterizes by glyph id, and aligns runs by the shaped
+  advance. `TextMeasurer::measure_run` is the backend-neutral hook so layout
+  measures with the same shaping; the Canvas/WASM `measureText` measurer also
+  measures whole runs. The core stays text-free.
 
 ## Debugging & performance inspection (Stage 10)
 
