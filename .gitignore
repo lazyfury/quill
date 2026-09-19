@@ -1,4 +1,5 @@
 /target
 **/*.rs.bk
 .dist
+demos/web_demo/dist
 node_modules

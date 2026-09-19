@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>quill — Canvas 2D demo</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0b0e; }
+    #canvas { display: block; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script type="module">
+    import init from './dist/web_demo.js';
+    init()
+      .then(() => {
+        // Smoke check: sample the canvas to confirm real pixels were painted.
+        requestAnimationFrame(() => {
+          const canvas = document.getElementById('canvas');
+          let painted = false;
+          try {
+            const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+            for (let i = 0; i < data.length; i += 4) {
+              if (data[i] > 80 || data[i + 1] > 80 || data[i + 2] > 100) { painted = true; break; }
+            }
+          } catch (err) {
+            console.error(err);
+          }
+          document.body.setAttribute('data-quill-status', painted ? 'painted' : 'blank');
+        });
+      })
+      .catch((err) => {
+        document.body.setAttribute('data-quill-status', 'error');
+        document.body.innerHTML = '<pre style="color:#f88;padding:16px">' + err + '</pre>';
+        console.error(err);
+      });
+  </script>
+</body>
+</html>

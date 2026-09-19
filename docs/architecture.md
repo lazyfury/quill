@@ -40,7 +40,7 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 - Stage 2 — `SceneTree` / `Node` / `CanvasItem` / `Node2D` [done]
 - Stage 3 — `DrawList` / render IR [done]
 - Stage 4 — `RecordingBackend` / headless pipeline [done]
-- Stage 5 — Canvas 2D backend + WASM
+- Stage 5 — Canvas 2D backend + WASM [done]
 - Stage 6 — `Control` / layout / input
 - Stage 7 — reusable component demo
 - Stage 8 — second backend validation

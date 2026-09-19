@@ -25,13 +25,13 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 4 (RecordingBackend / headless tests). `draw_core` provides math, colors, handles and
+Stage 5 (Canvas 2D backend + WASM). `draw_core` provides math, colors, handles and
 the viewport model; `draw_scene` provides the scene tree with transform/visibility
 propagation and a `SceneTree::paint` step; `draw_render` provides the
 backend-neutral IR (`DrawCommand`/`DrawList`/`PaintContext`) and the
 `RenderBackend` trait; `draw_backend_recording` records frames for the fully
-headless `Scene -> DrawList -> RenderBackend` test pipeline. The Canvas/WASM
-backend arrives in Stage 5.
+headless `Scene -> DrawList -> RenderBackend` test pipeline; `draw_backend_canvas`
++ `draw_wasm` render that IR to an HTML Canvas with DPR handling.
 
 ## Build & test
 
@@ -41,4 +41,17 @@ cargo test --workspace
 cargo fmt --all -- --check
 ```
 
-Browser/WASM build and the web demo arrive in Stage 5.
+## Run the web demo
+
+```bash
+# one-time: install matching tooling
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.128
+
+# build wasm + JS glue into demos/web_demo/dist
+./demos/web_demo/build.sh
+
+# serve (ES modules need http, not file://)
+python3 -m http.server 8080 --directory demos/web_demo
+# open http://localhost:8080/
+```

@@ -32,7 +32,8 @@ draw_scene    -> draw_core, draw_render
 draw_ui       -> draw_core, draw_scene
 draw_render   -> draw_core
 draw_backend_* -> draw_render, draw_core
-draw_wasm     -> draw_render, draw_backend_canvas
+draw_wasm     -> draw_render, draw_backend_canvas, draw_core
+web_demo      -> draw_core, draw_render, draw_scene, draw_wasm
 ```
 
 `draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
@@ -48,7 +49,7 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 - [x] Stage 2 — SceneTree / Node / CanvasItem
 - [x] Stage 3 — DrawList / render IR
 - [x] Stage 4 — RecordingBackend / headless tests
-- [ ] Stage 5 — Canvas2D backend + WASM
+- [x] Stage 5 — Canvas2D backend + WASM
 - [ ] Stage 6 — Control / layout / input
 - [ ] Stage 7 — reusable component demo
 - [ ] Stage 8 — second backend validation
@@ -99,3 +100,13 @@ are a temporary built-in primitive. Geometry is in current-transform space;
 frame's viewport + concatenated commands. `CommandAsserts` gives
 count/contains/sequence/last-transform/opacity/clip assertions. Full headless
 pipeline test lives in `draw_backend_recording/tests/pipeline.rs`.
+
+## Browser layer (Stage 5)
+
+`Canvas2dBackend` maps `DrawCommand` to Canvas 2D. Logical coords are kept; the
+backing store is `logical * scale_factor` and every transform is multiplied by
+the scale factor, so DPR never reaches core/IR. `draw_wasm::start(canvas_id, app)`
+owns the RAF loop and `App::{update, paint}`. `ClipRect` is applied in device
+space then the logical transform is reapplied. Build/run the demo with
+`demos/web_demo/build.sh` + a static server. Only these two crates + the demo may
+touch `web-sys`/browser APIs.

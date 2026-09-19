@@ -8,6 +8,7 @@ members = [
     "crates/draw_backend_canvas",
     "crates/draw_backend_recording",
     "crates/draw_wasm",
+    "demos/web_demo",
 ]
 
 [workspace.package]
