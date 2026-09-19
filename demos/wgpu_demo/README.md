@@ -19,7 +19,7 @@ cargo run -p wgpu_demo --release
 
 ## Controls
 
-- A three-column, macOS-style notes app built from `draw_kit` components on the
+- A three-column, macOS-style notes app built from `draw_components` components on the
   `draw_ui` core:
   - **sidebar** (220px): traffic lights, app title, search placeholder, nav
     rows with selection, version badge,

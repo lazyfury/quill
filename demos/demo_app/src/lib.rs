@@ -1,5 +1,5 @@
 //! Shared, backend-neutral demo application: a three-column, macOS-style notes
-//! app built from `draw_kit` components on the frozen `draw_ui` core.
+//! app built from `draw_components` components on the frozen `draw_ui` core.
 //!
 //! Layout is the classic macOS split view:
 //!
@@ -31,14 +31,15 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use draw_components::{Badge, Button, Checkbox, Divider, Overlays, Switch, Text};
 use draw_core::{Color, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, Viewport};
-use draw_kit::{
-    fill_rounded_rect, fill_rounded_rect_corners, inset, Badge, Button, Checkbox, CornerRadii,
-    Divider, Kit, Overlays, SurfaceStyle, Switch, Text, Tone,
-};
-use draw_render::PaintContext;
+use draw_render::{CornerRadii, PaintContext};
 use draw_theme::{radius, space, TextSize, Theme};
-use draw_ui::{Align, Flex, Justify, Label, Panel, TextMeasurer, TextOptions, Ui};
+use draw_ui::{
+    dynamic_surface_decor, fill_rounded_rect, fill_rounded_rect_corners, foreground_decor, inset,
+    surface_decor, Align, Flex, Justify, Label, Panel, SurfaceStyle, TextMeasurer, TextOptions,
+    Tone, Ui,
+};
 
 /// Sidebar width in logical pixels.
 pub const SIDEBAR_WIDTH: f32 = 220.0;
@@ -88,7 +89,7 @@ const NOTES: &[Note] = &[
     Note {
         title: "Component kit",
         snippet: "Themed cards, badges and controls",
-        body: "draw_kit layers themed chrome over draw_ui without extending the core \
+        body: "draw_components layers themed chrome over draw_ui without extending the core \
                Widget enum. Surfaces paint behind content; indicators paint in front.",
         tag: "Design",
         modified: "2d ago",
@@ -117,7 +118,6 @@ const TAG_ITEMS: &[&str] = &["Design", "Rust", "Docs"];
 /// Application state shared by every demo host.
 pub struct DemoApp {
     ui: Ui,
-    kit: Kit,
     theme: Theme,
     sidebar: NodeId,
     list: NodeId,
@@ -155,7 +155,7 @@ impl DemoApp {
     pub fn with_theme(theme: Theme) -> Self {
         let mut ui_storage = Ui::new();
         let ui = &mut ui_storage;
-        let mut kit = Kit::new(theme);
+        ui.set_theme(theme);
         let root = ui.root();
 
         let selected = Rc::new(Cell::new(0));
@@ -174,7 +174,10 @@ impl DemoApp {
         );
         ui.set_anchors(sidebar.id(), Edges::new(0.0, 0.0, 0.0, 1.0));
         ui.set_offsets(sidebar.id(), Edges::new(0.0, 0.0, SIDEBAR_WIDTH, 0.0));
-        kit.surface(sidebar.id(), SurfaceStyle::new(theme.palette.surface));
+        ui.add_decor(
+            sidebar.id(),
+            surface_decor(SurfaceStyle::new(theme.palette.surface)),
+        );
 
         let list = ui.add(
             root,
@@ -187,12 +190,18 @@ impl DemoApp {
         );
         ui.set_anchors(list.id(), Edges::new(0.0, 0.0, 0.0, 1.0));
         ui.set_offsets(list.id(), Edges::new(SIDEBAR_WIDTH, 0.0, DETAIL_X, 0.0));
-        kit.surface(list.id(), SurfaceStyle::new(theme.palette.background));
+        ui.add_decor(
+            list.id(),
+            surface_decor(SurfaceStyle::new(theme.palette.background)),
+        );
 
         let detail = ui.add(root, Flex::column().gap(0.0).padding(Edges::ZERO));
         ui.set_anchors(detail.id(), Edges::new(0.0, 0.0, 1.0, 1.0));
         ui.set_offsets(detail.id(), Edges::new(DETAIL_X, 0.0, 0.0, 0.0));
-        kit.surface(detail.id(), SurfaceStyle::new(theme.palette.background));
+        ui.add_decor(
+            detail.id(),
+            surface_decor(SurfaceStyle::new(theme.palette.background)),
+        );
 
         for x in [SIDEBAR_WIDTH, DETAIL_X] {
             let separator = ui.add(root, Panel::new().color(theme.palette.border_subtle).flat());
@@ -206,25 +215,28 @@ impl DemoApp {
             Flex::row().gap(space::XS).padding(Edges::ZERO),
         );
         ui.set_min_size(traffic.id(), Size::new(0.0, 12.0));
-        kit.foreground(traffic.id(), |ctx, rect, theme, _| {
-            let radius = 5.0;
-            let step = radius * 2.0 + 6.0;
-            let y = rect.center().y;
-            for (index, color) in [
-                theme.palette.error,
-                theme.palette.warning,
-                theme.palette.success,
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                ctx.fill_circle(
-                    Vec2::new(rect.left() + radius + index as f32 * step, y),
-                    radius,
-                    color,
-                );
-            }
-        });
+        ui.add_decor(
+            traffic.id(),
+            foreground_decor(theme, |ctx, rect, theme, _| {
+                let radius = 5.0;
+                let step = radius * 2.0 + 6.0;
+                let y = rect.center().y;
+                for (index, color) in [
+                    theme.palette.error,
+                    theme.palette.warning,
+                    theme.palette.success,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    ctx.fill_circle(
+                        Vec2::new(rect.left() + radius + index as f32 * step, y),
+                        radius,
+                        color,
+                    );
+                }
+            }),
+        );
 
         let title_row = ui.add(
             sidebar.id(),
@@ -233,23 +245,28 @@ impl DemoApp {
                 .gap(space::SM)
                 .padding(Edges::ZERO),
         );
-        let app_icon = add_placeholder(&mut kit, ui, title_row.id(), 20.0);
-        kit.surface(
+        let app_icon = add_placeholder(ui, title_row.id(), 20.0);
+        ui.add_decor(
             app_icon.id(),
-            SurfaceStyle::new(theme.palette.accent).radius(radius::SM),
+            surface_decor(SurfaceStyle::new(theme.palette.accent).radius(radius::SM)),
         );
-        kit.foreground(app_icon.id(), |ctx, rect, theme, _| {
-            fill_rounded_rect(ctx, inset(rect, 6.0), 1.0, theme.palette.on_accent);
-        });
-        kit.add(ui, title_row.id(), Text::subheading("Quill"));
+        ui.add_decor(
+            app_icon.id(),
+            foreground_decor(theme, |ctx, rect, theme, _| {
+                fill_rounded_rect(ctx, inset(rect, 6.0), 1.0, theme.palette.on_accent);
+            }),
+        );
+        ui.add(title_row.id(), Text::subheading("Quill"));
 
         let search = ui.add(sidebar.id(), Panel::new().color(Color::TRANSPARENT).flat());
         ui.set_min_size(search.id(), Size::new(0.0, 30.0));
-        kit.surface(
+        ui.add_decor(
             search.id(),
-            SurfaceStyle::new(theme.palette.surface_raised)
-                .border(theme.palette.border)
-                .radius(radius::MD),
+            surface_decor(
+                SurfaceStyle::new(theme.palette.surface_raised)
+                    .border(theme.palette.border)
+                    .radius(radius::MD),
+            ),
         );
         let search_label = ui.add(
             search.id(),
@@ -264,28 +281,16 @@ impl DemoApp {
             Edges::new(space::SM, -8.0, -space::SM, 8.0),
         );
 
-        kit.add(
-            ui,
-            sidebar.id(),
-            Text::caption("Library").tone(Tone::Subtle),
-        );
+        ui.add(sidebar.id(), Text::caption("Library").tone(Tone::Subtle));
         let mut nav_rows = Vec::new();
         for (index, label) in NAV_ITEMS.iter().enumerate() {
-            nav_rows.push(add_nav_row(
-                &mut kit,
-                ui,
-                sidebar.id(),
-                label,
-                index,
-                &selected_nav,
-            ));
+            nav_rows.push(add_nav_row(ui, sidebar.id(), label, index, &selected_nav));
         }
 
-        kit.add(ui, sidebar.id(), Text::caption("Tags").tone(Tone::Subtle));
+        ui.add(sidebar.id(), Text::caption("Tags").tone(Tone::Subtle));
         for (index, label) in TAG_ITEMS.iter().enumerate() {
             let row_index = NAV_ITEMS.len() + index;
             nav_rows.push(add_nav_row(
-                &mut kit,
                 ui,
                 sidebar.id(),
                 label,
@@ -303,8 +308,8 @@ impl DemoApp {
                 .gap(space::SM)
                 .padding(Edges::ZERO),
         );
-        kit.add(ui, footer.id(), Badge::new("v0.1.0").tone(Tone::Muted));
-        kit.add(ui, footer.id(), Text::caption("local").tone(Tone::Subtle));
+        ui.add(footer.id(), Badge::new("v0.1.0").tone(Tone::Muted));
+        ui.add(footer.id(), Text::caption("local").tone(Tone::Subtle));
 
         // ---- content list ----------------------------------------------
         let header = ui.add(
@@ -316,25 +321,16 @@ impl DemoApp {
                 .padding(Edges::new(space::SM, space::XS, space::SM, space::XS)),
         );
         ui.set_min_size(header.id(), Size::new(0.0, 32.0));
-        kit.add(ui, header.id(), Text::heading("All Notes"));
-        kit.add(
-            ui,
+        ui.add(header.id(), Text::heading("All Notes"));
+        ui.add(
             header.id(),
             Text::small(format!("{} notes", NOTES.len())).tone(Tone::Muted),
         );
-        kit.add(ui, list.id(), Divider::horizontal());
+        ui.add(list.id(), Divider::horizontal());
 
         let mut list_rows = Vec::new();
         for (index, note) in NOTES.iter().enumerate() {
-            list_rows.push(add_note_row(
-                &mut kit,
-                ui,
-                list.id(),
-                &theme,
-                note,
-                index,
-                &selected,
-            ));
+            list_rows.push(add_note_row(ui, list.id(), theme, note, index, &selected));
         }
 
         // ---- detail pane ------------------------------------------------
@@ -354,15 +350,15 @@ impl DemoApp {
                 .gap(space::XS)
                 .padding(Edges::ZERO),
         );
-        let back = add_placeholder(&mut kit, ui, nav_group.id(), 28.0);
+        let back = add_placeholder(ui, nav_group.id(), 28.0);
         let selected_prev = selected.clone();
-        kit.on_click(back.id(), move || {
+        ui.set_on_click(back.id(), move || {
             let value = selected_prev.get();
             selected_prev.set(value.saturating_sub(1));
         });
-        let forward = add_placeholder(&mut kit, ui, nav_group.id(), 28.0);
+        let forward = add_placeholder(ui, nav_group.id(), 28.0);
         let selected_next = selected.clone();
-        kit.on_click(forward.id(), move || {
+        ui.set_on_click(forward.id(), move || {
             let value = selected_next.get();
             selected_next.set((value + 1).min(NOTES.len() - 1));
         });
@@ -377,15 +373,14 @@ impl DemoApp {
                 .gap(space::SM)
                 .padding(Edges::ZERO),
         );
-        kit.add(ui, actions.id(), Button::ghost("Share"));
+        ui.add(actions.id(), Button::ghost("Share"));
         let clicks = Rc::new(Cell::new(0));
         let counter = clicks.clone();
-        let primary_button = kit.add(
-            ui,
+        let primary_button = ui.add(
             actions.id(),
             Button::primary("New Note").on_click(move || counter.set(counter.get() + 1)),
         );
-        kit.add(ui, detail.id(), Divider::horizontal());
+        ui.add(detail.id(), Divider::horizontal());
 
         let content = ui.add(
             detail.id(),
@@ -399,11 +394,13 @@ impl DemoApp {
 
         let hero = ui.add(content.id(), Flex::new().padding(Edges::ZERO));
         ui.set_min_size(hero.id(), Size::new(0.0, 220.0));
-        kit.surface(
+        ui.add_decor(
             hero.id(),
-            SurfaceStyle::new(theme.palette.surface_raised)
-                .border(theme.palette.border)
-                .radius(radius::LG),
+            surface_decor(
+                SurfaceStyle::new(theme.palette.surface_raised)
+                    .border(theme.palette.border)
+                    .radius(radius::LG),
+            ),
         );
 
         let note = &NOTES[0];
@@ -414,19 +411,14 @@ impl DemoApp {
                 .gap(space::SM)
                 .padding(Edges::ZERO),
         );
-        let detail_title = kit.add(ui, title_row.id(), Text::heading(note.title));
+        let detail_title = ui.add(title_row.id(), Text::heading(note.title));
         ui.set_flex_grow(detail_title.id(), 1.0);
-        let detail_tag = kit.add(
-            ui,
-            title_row.id(),
-            Text::caption(note.tag).tone(Tone::Accent),
-        );
-        let detail_meta = kit.add(
-            ui,
+        let detail_tag = ui.add(title_row.id(), Text::caption(note.tag).tone(Tone::Accent));
+        let detail_meta = ui.add(
             content.id(),
             Text::small(format!("Edited {} · {}", note.modified, note.tag)).tone(Tone::Muted),
         );
-        let detail_body = kit.add(ui, content.id(), Text::new(note.body).tone(Tone::Muted));
+        let detail_body = ui.add(content.id(), Text::new(note.body).tone(Tone::Muted));
 
         let preferences = ui.add(
             content.id(),
@@ -435,10 +427,10 @@ impl DemoApp {
                 .gap(space::XL)
                 .padding(Edges::ZERO),
         );
-        kit.add(ui, preferences.id(), Checkbox::new("Pin note"));
-        kit.add(ui, preferences.id(), Switch::new().label("Shared"));
+        ui.add(preferences.id(), Checkbox::new("Pin note"));
+        ui.add(preferences.id(), Switch::new().label("Shared"));
 
-        kit.add(ui, content.id(), Divider::horizontal());
+        ui.add(content.id(), Divider::horizontal());
         let actions = ui.add(
             content.id(),
             Flex::row()
@@ -446,36 +438,37 @@ impl DemoApp {
                 .gap(space::SM)
                 .padding(Edges::ZERO),
         );
-        kit.add(ui, actions.id(), Button::secondary("Open"));
-        kit.add(ui, actions.id(), Button::secondary("Duplicate"));
+        ui.add(actions.id(), Button::secondary("Open"));
+        ui.add(actions.id(), Button::secondary("Duplicate"));
         let delete_flag = delete_requested.clone();
-        kit.add(
-            ui,
+        ui.add(
             actions.id(),
             Button::ghost("Delete").on_click(move || delete_flag.set(true)),
         );
 
         // ---- hero: a static image placeholder --------------------------
         // No animation: the app is static so idle performance can be profiled.
-        kit.foreground(hero.id(), |ctx, rect, theme, _| {
-            let side = 64.0f32
-                .min(rect.size.width - 24.0)
-                .min(rect.size.height - 24.0)
-                .max(0.0);
-            if side > 0.0 {
-                let inner = Rect::from_center_size(rect.center(), Size::splat(side));
-                fill_rounded_rect(
-                    ctx,
-                    inner,
-                    radius::MD,
-                    theme.palette.subtle.with_alpha(0.18),
-                );
-            }
-        });
+        ui.add_decor(
+            hero.id(),
+            foreground_decor(theme, |ctx, rect, theme, _| {
+                let side = 64.0f32
+                    .min(rect.size.width - 24.0)
+                    .min(rect.size.height - 24.0)
+                    .max(0.0);
+                if side > 0.0 {
+                    let inner = Rect::from_center_size(rect.center(), Size::splat(side));
+                    fill_rounded_rect(
+                        ctx,
+                        inner,
+                        radius::MD,
+                        theme.palette.subtle.with_alpha(0.18),
+                    );
+                }
+            }),
+        );
 
         Self {
             ui: ui_storage,
-            kit,
             theme,
             sidebar: sidebar.id(),
             list: list.id(),
@@ -635,9 +628,7 @@ impl DemoApp {
             self.theme.palette.background,
         );
 
-        self.kit.paint_surfaces(&self.ui, ctx);
         self.ui.paint(ctx);
-        self.kit.paint_foreground(&self.ui, ctx);
         self.overlays.paint(ctx);
     }
 
@@ -646,13 +637,7 @@ impl DemoApp {
         if self.overlays.handle_input(event).is_handled() {
             return EventResult::Handled;
         }
-        let kit_handled = self.kit.handle_input(&self.ui, event);
-        let ui_result = self.ui.handle_input(event);
-        if kit_handled || ui_result.is_handled() {
-            EventResult::Handled
-        } else {
-            ui_result
-        }
+        self.ui.handle_input(event)
     }
 
     /// Controls in the demo UI.
@@ -660,41 +645,50 @@ impl DemoApp {
         self.ui.control_count()
     }
 
-    /// Whether the pointer is over anything clickable (kit component or a
+    /// Whether the pointer is over anything clickable (a themed component or
     /// core button). Hosts use this for cursor feedback.
     pub fn pointer_over_clickable(&self) -> bool {
-        self.kit.hovered().is_some() || self.ui.hovered_is_button()
+        self.ui
+            .hovered()
+            .is_some_and(|id| self.ui.is_interactive(id))
     }
 }
 
 /// Adds a compact rounded-square icon/thumbnail placeholder.
-fn add_placeholder(kit: &mut Kit, ui: &mut Ui, parent: NodeId, size: f32) -> draw_kit::ControlRef {
+fn add_placeholder(ui: &mut Ui, parent: NodeId, size: f32) -> draw_ui::ControlRef {
+    let theme = ui.theme();
     let node = ui.add(parent, Panel::new().color(Color::TRANSPARENT).flat());
     ui.set_min_size(node.id(), Size::new(size, size));
-    kit.dynamic_surface(node.id(), move |theme, state| {
-        let fill = if state.hovered || state.pressed {
-            theme.palette.surface_hover
-        } else {
-            Color::TRANSPARENT
-        };
-        SurfaceStyle::new(fill).radius(radius::SM)
-    });
-    kit.foreground(node.id(), |ctx, rect, theme, _| {
-        let inner = inset(rect, rect.size.width * 0.32);
-        fill_rounded_rect(ctx, inner, 1.5, theme.palette.subtle);
-    });
+    ui.add_decor(
+        node.id(),
+        dynamic_surface_decor(theme, move |theme, state| {
+            let fill = if state.hovered || state.pressed {
+                theme.palette.surface_hover
+            } else {
+                Color::TRANSPARENT
+            };
+            SurfaceStyle::new(fill).radius(radius::SM)
+        }),
+    );
+    ui.add_decor(
+        node.id(),
+        foreground_decor(theme, |ctx, rect, theme, _| {
+            let inner = inset(rect, rect.size.width * 0.32);
+            fill_rounded_rect(ctx, inner, 1.5, theme.palette.subtle);
+        }),
+    );
     node
 }
 
 /// Adds one sidebar navigation row (icon placeholder + label + selection).
 fn add_nav_row(
-    kit: &mut Kit,
     ui: &mut Ui,
     parent: NodeId,
     label: &str,
     index: usize,
     selected: &Rc<Cell<usize>>,
 ) -> NodeId {
+    let theme = ui.theme();
     let row = ui.add(
         parent,
         Flex::row()
@@ -704,36 +698,38 @@ fn add_nav_row(
     );
     ui.set_min_size(row.id(), Size::new(0.0, 28.0));
 
-    let icon = add_placeholder(kit, ui, row.id(), 14.0);
+    let icon = add_placeholder(ui, row.id(), 14.0);
     let _ = icon;
 
-    kit.add(ui, row.id(), Text::small(label));
+    ui.add(row.id(), Text::small(label));
 
     let state = selected.clone();
     let current = index;
-    kit.dynamic_surface(row.id(), move |theme, interact| {
-        let fill = if state.get() == current {
-            theme.palette.selection
-        } else if interact.hovered {
-            theme.palette.surface_hover
-        } else {
-            Color::TRANSPARENT
-        };
-        SurfaceStyle::new(fill).radius(radius::SM)
-    });
+    ui.add_decor(
+        row.id(),
+        dynamic_surface_decor(theme, move |theme, interact| {
+            let fill = if state.get() == current {
+                theme.palette.selection
+            } else if interact.hovered {
+                theme.palette.surface_hover
+            } else {
+                Color::TRANSPARENT
+            };
+            SurfaceStyle::new(fill).radius(radius::SM)
+        }),
+    );
 
     let click = selected.clone();
     let target = index;
-    kit.on_click(row.id(), move || click.set(target));
+    ui.set_on_click(row.id(), move || click.set(target));
     row.id()
 }
 
 /// Adds one note row to the content list.
 fn add_note_row(
-    kit: &mut Kit,
     ui: &mut Ui,
     parent: NodeId,
-    theme: &Theme,
+    theme: Theme,
     note: &Note,
     index: usize,
     selected: &Rc<Cell<usize>>,
@@ -750,75 +746,81 @@ fn add_note_row(
     let state = selected.clone();
     let current = index;
     // Square left corners, rounded right corners (a macOS-style list item).
-    kit.dynamic_surface(row.id(), move |theme, interact| {
-        let fill = if state.get() == current {
-            theme.palette.selection
-        } else if interact.hovered {
-            theme.palette.surface_hover
-        } else {
-            Color::TRANSPARENT
-        };
-        SurfaceStyle::new(fill).corners(CornerRadii::new(0.0, radius::MD, radius::MD, 0.0))
-    });
+    ui.add_decor(
+        row.id(),
+        dynamic_surface_decor(theme, move |theme, interact| {
+            let fill = if state.get() == current {
+                theme.palette.selection
+            } else if interact.hovered {
+                theme.palette.surface_hover
+            } else {
+                Color::TRANSPARENT
+            };
+            SurfaceStyle::new(fill).corners(CornerRadii::new(0.0, radius::MD, radius::MD, 0.0))
+        }),
+    );
 
     let state = selected.clone();
     let current = index;
     // A full-height accent bar marks the selected item.
-    kit.foreground(row.id(), move |ctx, rect, theme, _| {
-        if state.get() == current {
-            let bar = Rect::from_min_max(
-                Vec2::new(rect.left(), rect.top()),
-                Vec2::new(rect.left() + 3.0, rect.bottom()),
-            );
-            fill_rounded_rect_corners(
-                ctx,
-                bar,
-                CornerRadii::new(0.0, 1.5, 1.5, 0.0),
-                theme.palette.accent,
-            );
-        }
-    });
+    ui.add_decor(
+        row.id(),
+        foreground_decor(theme, move |ctx, rect, theme, _| {
+            if state.get() == current {
+                let bar = Rect::from_min_max(
+                    Vec2::new(rect.left(), rect.top()),
+                    Vec2::new(rect.left() + 3.0, rect.bottom()),
+                );
+                fill_rounded_rect_corners(
+                    ctx,
+                    bar,
+                    CornerRadii::new(0.0, 1.5, 1.5, 0.0),
+                    theme.palette.accent,
+                );
+            }
+        }),
+    );
 
-    let thumb = add_placeholder(kit, ui, row.id(), 44.0);
-    kit.surface(
+    let thumb = add_placeholder(ui, row.id(), 44.0);
+    ui.add_decor(
         thumb.id(),
-        SurfaceStyle::new(theme.palette.surface_raised)
-            .border(theme.palette.border)
-            .radius(radius::MD),
+        surface_decor(
+            SurfaceStyle::new(theme.palette.surface_raised)
+                .border(theme.palette.border)
+                .radius(radius::MD),
+        ),
     );
     let shade = 0.18 + index as f32 * 0.05;
-    kit.foreground(thumb.id(), move |ctx, rect, theme, _| {
-        fill_rounded_rect(
-            ctx,
-            inset(rect, 12.0),
-            2.0,
-            theme.palette.subtle.with_alpha(shade),
-        );
-    });
+    ui.add_decor(
+        thumb.id(),
+        foreground_decor(theme, move |ctx, rect, theme, _| {
+            fill_rounded_rect(
+                ctx,
+                inset(rect, 12.0),
+                2.0,
+                theme.palette.subtle.with_alpha(shade),
+            );
+        }),
+    );
 
     let column = ui.add(
         row.id(),
         Flex::column().gap(space::XXS).padding(Edges::ZERO),
     );
     ui.set_flex_grow(column.id(), 1.0);
-    kit.add(ui, column.id(), Text::small(note.title));
-    kit.add(
-        ui,
+    ui.add(column.id(), Text::small(note.title));
+    ui.add(
         column.id(),
         Text::caption(note.snippet)
             .tone(Tone::Muted)
             .max_lines(1)
             .ellipsis(true),
     );
-    kit.add(
-        ui,
-        column.id(),
-        Text::caption(note.modified).tone(Tone::Subtle),
-    );
+    ui.add(column.id(), Text::caption(note.modified).tone(Tone::Subtle));
 
     let click = selected.clone();
     let target = index;
-    kit.on_click(row.id(), move || click.set(target));
+    ui.set_on_click(row.id(), move || click.set(target));
     row.id()
 }
 
@@ -996,8 +998,7 @@ mod tests {
         let row_rect = rect(&app, row);
 
         let mut ctx = PaintContext::new();
-        app.kit.paint_surfaces(&app.ui, &mut ctx);
-        app.kit.paint_foreground(&app.ui, &mut ctx);
+        app.ui.paint(&mut ctx);
         let list = ctx.into_draw_list();
 
         // The selection surface is square on the left and rounded on the right.

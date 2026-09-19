@@ -4,14 +4,14 @@ use draw_core::{Color, NodeId};
 use draw_theme::TextSize;
 use draw_ui::{Label, TextOptions};
 
-use crate::tone::Tone;
-use crate::{Component, ControlRef, Kit, Ui};
+use crate::{Component, ControlRef, Ui};
+use draw_ui::Tone;
 
 /// A single block of text with a semantic size and color.
 ///
 /// ```ignore
-/// kit.add(&mut ui, parent, Text::heading("Settings"));
-/// kit.add(&mut ui, parent, Text::body("Changes are saved automatically.").tone(Tone::Muted));
+/// ui.add(parent, Text::heading("Settings"));
+/// ui.add(parent, Text::body("Changes are saved automatically.").tone(Tone::Muted));
 /// ```
 #[derive(Debug, Clone)]
 pub struct Text {
@@ -107,8 +107,9 @@ impl Text {
 }
 
 impl Component for Text {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let color = self.color.unwrap_or_else(|| self.tone.color(kit.theme()));
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let theme = ui.theme();
+        let color = self.color.unwrap_or_else(|| self.tone.color(&theme));
         ui.add(
             parent,
             Label::new(self.text)
@@ -128,9 +129,9 @@ mod tests {
     #[test]
     fn text_mounts_a_label_with_resolved_tone() {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(Theme::dark());
+        ui.set_theme(Theme::dark());
         let root = ui.root();
-        let control = kit.add(&mut ui, root, Text::heading("Hi").tone(Tone::Error));
+        let control = ui.add(root, Text::heading("Hi").tone(Tone::Error));
         ui.layout(Viewport::new(Size::new(400.0, 200.0)));
         assert!(ui.control(control.id()).is_some());
         match ui.widget(control.id()) {
@@ -151,9 +152,9 @@ mod tests {
     #[test]
     fn explicit_color_wins() {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(Theme::light());
+        ui.set_theme(Theme::light());
         let root = ui.root();
-        let control = kit.add(&mut ui, root, Text::caption("v1.2.0").color(Color::WHITE));
+        let control = ui.add(root, Text::caption("v1.2.0").color(Color::WHITE));
         assert_eq!(
             ui.widget(control.id()).and_then(|w| w.text()),
             Some("v1.2.0")

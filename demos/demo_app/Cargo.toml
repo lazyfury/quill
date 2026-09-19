@@ -12,7 +12,7 @@ draw_render.workspace = true
 draw_scene.workspace = true
 draw_ui.workspace = true
 draw_theme.workspace = true
-draw_kit.workspace = true
+draw_components.workspace = true
 
 [dev-dependencies]
 draw_backend_recording.workspace = true

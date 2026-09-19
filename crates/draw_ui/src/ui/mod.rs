@@ -20,8 +20,10 @@ use std::rc::Rc;
 
 use draw_core::{Edges, NodeId, Viewport};
 use draw_scene::SceneTree;
+use draw_theme::Theme;
 
 use crate::control::{ControlData, MouseFilter};
+use crate::decor::{DecorRef, InteractState};
 use crate::layout::{layout_text, ApproxTextMeasurer, ContentSize, TextMeasurer, TextOptions};
 use crate::widget::{ButtonState, Widget};
 
@@ -45,11 +47,15 @@ pub type ClickCallback = Rc<RefCell<dyn FnMut()>>;
 /// iterates the scene tree in draw order, and input uses reverse-order hit
 /// testing.
 pub struct Ui {
+    pub(super) theme: Theme,
     pub(super) tree: SceneTree,
     pub(super) root: NodeId,
     pub(super) controls: HashMap<NodeId, ControlData>,
     pub(super) widgets: HashMap<NodeId, Widget>,
     pub(super) callbacks: HashMap<NodeId, ClickCallback>,
+    /// Themed chrome attached per node by components (surfaces, foregrounds).
+    /// Multiple decorators compose: all behind, then content, then all front.
+    pub(super) decorations: HashMap<NodeId, Vec<DecorRef>>,
     pub(super) hovered: Option<NodeId>,
     pub(super) pressed: Option<NodeId>,
     pub(super) focused: Option<NodeId>,
@@ -94,11 +100,13 @@ impl Ui {
         );
 
         Self {
+            theme: Theme::default(),
             tree,
             root,
             controls,
             widgets: HashMap::new(),
             callbacks: HashMap::new(),
+            decorations: HashMap::new(),
             hovered: None,
             pressed: None,
             focused: None,
@@ -126,6 +134,17 @@ impl Ui {
 
     pub fn root(&self) -> NodeId {
         self.root
+    }
+
+    /// The active theme. Components read colors/spacing from it when mounting.
+    pub fn theme(&self) -> Theme {
+        self.theme
+    }
+
+    /// Replaces the theme. Decorators created before this keep their resolved
+    /// theme, so call it before mounting components.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
     }
 
     /// Number of times the full measure/arrange pass has run.
@@ -243,6 +262,46 @@ impl Ui {
         self.focused
     }
 
+    /// Attaches themed chrome to `id`, painted by [`Ui::paint`] around the
+    /// control's own content. Multiple decorators compose in registration order.
+    pub fn add_decor(&mut self, id: NodeId, decor: DecorRef) {
+        if self.controls.contains_key(&id) {
+            self.decorations.entry(id).or_default().push(decor);
+        }
+    }
+
+    /// Decorators attached to `id`, in paint order.
+    pub fn decor(&self, id: NodeId) -> &[DecorRef] {
+        self.decorations.get(&id).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// Hover/pressed/focused state of `id`, inherited from its ancestors.
+    pub fn state_for(&self, id: NodeId) -> InteractState {
+        InteractState {
+            hovered: self
+                .hovered
+                .is_some_and(|node| is_self_or_ancestor(self, node, id)),
+            pressed: self
+                .pressed
+                .is_some_and(|node| is_self_or_ancestor(self, node, id)),
+            focused: self
+                .focused
+                .is_some_and(|node| is_self_or_ancestor(self, node, id)),
+        }
+    }
+
+    /// Whether `id` or any ancestor has a click callback.
+    pub fn is_interactive(&self, id: NodeId) -> bool {
+        let mut current = Some(id);
+        while let Some(node) = current {
+            if self.callbacks.contains_key(&node) {
+                return true;
+            }
+            current = self.tree.parent(node);
+        }
+        false
+    }
+
     pub fn button_state(&self, id: NodeId) -> Option<ButtonState> {
         match self.widgets.get(&id) {
             Some(Widget::Button(button)) => Some(button.state),
@@ -260,4 +319,15 @@ impl Ui {
             .map(|children| children.to_vec())
             .unwrap_or_default()
     }
+}
+
+fn is_self_or_ancestor(ui: &Ui, candidate: NodeId, node: NodeId) -> bool {
+    let mut current = Some(candidate);
+    while let Some(id) = current {
+        if id == node {
+            return true;
+        }
+        current = ui.tree.parent(id);
+    }
+    false
 }

@@ -100,11 +100,19 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
   advance. `TextMeasurer::measure_run` is the backend-neutral hook so layout
   measures with the same shaping; the Canvas/WASM `measureText` measurer also
   measures whole runs. The core stays text-free.
-- Stage 22 — overlay layer [done]: `draw_kit::Overlays` owns its own `Ui` + `Kit`
+- Stage 22 — overlay layer [done]: `draw_components::Overlays` owns its own `Ui`
   and provides `confirm` / `popover` / `tips` / `message` builders on top of a
   pure placement module (edge flipping + margin clamp). It handles scrims, modal
   input capture, Esc/click-outside dismissal, auto-dismiss timers and callbacks;
   hosts call `layout`, `paint` and `handle_input` around their own pipeline.
+- Stage 23 — per-node decorations [done]: `draw_ui::{NodeDecor, InteractState}`
+  plus `Ui::add_decor` / `Ui::state_for` let components attach themed chrome to
+  their root node. `Ui::paint` runs decorators around the widget content in one
+  pass and `Ui::set_on_click` accepts any control, dispatching to the nearest
+  ancestor. `Ui` owns the active `Theme` (`Ui::theme`/`set_theme`, so
+  `draw_ui -> draw_theme`) and the `Kit` runtime is gone: `draw_components` components
+  implement `draw_ui::Component`, read `ui.theme()` and attach decorators, and
+  hosts run a single `ui.paint` / `ui.handle_input`.
 
 ## Debugging & performance inspection (Stage 10)
 

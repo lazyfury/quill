@@ -141,7 +141,7 @@ impl Ui {
     where
         F: FnMut() + 'static,
     {
-        if !self.widgets.get(&id).is_some_and(Widget::is_button) {
+        if !self.controls.contains_key(&id) {
             return false;
         }
         self.callbacks.insert(id, Rc::new(RefCell::new(callback)));

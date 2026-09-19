@@ -5,7 +5,7 @@ members = [
     "crates/draw_scene",
     "crates/draw_ui",
     "crates/draw_theme",
-    "crates/draw_kit",
+    "crates/draw_components",
     "crates/draw_render",
     "crates/draw_profile",
     "crates/draw_debug_ui",
@@ -33,7 +33,7 @@ draw_core = { path = "crates/draw_core" }
 draw_scene = { path = "crates/draw_scene" }
 draw_ui = { path = "crates/draw_ui" }
 draw_theme = { path = "crates/draw_theme" }
-draw_kit = { path = "crates/draw_kit" }
+draw_components = { path = "crates/draw_components" }
 draw_render = { path = "crates/draw_render" }
 draw_profile = { path = "crates/draw_profile" }
 draw_debug_ui = { path = "crates/draw_debug_ui" }

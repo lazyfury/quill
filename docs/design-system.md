@@ -1,6 +1,6 @@
 # Design system — theme & components
 
-`draw_theme` holds the design tokens; `draw_kit` builds themed components on top
+`draw_theme` holds the design tokens; `draw_components` builds themed components on top
 of `draw_ui`. The core drawing crates are **locked** here: the theme and
 component layers do not change `draw_core`, `draw_scene`, `draw_render` or
 `draw_ui` (see the "Locked core" section below).
@@ -59,53 +59,62 @@ Semantic accents (`accent`, `success`, `warning`, `error`, `info`), `on_accent`,
 - Controls: `control::{HEIGHT,HEIGHT_SM,HEIGHT_LG,ICON,ROW,ROW_SM,TAB}`.
 - Motion: `motion::{FAST,NORMAL,SLOW}` = 100/150/200 ms.
 
-## Components — `draw_kit`
+## Components — `draw_components`
 
-`Kit` layers themed chrome over a `draw_ui::Ui` without extending the core
-`Widget` enum:
+The crate split is deliberate: `draw_ui` is the UI runtime **and** the styling
+primitives (`SurfaceStyle`, `fill_rounded_rect`/`inset`/`surface`, `Tone`,
+`SurfaceTone`, and the `surface_decor`/`dynamic_surface_decor`/
+`foreground_decor` factories), while `draw_components` contains **only component
+builders**. Components implement `draw_ui::Component`, read the active `Theme`
+from `ui.theme()`, and attach their chrome to their own node. Hosts build one
+`Ui`, set the theme once, and use a single paint/input pass:
 
 ```rust
-use draw_kit::{Card, Checkbox, Kit, Text, Tone};
+use draw_components::{Card, Checkbox, Text};
 use draw_theme::{space, Theme};
-use draw_ui::Ui;
+use draw_ui::{Tone, Ui};
 
 let mut ui = Ui::new();
-let mut kit = Kit::new(Theme::dark());
+ui.set_theme(Theme::dark());
 
 let root = ui.root();
-let card = kit.add(&mut ui, root, Card::new().gap(space::MD));
-kit.add(&mut ui, card.id(), Text::heading("Settings"));
-kit.add(&mut ui, card.id(), Text::small("Changes save automatically.").tone(Tone::Muted));
-kit.add(&mut ui, card.id(), Checkbox::new("Verbose output"));
+let card = ui.add(root, Card::new().gap(space::MD));
+ui.add(card.id(), Text::heading("Settings"));
+ui.add(card.id(), Text::small("Changes save automatically.").tone(Tone::Muted));
+ui.add(card.id(), Checkbox::new("Verbose output"));
 
 ui.layout(viewport);
-kit.paint_surfaces(&ui, &mut ctx);   // behind content
-ui.paint(&mut ctx);
-kit.paint_foreground(&ui, &mut ctx); // marks, knobs, indicators
-kit.handle_input(&ui, &event);       // alongside ui.handle_input(&event)
+ui.paint(&mut ctx);        // surfaces + content + marks, in tree order
+ui.handle_input(&event);   // dispatches component clicks
 ```
 
 ### Paint passes
 
-`Kit` cannot extend `Ui::paint`, so hosts call three passes in order:
+Themed chrome is attached to a control as a `draw_ui::NodeDecor` (built by the
+`draw_ui` decorator helpers `surface_decor` / `dynamic_surface_decor` /
+`foreground_decor`), so a single `ui.paint` runs it in tree order:
 
-1. `kit.paint_surfaces` — rounded surfaces/borders behind content.
-2. `ui.paint` — labels, buttons and other `draw_ui` widgets.
-3. `kit.paint_foreground` — check marks, switch knobs, terminal dots, icons.
+1. every decorator's `paint_behind` — rounded surfaces/borders behind content,
+2. the control's own `Widget` content,
+3. every decorator's `paint_front` — check marks, switch knobs, terminal dots.
+
+There are no separate surface/foreground passes, and a decorator is painted
+next to the node it belongs to (so it is torn down with the node).
 
 `paint::fill_rounded_rect` / `paint::surface` compose the render IR's rects and
 circles into rounded surfaces without double-blending translucent fills.
 
 ### Interactions
 
-`Kit::handle_input` hit-tests by walking up from `Ui::hit_test`, so clicking any
-descendant of a component root activates it. Hover/pressed state propagates to
-descendants, which lets indicators repaint from shared `Rc<Cell<_>>` state
-without remounting. Checkbox/Switch share their state through `Rc<Cell<bool>>`.
+Components register clicks with `ui.set_on_click(node, ..)`; a hit on any
+descendant walks up to the nearest ancestor callback. Hover/pressed/focused
+state lives in the core and `Ui::state_for(node)` inherits it from ancestors,
+which is what decorators read each frame. Checkbox/Switch share their state
+through `Rc<Cell<bool>>`.
 
 Surfaces are usually static, but selection and hover need per-frame styles:
-`Kit::dynamic_surface(node, |theme, state| ...)` recomputes a `SurfaceStyle` from
-the theme and the node's `InteractState` on every frame.
+`dynamic_surface_decor(theme, |theme, state| ...)` recomputes a `SurfaceStyle`
+from the theme and the node's `InteractState` on every frame.
 
 ### Demo
 
@@ -128,26 +137,26 @@ placeholders) and detail pane (toolbar, hero scene, body, actions).
 | `Checkbox` | compact control with shared state and `on_change`. |
 | `Switch` | compact on/off control. |
 
-Extend the library by implementing `draw_kit::Component`:
+Extend the library by implementing `draw_ui::Component`:
 
 ```rust
 use draw_core::NodeId;
-use draw_kit::{Component, ControlRef, Kit, Tone};
-use draw_ui::Ui;
+use draw_components::{Component, ControlRef};
+use draw_ui::Tone;
+use draw_ui::{Label, Ui};
 
 struct Caption(String);
 
 impl Component for Caption {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let _ = kit;
-        ui.add(parent, draw_ui::Label::new(self.0))
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        ui.add(parent, Label::new(self.0))
     }
 }
 ```
 
 ## Overlays
 
-`draw_kit::Overlays` is a generic floating layer built on its own `Ui` + `Kit`.
+`draw_components::Overlays` is a generic floating layer built on its own `Ui`.
 It keeps the host pipeline explicit — the host lays out its UI, then the layer,
 and paints the layer last:
 
@@ -184,13 +193,34 @@ layout stays incremental. Button clicks, Esc and click-outside push actions that
 foundation for the design system. The theme and component layers only *use* their
 public APIs:
 
-- `draw_kit` composes `Panel`, `Label`, `Flex` and the layout setters.
+- `draw_components` composes `Panel`, `Label`, `Flex` and the layout setters.
 - No new variants were added to `draw_ui::Widget`.
-- Themed surfaces are painted by `draw_kit` into the backend-neutral
+- Themed surfaces are painted by `draw_components` into the backend-neutral
   `DrawList`, so every backend renders them.
 
 If a future component truly requires a core change, do it as a separate,
 backward-compatible addition and record it here.
+
+### Recorded core additions
+
+- **`draw_ui::NodeDecor` / `InteractState` + `Ui::add_decor`** (Stage 22): the
+  closed `Widget` enum cannot carry themed chrome, so components attach a
+  `NodeDecor` to a node instead. `Ui::paint` runs `paint_behind` / content /
+  `paint_front` per node and `Ui::state_for` resolves inherited hover/pressed/
+  focused. `Ui::set_on_click` now accepts any control (not just
+  `Widget::Button`) and dispatches to the nearest ancestor callback, so themed
+  component roots own their clicks. `draw_components` no longer keeps a surface /
+  foreground / interaction registry; its decorator helpers build `NodeDecor`
+  values from the theme. This is additive: existing `Widget`/`ControlData`
+  shapes are unchanged.
+- **`draw_ui` owns the theme and styling primitives** (Stage 24): `draw_ui` now
+  depends on `draw_theme` and `Ui::theme()` / `Ui::set_theme()` expose the active
+  tokens. `SurfaceStyle`, `fill_rounded_rect`/`fill_rounded_rect_corners`/`inset`/
+  `surface`, `Tone`, `SurfaceTone` and the `surface_decor`/
+  `dynamic_surface_decor`/`foreground_decor` factories moved from `draw_kit` into
+  `draw_ui`. `Theme` stays pure data (mode + palette + scale accessors), and
+  `draw_components` (renamed from `draw_kit`) now contains only component
+  builders.
 
 ## Deferred
 

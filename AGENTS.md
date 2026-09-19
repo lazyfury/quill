@@ -30,7 +30,7 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
    state markers. If a claim cannot be verified without a screenshot, say so
    rather than capturing one.
 8. **The design-system layers do not extend the core.** `draw_theme` (tokens)
-   and `draw_kit` (components) may only use the public APIs of `draw_core`,
+   and `draw_components` (components) may only use the public APIs of `draw_core`,
    `draw_scene`, `draw_render` and `draw_ui`. Keep `draw_ui::Widget` and the
    backend-neutral core frozen unless a change is genuinely required and
    backward compatible; record any such change in `docs/design-system.md`.
@@ -44,8 +44,8 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 draw_core            (no draw_* deps)
 draw_theme   -> draw_core
 draw_scene    -> draw_core, draw_render
-draw_ui       -> draw_core, draw_scene, draw_render
-draw_kit      -> draw_core, draw_ui, draw_render, draw_theme
+draw_ui         -> draw_core, draw_scene, draw_render, draw_theme
+draw_components -> draw_core, draw_ui, draw_render, draw_theme
 draw_render   -> draw_core
 draw_profile  -> draw_core, draw_render
 draw_debug_ui -> draw_core, draw_render, draw_ui, draw_profile
@@ -108,7 +108,7 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       `FontMode::Pixel` (built-in bitmap); `set_font_config` switches at runtime
       and `FontMetrics` lets `wgpu_demo` inject a matching `TextMeasurer`.
 - [x] Stage 20 — design system: `draw_theme` design tokens (light/dark
-      palettes, spacing/radius/type/motion scales) + `draw_kit` themed component
+      palettes, spacing/radius/type/motion scales) + `draw_components` themed component
       library (`Text`, `Card`, `Divider`, `Badge`, `Button`, `CodeBlock`,
       `Terminal`, `EmptyState`, `Checkbox`, `Switch`) built on frozen `draw_ui`
       primitives, plus the shared `demo_app` rewritten as a three-column
@@ -119,12 +119,24 @@ tests/bench) and `demos/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
       for alignment. `TextMeasurer::measure_run` (default: sum of advances) lets
       layout measure with the same shaping; the Canvas/WASM `measureText`
       measurer uses it too. The core stays text-free.
-- [x] Stage 22 — overlay layer (`draw_kit::Overlays`): a generic floating layer
-      (own `Ui` + `Kit`) with `confirm`, `popover`, `tips` and `message` builders,
+- [x] Stage 22 — overlay layer (`draw_components::Overlays`): a generic floating layer
+      (own `Ui`) with `confirm`, `popover`, `tips` and `message` builders,
       edge-aware placement with flipping (`overlay::placement`), scrims, input
       capture/modal blocking, Esc/click-outside dismissal, auto-dismiss timers
-      and `on_confirm`/`on_cancel`/`on_close` callbacks. `draw_kit::Button`
+      and `on_confirm`/`on_cancel`/`on_close` callbacks. `draw_components::Button`
       gained a `Destructive` variant.
+- [x] Stage 23 — per-node decorations, no `Kit`: added
+      `draw_ui::{NodeDecor, InteractState}`, `Ui::add_decor`, `Ui::state_for`,
+      `Ui::is_interactive`; `Ui::paint` runs `paint_behind` / content /
+      `paint_front` per node and `Ui::set_on_click` accepts any control and
+      dispatches to the nearest ancestor. `Ui` owns the `Theme`
+      (`Ui::theme`/`set_theme`, so `draw_ui -> draw_theme`). The `Kit` runtime is
+      gone: `draw_components` components implement `draw_ui::Component`, read
+      `ui.theme()` and attach `draw_ui::{surface_decor, dynamic_surface_decor,
+      foreground_decor}`. Hosts run a single `ui.paint` + `ui.handle_input`.
+      `draw_components` holds only component builders; the surface/tone/decorator
+      primitives live in `draw_ui`.
+      Recorded in `docs/design-system.md`.
 
 ## Per-stage gate (must run)
 

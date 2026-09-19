@@ -14,6 +14,12 @@ impl Ui {
                 continue;
             };
             let rect = control.rect;
+            let state = self.state_for(id);
+            if let Some(decorators) = self.decorations.get(&id) {
+                for decor in decorators {
+                    decor.paint_behind(ctx, rect, state);
+                }
+            }
             match widget {
                 Widget::Panel { color, border } => {
                     ctx.fill_rect(rect, *color);
@@ -70,6 +76,11 @@ impl Ui {
                     }
                 }
                 Widget::Flex(_) | Widget::Grid(_) => {}
+            }
+            if let Some(decorators) = self.decorations.get(&id) {
+                for decor in decorators {
+                    decor.paint_front(ctx, rect, state);
+                }
             }
         }
     }

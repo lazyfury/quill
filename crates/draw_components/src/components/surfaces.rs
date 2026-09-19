@@ -5,14 +5,15 @@ use draw_render::PaintContext;
 use draw_theme::{radius, space, TextSize};
 use draw_ui::{Align, Flex, Justify, Label, TextOptions};
 
-use crate::paint::{self, SurfaceStyle};
-use crate::tone::{SurfaceTone, Tone};
-use crate::{Component, ControlRef, Kit, Text, Ui};
+use crate::{Component, ControlRef, Text, Ui};
+use draw_ui::{foreground_decor, surface_decor};
+use draw_ui::{surface, SurfaceStyle};
+use draw_ui::{SurfaceTone, Tone};
 
 /// A structured container: thin border, subtle surface, restrained radius.
 ///
-/// The card is a column flex container, so children flow vertically. It is
-/// painted by [`Kit::paint_surfaces`] behind its content.
+/// The card is a column flex container, so children flow vertically. Its
+/// surface is attached as a `draw_ui::NodeDecor` and painted behind its content.
 #[derive(Debug, Clone, Copy)]
 pub struct Card {
     tone: SurfaceTone,
@@ -81,8 +82,8 @@ impl Card {
 }
 
 impl Component for Card {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = *kit.theme();
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let theme = ui.theme();
         let fill = self.fill.unwrap_or_else(|| self.tone.color(&theme));
         let border = if self.hairline {
             Some(theme.palette.border)
@@ -90,12 +91,10 @@ impl Component for Card {
             None
         };
         let card = ui.add(parent, Flex::column().gap(self.gap).padding(self.padding));
-        kit.surface(
-            card.id(),
-            SurfaceStyle::new(fill)
-                .radius(self.radius)
-                .border_opt(border),
-        );
+        let style = SurfaceStyle::new(fill)
+            .radius(self.radius)
+            .border_opt(border);
+        ui.add_decor(card.id(), surface_decor(style));
         card
     }
 }
@@ -119,7 +118,7 @@ impl Divider {
 }
 
 impl Component for Divider {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
         let node = ui.add(parent, Flex::new().padding(Edges::ZERO));
         crate::detach(ui, node.id());
         let min = if self.vertical {
@@ -128,10 +127,8 @@ impl Component for Divider {
             Size::new(0.0, 1.0)
         };
         ui.set_min_size(node.id(), min);
-        kit.surface(
-            node.id(),
-            SurfaceStyle::new(kit.theme().palette.border_subtle),
-        );
+        let style = SurfaceStyle::new(ui.theme().palette.border_subtle);
+        ui.add_decor(node.id(), surface_decor(style));
         node
     }
 }
@@ -178,8 +175,8 @@ impl Badge {
 }
 
 impl Component for Badge {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = *kit.theme();
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let theme = ui.theme();
         let font = TextSize::Caption.px();
         let accent = self.tone.color(&theme);
         let pad = Edges::symmetric(space::SM, space::XXS);
@@ -201,7 +198,7 @@ impl Component for Badge {
                 .border(accent.with_alpha(0.30))
                 .radius(self.radius)
         };
-        kit.surface(node.id(), style);
+        ui.add_decor(node.id(), surface_decor(style));
 
         let text_color = if self.solid {
             theme.palette.on_accent
@@ -248,26 +245,24 @@ impl CodeBlock {
 }
 
 impl Component for CodeBlock {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = *kit.theme();
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let theme = ui.theme();
         let block = ui.add(
             parent,
             Flex::column().gap(space::SM).padding(Edges::all(space::LG)),
         );
-        kit.surface(
-            block.id(),
-            SurfaceStyle::new(theme.palette.code_surface)
-                .border(theme.palette.border)
-                .radius(radius::LG),
-        );
+        let style = SurfaceStyle::new(theme.palette.code_surface)
+            .border(theme.palette.border)
+            .radius(radius::LG);
+        ui.add_decor(block.id(), surface_decor(style));
 
         if self.filename.is_some() || self.language.is_some() {
             let header = ui.add(block.id(), Flex::row().align(Align::Center).gap(space::SM));
             if let Some(filename) = self.filename {
-                kit.add(ui, header.id(), Text::small(filename).tone(Tone::Muted));
+                ui.add(header.id(), Text::small(filename).tone(Tone::Muted));
             }
             if let Some(language) = self.language {
-                kit.add(ui, header.id(), Text::caption(language).tone(Tone::Subtle));
+                ui.add(header.id(), Text::caption(language).tone(Tone::Subtle));
             }
         }
 
@@ -317,40 +312,41 @@ impl Terminal {
 }
 
 impl Component for Terminal {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = *kit.theme();
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let theme = ui.theme();
         let terminal = ui.add(
             parent,
             Flex::column().gap(space::SM).padding(Edges::all(space::LG)),
         );
-        kit.surface(
-            terminal.id(),
-            SurfaceStyle::new(theme.palette.code_surface)
-                .border(theme.palette.border)
-                .radius(radius::LG),
-        );
+        let style = SurfaceStyle::new(theme.palette.code_surface)
+            .border(theme.palette.border)
+            .radius(radius::LG);
+        ui.add_decor(terminal.id(), surface_decor(style));
 
         let header = ui.add(terminal.id(), Flex::row().gap(space::XS));
         ui.set_min_size(header.id(), Size::new(0.0, 8.0));
-        kit.foreground(header.id(), |ctx: &mut PaintContext, rect, theme, _| {
-            let r = 3.5;
-            let step = r * 2.0 + space::XXS;
-            let y = rect.top() + r;
-            for (index, color) in [
-                theme.palette.error,
-                theme.palette.warning,
-                theme.palette.success,
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                ctx.fill_circle(
-                    Vec2::new(rect.left() + r + index as f32 * step, y),
-                    r,
-                    color,
-                );
-            }
-        });
+        ui.add_decor(
+            header.id(),
+            foreground_decor(theme, |ctx: &mut PaintContext, rect, theme, _| {
+                let r = 3.5;
+                let step = r * 2.0 + space::XXS;
+                let y = rect.top() + r;
+                for (index, color) in [
+                    theme.palette.error,
+                    theme.palette.warning,
+                    theme.palette.success,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    ctx.fill_circle(
+                        Vec2::new(rect.left() + r + index as f32 * step, y),
+                        r,
+                        color,
+                    );
+                }
+            }),
+        );
 
         if let Some(command) = self.command {
             ui.add(
@@ -396,7 +392,8 @@ impl EmptyState {
 }
 
 impl Component for EmptyState {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let theme = ui.theme();
         let container = ui.add(
             parent,
             Flex::column()
@@ -407,23 +404,22 @@ impl Component for EmptyState {
 
         let icon = ui.add(container.id(), Flex::new().padding(Edges::ZERO));
         ui.set_min_size(icon.id(), Size::new(32.0, 32.0));
-        kit.foreground(icon.id(), |ctx, rect, theme, _| {
-            paint::surface(
-                ctx,
-                rect,
-                &SurfaceStyle::new(theme.palette.background)
-                    .border(theme.palette.border)
-                    .radius(radius::MD),
-            );
-        });
+        ui.add_decor(
+            icon.id(),
+            foreground_decor(theme, |ctx, rect, theme, _| {
+                surface(
+                    ctx,
+                    rect,
+                    &SurfaceStyle::new(theme.palette.background)
+                        .border(theme.palette.border)
+                        .radius(radius::MD),
+                );
+            }),
+        );
 
-        kit.add(ui, container.id(), Text::subheading(self.title));
+        ui.add(container.id(), Text::subheading(self.title));
         if let Some(description) = self.description {
-            kit.add(
-                ui,
-                container.id(),
-                Text::small(description).tone(Tone::Muted),
-            );
+            ui.add(container.id(), Text::small(description).tone(Tone::Muted));
         }
         container
     }
@@ -443,14 +439,14 @@ mod tests {
     #[test]
     fn card_registers_a_surface_and_flows_children() {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(Theme::dark());
+        ui.set_theme(Theme::dark());
         let root = ui.root();
-        let card = kit.add(&mut ui, root, Card::new());
-        kit.add(&mut ui, card.id(), Text::heading("Title"));
+        let card = ui.add(root, Card::new());
+        ui.add(card.id(), Text::heading("Title"));
         layout(&mut ui, 400.0, 300.0);
 
         let mut ctx = PaintContext::new();
-        kit.paint_surfaces(&ui, &mut ctx);
+        ui.paint(&mut ctx);
         let list = ctx.into_draw_list();
         assert!(list
             .commands()
@@ -461,9 +457,9 @@ mod tests {
     #[test]
     fn divider_has_a_one_pixel_min_extent() {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(Theme::light());
+        ui.set_theme(Theme::light());
         let root = ui.root();
-        let divider = kit.add(&mut ui, root, Divider::horizontal());
+        let divider = ui.add(root, Divider::horizontal());
         layout(&mut ui, 300.0, 100.0);
         let rect = ui.control(divider.id()).unwrap().rect;
         assert!((rect.size.height - 1.0).abs() < 1e-3);
@@ -472,9 +468,9 @@ mod tests {
     #[test]
     fn badge_sizes_to_its_text() {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(Theme::light());
+        ui.set_theme(Theme::light());
         let root = ui.root();
-        let badge = kit.add(&mut ui, root, Badge::new("Stable"));
+        let badge = ui.add(root, Badge::new("Stable"));
         layout(&mut ui, 300.0, 100.0);
         let rect = ui.control(badge.id()).unwrap().rect;
         assert!(rect.size.width > 0.0);
@@ -484,10 +480,9 @@ mod tests {
     #[test]
     fn code_block_draws_surface_and_text() {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(Theme::dark());
+        ui.set_theme(Theme::dark());
         let root = ui.root();
-        let block = kit.add(
-            &mut ui,
+        let block = ui.add(
             root,
             CodeBlock::new("let x = 1;")
                 .filename("main.rs")
@@ -495,7 +490,6 @@ mod tests {
         );
         layout(&mut ui, 500.0, 300.0);
         let mut ctx = PaintContext::new();
-        kit.paint_surfaces(&ui, &mut ctx);
         ui.paint(&mut ctx);
         let list = ctx.into_draw_list();
         let texts: Vec<&str> = list
@@ -513,10 +507,9 @@ mod tests {
     #[test]
     fn empty_state_has_a_title() {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(Theme::light());
+        ui.set_theme(Theme::light());
         let root = ui.root();
-        let empty = kit.add(
-            &mut ui,
+        let empty = ui.add(
             root,
             EmptyState::new("No results").description("Try another query."),
         );

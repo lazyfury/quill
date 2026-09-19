@@ -20,7 +20,7 @@ python3 -m http.server 8080 --directory .
 ## What it shows
 
 - a three-column, macOS-style notes app (sidebar / content list / detail) built
-  from `draw_kit` themed components (`Text`, `Badge`, `Divider`, `Button`,
+  from `draw_components` themed components (`Text`, `Badge`, `Divider`, `Button`,
   `Checkbox`, `Switch`) on the shared `demo_app::DemoApp`,
 - monochrome rounded-square placeholders for icons and images,
 - a static image placeholder (monochrome rounded square) in the detail hero,

@@ -1,6 +1,6 @@
 # Plan
 
-Working roadmap for the design system (`draw_theme` + `draw_kit`), the drawing
+Working roadmap for the design system (`draw_theme` + `draw_components`), the drawing
 primitives, and the demo. Keep this short and move finished items to the
 "Done" section rather than deleting them.
 
@@ -24,7 +24,7 @@ Every new primitive must be implemented in **all** backends
 (`draw_backend_canvas`, `draw_backend_wgpu`, `draw_backend_recording`) and
 audited by `draw_profile`'s inspector, or it is not "done".
 
-## Components (`draw_kit`)
+## Components (`draw_components`)
 
 | Component | Status | Notes |
 |---|---|---|
@@ -32,7 +32,7 @@ audited by `draw_profile`'s inspector, or it is not "done".
 | `Checkbox`, `Switch` | done | shared `Rc<Cell<_>>` state |
 | `Radio` / `RadioGroup` | next | same interaction layer as `Checkbox` |
 | `Tabs` | next | active indicator, keyboard focus |
-| `Input` / `TextArea` | next | placeholder, caret, selection, focus ring; needs core text editing or a Kit-owned editor |
+| `Input` / `TextArea` | next | placeholder, caret, selection, focus ring; needs core text editing or a component-owned editor |
 | `Select` / `Dropdown` | next | menu surface + selected state |
 | `Tooltip` | done | `Overlays::tips`, anchored and hover-tracked |
 | `List` / `Table` | next | header row, column alignment, hover, selection |
@@ -70,10 +70,15 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Done
 
-- Overlay layer (`draw_kit::Overlays`): a generic floating layer with `confirm`,
+- Decorator-based chrome, no `Kit` (Stage 23): `Ui` owns the `Theme`
+  (`Ui::theme`/`set_theme`); components implement `draw_ui::Component`, read
+  `ui.theme()` and attach `draw_ui::NodeDecor` (surface / foreground) while
+  registering clicks with `Ui::set_on_click`. A single `ui.paint` /
+  `ui.handle_input` runs everything.
+- Overlay layer (`draw_components::Overlays`): a generic floating layer with `confirm`,
   `popover`, `tips` and `message` built on a pure placement module (flip + clamp),
   scrims, modal capture, Esc/click-outside dismissal and auto-dismiss timers.
-  `draw_kit::Button` gained `Destructive`. Wired into `demo_app` (Delete →
+  `draw_components::Button` gained `Destructive`. Wired into `demo_app` (Delete →
   confirm → toast).
 - Fixed flex cross-axis `Stretch` overflowing a definite container: items now
   fill the container's inner cross size instead of growing to their content's
@@ -85,7 +90,7 @@ audited by `draw_profile`'s inspector, or it is not "done".
   run ordering), rasterizes by glyph id, and aligns by shaped advances.
   `TextMeasurer::measure_run` is the backend-neutral hook so layout measures with
   the same shaping; Canvas/WASM `measureText` measures whole runs too.
-- Button cursor feedback: `Ui::hovered_is_button` / `Kit::hovered` feed
+- Button cursor feedback: `Ui::hovered_is_button` / `Ui::is_interactive` feed
   `App::pointer_cursor`, so the Canvas runner sets a `pointer` CSS cursor while
   the pointer is over a clickable control (and `default` otherwise);
   `demo_app::DemoApp::pointer_over_clickable` combines both, and `wgpu_demo`
@@ -99,7 +104,7 @@ audited by `draw_profile`'s inspector, or it is not "done".
   advances in a different order than the natural width); this fixes single-line
   UI text like the "All Notes" list header wrapping at its space.
 - Rounded rectangles are first-class `DrawCommand`s with **per-corner radii**
-  (`CornerRadii`); `draw_kit` surfaces use them instead of composing circles +
+  (`CornerRadii`); `draw_components` surfaces use them instead of composing circles +
   rects. The demo's list items use square left / rounded right corners with a
   full-height accent bar.
 - Centered button/badge text via centered flex labels (measurer-driven, so it

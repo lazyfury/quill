@@ -1,5 +1,5 @@
 [package]
-name = "draw_kit"
+name = "draw_components"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

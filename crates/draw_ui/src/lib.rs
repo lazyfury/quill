@@ -18,18 +18,26 @@ pub const CRATE: &str = "draw_ui";
 mod component;
 mod control;
 mod debug;
+mod decor;
 pub mod layout;
+mod paint;
+mod tone;
 mod ui;
 mod widget;
 
 pub use component::{Button, Component, ControlRef, Flex, Grid, HBox, Label, Panel, VBox};
 pub use control::{ControlData, MouseFilter};
 pub use debug::DebugDrawOptions;
+pub use decor::{
+    dynamic_surface_decor, foreground_decor, surface_decor, DecorRef, InteractState, NodeDecor,
+};
 pub use layout::{
     Align, AlignContent, ApproxTextMeasurer, ContentSize, FixedWidthTextMeasurer, FlexDirection,
     FlexStyle, GridPlacement, GridStyle, Justify, LayoutStyle, SizeBasis, TextMeasurer,
     TextOptions, Track,
 };
+pub use paint::{fill_rounded_rect, fill_rounded_rect_corners, inset, surface, SurfaceStyle};
+pub use tone::{SurfaceTone, Tone};
 pub use ui::{ClickCallback, Ui};
 pub use widget::{estimate_text_size, BoxLayout, ButtonData, ButtonState, Widget};
 
@@ -136,6 +144,95 @@ mod tests {
 
         ui.handle_input(&InputEvent::PointerLeave);
         assert!(!ui.hovered_is_button());
+    }
+
+    #[test]
+    fn decor_paints_around_each_node_in_tree_order() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        use draw_core::Rect;
+
+        struct Marker {
+            name: &'static str,
+            log: Rc<RefCell<Vec<&'static str>>>,
+        }
+        impl NodeDecor for Marker {
+            fn paint_behind(
+                &self,
+                _ctx: &mut draw_render::PaintContext,
+                _rect: Rect,
+                _state: InteractState,
+            ) {
+                self.log.borrow_mut().push(self.name);
+            }
+            fn paint_front(
+                &self,
+                _ctx: &mut draw_render::PaintContext,
+                _rect: Rect,
+                _state: InteractState,
+            ) {
+                self.log.borrow_mut().push(self.name);
+            }
+        }
+
+        let mut ui = Ui::new();
+        let a = ui.add_label(ui.root(), "A");
+        let b = ui.add_label(ui.root(), "B");
+        let log = Rc::new(RefCell::new(Vec::new()));
+        ui.add_decor(
+            a,
+            Rc::new(Marker {
+                name: "a",
+                log: log.clone(),
+            }),
+        );
+        ui.add_decor(
+            b,
+            Rc::new(Marker {
+                name: "b",
+                log: log.clone(),
+            }),
+        );
+        ui.layout(Viewport::new(Size::new(200.0, 200.0)));
+
+        let mut ctx = draw_render::PaintContext::new();
+        ui.paint(&mut ctx);
+        // Each node's decor wraps its own content; there are no separate
+        // global surface/foreground passes.
+        assert_eq!(&*log.borrow(), &["a", "a", "b", "b"]);
+    }
+
+    #[test]
+    fn state_and_clicks_inherit_from_ancestors() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        use draw_core::Vec2;
+
+        let mut ui = Ui::new();
+        let row = ui.add_vbox(ui.root());
+        let child = ui.add_label(row, "child");
+        let clicks = Rc::new(Cell::new(0));
+        let counter = clicks.clone();
+        ui.set_on_click(row, move || counter.set(counter.get() + 1));
+        ui.layout(Viewport::new(Size::new(200.0, 200.0)));
+
+        let center: Vec2 = rect(&ui, child).center();
+        ui.handle_input(&InputEvent::PointerMove { position: center });
+        assert!(ui.state_for(row).hovered);
+        assert!(ui.is_interactive(child));
+
+        ui.handle_input(&InputEvent::PointerDown {
+            position: center,
+            button: PointerButton::Left,
+        });
+        assert!(ui.state_for(row).pressed);
+        ui.handle_input(&InputEvent::PointerUp {
+            position: center,
+            button: PointerButton::Left,
+        });
+        assert_eq!(clicks.get(), 1);
     }
 
     #[test]

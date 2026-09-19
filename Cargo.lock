@@ -339,8 +339,8 @@ name = "demo_app"
 version = "0.1.0"
 dependencies = [
  "draw_backend_recording",
+ "draw_components",
  "draw_core",
- "draw_kit",
  "draw_render",
  "draw_scene",
  "draw_theme",
@@ -437,6 +437,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "draw_components"
+version = "0.1.0"
+dependencies = [
+ "draw_backend_recording",
+ "draw_core",
+ "draw_render",
+ "draw_theme",
+ "draw_ui",
+]
+
+[[package]]
 name = "draw_core"
 version = "0.1.0"
 
@@ -447,17 +458,6 @@ dependencies = [
  "draw_core",
  "draw_profile",
  "draw_render",
- "draw_ui",
-]
-
-[[package]]
-name = "draw_kit"
-version = "0.1.0"
-dependencies = [
- "draw_backend_recording",
- "draw_core",
- "draw_render",
- "draw_theme",
  "draw_ui",
 ]
 
@@ -498,6 +498,7 @@ dependencies = [
  "draw_core",
  "draw_render",
  "draw_scene",
+ "draw_theme",
 ]
 
 [[package]]

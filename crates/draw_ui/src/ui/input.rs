@@ -54,11 +54,9 @@ impl Ui {
                 self.set_hover(hit);
                 self.focused = hit;
                 if let Some(id) = hit {
-                    if self.widgets.get(&id).is_some_and(Widget::is_button) {
-                        self.pressed = Some(id);
-                        if let Some(Widget::Button(button)) = self.widgets.get_mut(&id) {
-                            button.state.pressed = true;
-                        }
+                    self.pressed = Some(id);
+                    if let Some(Widget::Button(button)) = self.widgets.get_mut(&id) {
+                        button.state.pressed = true;
                     }
                     EventResult::Handled
                 } else {
@@ -99,14 +97,26 @@ impl Ui {
     fn activate(&mut self, id: NodeId) {
         if let Some(Widget::Button(button)) = self.widgets.get_mut(&id) {
             button.state.click_count += 1;
-            self.activated.push(id);
         }
+        // Dispatch even for non-`Button` nodes: themed components register
+        // click callbacks there (`Ui::set_on_click`).
+        self.activated.push(id);
     }
 
     fn dispatch_click_callbacks(&mut self) {
         let activated = std::mem::take(&mut self.activated);
         for id in activated {
-            let callback = self.callbacks.get(&id).cloned();
+            // A component root owns its click, so a hit on any descendant
+            // activates the nearest ancestor with a callback.
+            let mut current = Some(id);
+            let mut callback = None;
+            while let Some(node) = current {
+                if let Some(registered) = self.callbacks.get(&node).cloned() {
+                    callback = Some(registered);
+                    break;
+                }
+                current = self.tree.parent(node);
+            }
             if let Some(callback) = callback {
                 (callback.borrow_mut())();
             }

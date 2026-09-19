@@ -2,7 +2,7 @@
 //! where it goes, flipping to the opposite side when it would leave the viewport
 //! and clamping inside a margin.
 //!
-//! Pure geometry (no `Ui`/`Kit`), so it is unit-testable on its own.
+//! Pure geometry (no `Ui`/theme), so it is unit-testable on its own.
 
 use draw_core::{Rect, Size};
 

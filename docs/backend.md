@@ -46,7 +46,7 @@ injected via `Ui::set_text_measurer`, so layout ascents, run widths and painted
 baselines agree.
 
 The runner also reflects hover feedback: `App::pointer_cursor` (usually
-`Ui::hovered_is_button` or `Kit::hovered`) drives the canvas CSS `cursor`
+`Ui::hovered_is_button` or `Ui::is_interactive`) drives the canvas CSS `cursor`
 property (`pointer` / `default`).
 
 ## Recording (`draw_backend_recording`)

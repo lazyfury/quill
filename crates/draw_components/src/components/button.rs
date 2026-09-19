@@ -4,8 +4,9 @@ use draw_core::{Color, Edges, NodeId, Size};
 use draw_theme::{control, radius, TextSize};
 use draw_ui::{Align, Flex, Justify, Label, TextOptions};
 
-use crate::paint::SurfaceStyle;
-use crate::{detach, Component, ControlRef, Kit, Ui};
+use crate::{detach, Component, ControlRef, Ui};
+use draw_ui::dynamic_surface_decor;
+use draw_ui::SurfaceStyle;
 
 /// Visual weight of a button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -72,8 +73,8 @@ impl Button {
 }
 
 impl Component for Button {
-    fn mount(self, kit: &mut Kit, ui: &mut Ui, parent: NodeId) -> ControlRef {
-        let theme = *kit.theme();
+    fn mount(self, ui: &mut Ui, parent: NodeId) -> ControlRef {
+        let theme = ui.theme();
         let font = self.font_size;
         let pad = control::PADDING_X;
 
@@ -92,50 +93,52 @@ impl Component for Button {
         ui.set_min_size(node.id(), Size::new(0.0, control::HEIGHT));
 
         let variant = self.variant;
-        kit.dynamic_surface(node.id(), move |theme, st| {
-            let palette = &theme.palette;
-            match variant {
-                ButtonVariant::Primary => {
-                    let fill = if st.pressed {
-                        palette.accent.lerp(Color::BLACK, 0.12)
-                    } else if st.hovered {
-                        palette.accent.lerp(palette.foreground, 0.10)
-                    } else {
-                        palette.accent
-                    };
-                    SurfaceStyle::new(fill).radius(radius::MD)
+        ui.add_decor(
+            node.id(),
+            dynamic_surface_decor(theme, move |theme, st| {
+                let palette = &theme.palette;
+                match variant {
+                    ButtonVariant::Primary => {
+                        let fill = if st.pressed {
+                            palette.accent.lerp(Color::BLACK, 0.12)
+                        } else if st.hovered {
+                            palette.accent.lerp(palette.foreground, 0.10)
+                        } else {
+                            palette.accent
+                        };
+                        SurfaceStyle::new(fill).radius(radius::MD)
+                    }
+                    ButtonVariant::Secondary => {
+                        let fill = if st.hovered || st.pressed {
+                            palette.surface_hover
+                        } else {
+                            palette.surface_raised
+                        };
+                        SurfaceStyle::new(fill)
+                            .border(palette.border)
+                            .radius(radius::MD)
+                    }
+                    ButtonVariant::Ghost => {
+                        let fill = if st.hovered || st.pressed {
+                            palette.surface_hover
+                        } else {
+                            Color::TRANSPARENT
+                        };
+                        SurfaceStyle::new(fill).radius(radius::MD)
+                    }
+                    ButtonVariant::Destructive => {
+                        let fill = if st.pressed {
+                            palette.error.lerp(Color::BLACK, 0.12)
+                        } else if st.hovered {
+                            palette.error.lerp(palette.foreground, 0.10)
+                        } else {
+                            palette.error
+                        };
+                        SurfaceStyle::new(fill).radius(radius::MD)
+                    }
                 }
-                ButtonVariant::Secondary => {
-                    let fill = if st.hovered || st.pressed {
-                        palette.surface_hover
-                    } else {
-                        palette.surface_raised
-                    };
-                    SurfaceStyle::new(fill)
-                        .border(palette.border)
-                        .radius(radius::MD)
-                }
-                ButtonVariant::Ghost => {
-                    let fill = if st.hovered || st.pressed {
-                        palette.surface_hover
-                    } else {
-                        Color::TRANSPARENT
-                    };
-                    SurfaceStyle::new(fill).radius(radius::MD)
-                }
-                ButtonVariant::Destructive => {
-                    let fill = if st.pressed {
-                        palette.error.lerp(Color::BLACK, 0.12)
-                    } else if st.hovered {
-                        palette.error.lerp(palette.foreground, 0.10)
-                    } else {
-                        palette.error
-                    };
-                    SurfaceStyle::new(fill).radius(radius::MD)
-                }
-            }
-        });
-
+            }),
+        );
         let color = match variant {
             ButtonVariant::Primary | ButtonVariant::Destructive => theme.palette.on_accent,
             _ => theme.palette.foreground,
@@ -149,7 +152,7 @@ impl Component for Button {
         );
 
         if let Some(callback) = self.on_click {
-            kit.on_click(node.id(), callback);
+            ui.set_on_click(node.id(), callback);
         }
         node
     }
@@ -167,31 +170,24 @@ mod tests {
     #[test]
     fn primary_button_is_clickable_and_fires_callback() {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(Theme::dark());
+        ui.set_theme(Theme::dark());
         let clicks = Rc::new(Cell::new(0));
         let counter = clicks.clone();
         let root = ui.root();
-        let button = kit.add(
-            &mut ui,
+        let button = ui.add(
             root,
             Button::primary("Save").on_click(move || counter.set(counter.get() + 1)),
         );
         ui.layout(Viewport::new(CoreSize::new(400.0, 200.0)));
         let center = ui.control(button.id()).unwrap().rect.center();
-        kit.handle_input(
-            &ui,
-            &InputEvent::PointerDown {
-                position: center,
-                button: PointerButton::Left,
-            },
-        );
-        kit.handle_input(
-            &ui,
-            &InputEvent::PointerUp {
-                position: center,
-                button: PointerButton::Left,
-            },
-        );
+        ui.handle_input(&InputEvent::PointerDown {
+            position: center,
+            button: PointerButton::Left,
+        });
+        ui.handle_input(&InputEvent::PointerUp {
+            position: center,
+            button: PointerButton::Left,
+        });
         assert_eq!(clicks.get(), 1);
         let rect = ui.control(button.id()).unwrap().rect;
         assert!(rect.size.height >= control::HEIGHT);

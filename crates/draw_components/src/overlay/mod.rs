@@ -1,17 +1,15 @@
 //! A generic overlay layer: confirm dialogs, popovers, tooltips and toasts on
-//! top of the [`Kit`]/[`Ui`] stack.
+//! top of the [`Ui`] stack.
 //!
-//! [`Overlays`] owns its own [`Ui`] and [`Kit`], so the host keeps painting its
+//! [`Overlays`] owns its own [`Ui`], so the host keeps painting its
 //! main UI exactly as before and then layers this on top:
 //!
 //! ```ignore
 //! app.ui.layout(viewport);
 //! overlays.layout(&app.ui, viewport); // anchor to laid-out targets
 //!
-//! kit.paint_surfaces(&app.ui, &mut ctx);
-//! app.ui.paint(&mut ctx);
-//! kit.paint_foreground(&app.ui, &mut ctx);
-//! overlays.paint(&mut ctx);            // scrim + overlay content, on top
+//! app.ui.paint(&mut ctx);             // main UI (decor + content)
+//! overlays.paint(&mut ctx);           // scrim + overlay content, on top
 //! ```
 //!
 //! Input goes to the overlays first; a modal overlay consumes everything so the
@@ -40,13 +38,15 @@ use draw_render::PaintContext;
 use draw_theme::{radius, space, SurfaceLevel, TextSize, Theme};
 use draw_ui::{Align, Flex, Justify, Label, MouseFilter, Ui};
 
-use crate::paint::SurfaceStyle;
-use crate::{Button, Kit, Tone};
+use crate::Button;
+use draw_ui::surface_decor;
+use draw_ui::SurfaceStyle;
+use draw_ui::Tone;
 
 pub use placement::Placement;
 
 type Callback = Rc<RefCell<dyn FnMut()>>;
-type ContentFn = Rc<dyn Fn(&mut Kit, &mut Ui, NodeId)>;
+type ContentFn = Rc<dyn Fn(&mut Ui, NodeId)>;
 
 const MARGIN: f32 = 8.0;
 const OFFSET: f32 = 8.0;
@@ -137,8 +137,8 @@ impl Entry {
 pub struct Overlays {
     theme: Theme,
     ui: Ui,
-    kit: Kit,
     entries: Vec<Entry>,
+    measurer: Option<Rc<dyn draw_ui::TextMeasurer>>,
     next_id: u64,
     viewport: Viewport,
     dirty: bool,
@@ -147,11 +147,13 @@ pub struct Overlays {
 
 impl Overlays {
     pub fn new(theme: Theme) -> Self {
+        let mut ui = Ui::new();
+        ui.set_theme(theme);
         Self {
             theme,
-            ui: Ui::new(),
-            kit: Kit::new(theme),
+            ui,
             entries: Vec::new(),
+            measurer: None,
             next_id: 1,
             viewport: Viewport::default(),
             dirty: false,
@@ -166,13 +168,13 @@ impl Overlays {
     /// Swaps the theme and rebuilds the overlay tree.
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme;
-        self.kit.set_theme(theme);
         self.dirty = true;
     }
 
     /// Uses `measurer` for overlay text layout, matching the host UI.
     pub fn set_text_measurer(&mut self, measurer: Rc<dyn draw_ui::TextMeasurer>) {
-        self.ui.set_text_measurer(measurer);
+        self.ui.set_text_measurer(measurer.clone());
+        self.measurer = Some(measurer);
         self.dirty = true;
     }
 
@@ -205,7 +207,7 @@ impl Overlays {
         &mut self,
         target: NodeId,
         placement: Placement,
-        content: impl Fn(&mut Kit, &mut Ui, NodeId) + 'static,
+        content: impl Fn(&mut Ui, NodeId) + 'static,
     ) -> OverlayId {
         let mut entry = Entry::new(
             OverlayId(0),
@@ -452,9 +454,7 @@ impl Overlays {
                 ctx.fill_rect(viewport, scrim);
             }
         }
-        self.kit.paint_surfaces(&self.ui, ctx);
         self.ui.paint(ctx);
-        self.kit.paint_foreground(&self.ui, ctx);
     }
 
     /// Routes an event to the overlays.
@@ -500,7 +500,6 @@ impl Overlays {
             }
         }
 
-        let kit_handled = self.kit.handle_input(&self.ui, event);
         let ui_result = self.ui.handle_input(event);
         self.process_actions();
 
@@ -508,11 +507,9 @@ impl Overlays {
         // events only count while they are over overlay content.
         let consumed = match pointer {
             Some(position) => {
-                modal
-                    || kit_handled
-                    || (self.ui.hit_test(position).is_some() && ui_result.is_handled())
+                modal || (self.ui.hit_test(position).is_some() && ui_result.is_handled())
             }
-            None => modal || kit_handled || ui_result.is_handled(),
+            None => modal || ui_result.is_handled(),
         };
         if consumed {
             EventResult::Handled
@@ -538,18 +535,14 @@ impl Overlays {
 
     fn rebuild(&mut self) {
         let mut ui = Ui::new();
-        let mut kit = Kit::new(self.theme);
+        ui.set_theme(self.theme);
+        if let Some(measurer) = &self.measurer {
+            ui.set_text_measurer(measurer.clone());
+        }
         for entry in &mut self.entries {
-            entry.root = Some(build_entry(
-                entry,
-                &mut kit,
-                &mut ui,
-                // `Kit::on_click` takes `'static` closures; share the queue.
-                self.actions.clone(),
-            ));
+            entry.root = Some(build_entry(entry, &mut ui, self.actions.clone()));
         }
         self.ui = ui;
-        self.kit = kit;
         self.dirty = false;
     }
 
@@ -605,13 +598,8 @@ fn is_self_or_ancestor(host: &Ui, target: NodeId, mut node: NodeId) -> bool {
 }
 
 /// Builds one overlay's content and returns its root node.
-fn build_entry(
-    entry: &Entry,
-    kit: &mut Kit,
-    ui: &mut Ui,
-    actions: Rc<RefCell<Vec<Action>>>,
-) -> NodeId {
-    let theme = *kit.theme();
+fn build_entry(entry: &Entry, ui: &mut Ui, actions: Rc<RefCell<Vec<Action>>>) -> NodeId {
+    let theme = ui.theme();
     let palette = theme.palette;
     let surface = SurfaceStyle::new(theme.surface(SurfaceLevel::Floating))
         .border(palette.border)
@@ -633,7 +621,7 @@ fn build_entry(
                 .id();
             crate::detach(ui, root);
             ui.set_min_size(root, Size::new(CONFIRM_WIDTH, 0.0));
-            kit.surface(root, surface);
+            ui.add_decor(root, surface_decor(surface));
 
             ui.add(
                 root,
@@ -660,8 +648,7 @@ fn build_entry(
                 .id();
             let id = entry.id;
             let cancel_actions = actions.clone();
-            kit.add(
-                ui,
+            ui.add(
                 row,
                 Button::ghost(cancel.clone())
                     .on_click(move || cancel_actions.borrow_mut().push(Action::Cancel(id))),
@@ -672,8 +659,7 @@ fn build_entry(
                 Button::primary(confirm.clone())
             };
             let confirm_actions = actions;
-            kit.add(
-                ui,
+            ui.add(
                 row,
                 button.on_click(move || confirm_actions.borrow_mut().push(Action::Confirm(id))),
             );
@@ -687,7 +673,7 @@ fn build_entry(
                 )
                 .id();
             crate::detach(ui, root);
-            kit.surface(root, surface);
+            ui.add_decor(root, surface_decor(surface));
             if let Some(title) = title {
                 ui.add(
                     root,
@@ -696,7 +682,7 @@ fn build_entry(
                         .color(palette.foreground),
                 );
             }
-            content(kit, ui, root);
+            content(ui, root);
             root
         }
         Kind::Tips { text } => {
@@ -709,10 +695,12 @@ fn build_entry(
                 )
                 .id();
             crate::detach(ui, root);
-            kit.surface(
+            ui.add_decor(
                 root,
-                SurfaceStyle::new(palette.foreground.lerp(palette.background, 0.08))
-                    .radius(radius::SM),
+                surface_decor(
+                    SurfaceStyle::new(palette.foreground.lerp(palette.background, 0.08))
+                        .radius(radius::SM),
+                ),
             );
             ui.set_mouse_filter(root, MouseFilter::Ignore);
             let label = ui
@@ -737,11 +725,13 @@ fn build_entry(
                 )
                 .id();
             crate::detach(ui, root);
-            kit.surface(
+            ui.add_decor(
                 root,
-                SurfaceStyle::new(theme.surface(SurfaceLevel::Floating))
-                    .border(palette.border)
-                    .radius(radius::MD),
+                surface_decor(
+                    SurfaceStyle::new(theme.surface(SurfaceLevel::Floating))
+                        .border(palette.border)
+                        .radius(radius::MD),
+                ),
             );
             ui.set_mouse_filter(root, MouseFilter::Ignore);
             let label = ui

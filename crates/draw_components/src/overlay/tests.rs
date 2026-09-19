@@ -75,7 +75,7 @@ fn outside_click_dismisses_a_popover() {
     let (host_ui, button) = host();
     let viewport = Viewport::new(Size::new(400.0, 300.0));
     let mut overlays = Overlays::new(Theme::dark());
-    let id = overlays.popover(button, Placement::Below, |_, _, _| {});
+    let id = overlays.popover(button, Placement::Below, |_, _| {});
     overlays.layout(&host_ui, viewport);
 
     let result = overlays.handle_input(&InputEvent::PointerDown {
@@ -107,7 +107,7 @@ fn popover_sits_below_its_target() {
     let viewport = Viewport::new(Size::new(400.0, 300.0));
 
     let mut overlays = Overlays::new(Theme::dark());
-    let id = overlays.popover(button, Placement::Below, |_, ui, parent| {
+    let id = overlays.popover(button, Placement::Below, |ui, parent| {
         ui.add(parent, Label::new("Menu"));
     });
     overlays.layout(&host_ui, viewport);
@@ -174,7 +174,7 @@ fn clicking_confirm_fires_the_callback_and_closes() {
     overlays.on_confirm(id, move || flag.set(true));
     overlays.layout(&host_ui, viewport);
 
-    // `draw_kit::Button` is a flex row with a label; find the confirm label and
+    // `draw_components::Button` is a flex row with a label; find the confirm label and
     // click the row that owns it.
     let label = overlays
         .ui
