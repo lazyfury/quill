@@ -24,6 +24,23 @@ cargo run -p wgpu_demo --release
   updates the click count.
 - Resize the window (the UI re-lays out) or move it between displays with
   different DPRs.
+- Press `` ` `` (backtick) to toggle the **performance / debug overlay** in the
+  top-right corner.
+
+## Performance / debug overlay
+
+The demo instruments each pipeline phase, records it in a `draw_profile::Profiler`,
+audits the frame's `DrawList` with `draw_profile::inspect`, and renders the
+result with `draw_debug_ui::DebugOverlay`:
+
+```text
+update/layout/paint/render (timed) -> Profiler.record -> inspect -> DebugOverlay -> DrawList
+```
+
+The panel shows FPS, current frame time (avg/max), per-phase averages, command
+counts (current/peak), node & control counts, and inspection findings. Overlay
+input is consumed over the panel; everything else is forwarded to the demo. See
+`docs/debug.md` for wiring it into your own app.
 
 ## Notes
 

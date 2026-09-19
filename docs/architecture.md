@@ -45,6 +45,34 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 - Stage 7 — reusable component demo [done]
 - Stage 8 — second backend validation (`draw_backend_recording`) [done]
 - Stage 9 — `wgpu` backend (`draw_backend_wgpu`, offscreen + pixel readback) [done]
+- Stage 10 — performance inspection (`draw_profile`) + debug overlay
+  (`draw_debug_ui`) [done]
+
+## Performance inspection (Stage 10)
+
+The pipeline stays backend-neutral, and so does observing it. `draw_profile`
+never measures time or touches a backend; hosts sample `Instant` per phase and
+feed the numbers in:
+
+```text
+frame_start -> update -> layout -> paint -> render -> frame_done
+                |          |         |         |
+                +---------- StageTimes ----+  FrameCounters
+                                            |
+                     Profiler.record(FrameStats) -> FrameSummary
+                                            |
+                     inspect(&DrawList, &FrameStats) -> InspectionReport
+                                            |
+                           draw_debug_ui::DebugOverlay (draw_ui panel)
+```
+
+- `Profiler` keeps a bounded frame history and derives averages/min/max/FPS.
+- `inspect` produces severity-ranked `Finding`s (correctness, degenerate
+  geometry, budgets) aggregated by `FindingCode`.
+- `DebugOverlay` renders the summary + findings as an ordinary `draw_ui` panel;
+  it is painted after the application UI and does not touch app layout or input.
+
+See `docs/debug.md`.
 
 ## Backend replaceability
 

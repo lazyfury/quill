@@ -90,3 +90,33 @@ ui.paint(&mut ctx);
 
 See `docs/components.md` for anchors, containers, events and custom components,
 and `demos/component_demo` for a runnable browser example.
+
+## Inspect performance
+
+Measure the pipeline phases, aggregate them, and show a debug panel:
+
+```rust
+use draw_profile::{inspect, FrameCounters, FrameStats, Profiler, StageTimes};
+use draw_debug_ui::DebugOverlay;
+
+let mut profiler = Profiler::new();
+let mut overlay = DebugOverlay::new();
+
+// per frame (t0..t4 are Instant::now() samples around update/layout/paint/render)
+let stats = FrameStats {
+    index: profiler.next_index(),
+    frame_ms: 12.0,
+    stages: StageTimes::new(1.0, 0.5, 2.0, 8.5),
+    counters: FrameCounters::new(scene_nodes, controls, list.len(), 1),
+};
+profiler.record(stats);
+
+let report = inspect(&list, &stats);
+
+overlay.update(&profiler, &report, viewport);
+overlay.paint(&mut ctx); // painted after your own UI
+```
+
+`draw_profile` never reads the clock itself; the host feeds in milliseconds, so
+metrics are deterministic and testable. See `docs/debug.md` for the full guide
+(phase wiring, thresholds, finding codes, overlay styling).

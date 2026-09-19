@@ -83,6 +83,13 @@ mod tests {
     }
 
     #[test]
+    fn control_count_tracks_inserted_controls() {
+        let (ui, ..) = build();
+        // root + panel + vbox + label + button
+        assert_eq!(ui.control_count(), 5);
+    }
+
+    #[test]
     fn layout_responds_to_resize() {
         let (mut ui, panel, _label, button) = build();
         assert_eq!(rect(&ui, panel).size, Size::new(800.0, 600.0));

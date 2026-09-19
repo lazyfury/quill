@@ -5,6 +5,8 @@ members = [
     "crates/draw_scene",
     "crates/draw_ui",
     "crates/draw_render",
+    "crates/draw_profile",
+    "crates/draw_debug_ui",
     "crates/draw_backend_canvas",
     "crates/draw_backend_recording",
     "crates/draw_backend_wgpu",
@@ -26,6 +28,8 @@ draw_core = { path = "crates/draw_core" }
 draw_scene = { path = "crates/draw_scene" }
 draw_ui = { path = "crates/draw_ui" }
 draw_render = { path = "crates/draw_render" }
+draw_profile = { path = "crates/draw_profile" }
+draw_debug_ui = { path = "crates/draw_debug_ui" }
 draw_backend_canvas = { path = "crates/draw_backend_canvas" }
 draw_backend_recording = { path = "crates/draw_backend_recording" }
 draw_backend_wgpu = { path = "crates/draw_backend_wgpu" }

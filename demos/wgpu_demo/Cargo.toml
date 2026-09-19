@@ -17,6 +17,8 @@ draw_core.workspace = true
 draw_render.workspace = true
 draw_scene.workspace = true
 draw_ui.workspace = true
+draw_profile.workspace = true
+draw_debug_ui.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 winit = "0.30"

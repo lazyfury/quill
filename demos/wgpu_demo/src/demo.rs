@@ -87,7 +87,10 @@ impl Demo {
         }
     }
 
-    /// Advances the animation and resolves layout for the new viewport.
+    /// Advances the animation and updates text for the new viewport.
+    ///
+    /// UI layout is deliberately *not* performed here: the host times it as a
+    /// separate pipeline phase via [`Demo::layout`].
     pub fn update(&mut self, viewport: Viewport, dt: f32) {
         self.viewport = viewport;
         self.time += dt;
@@ -104,7 +107,21 @@ impl Demo {
             self.status,
             format!("Status: Clicked {} times", self.clicks.get()),
         );
+    }
+
+    /// Resolves UI layout for `viewport` (the timed *layout* pipeline phase).
+    pub fn layout(&mut self, viewport: Viewport) {
         self.ui.layout(viewport);
+    }
+
+    /// Scene nodes in the built-in demo scene.
+    pub fn scene_node_count(&self) -> usize {
+        self.scene.node_count()
+    }
+
+    /// Controls in the demo UI.
+    pub fn control_count(&self) -> usize {
+        self.ui.control_count()
     }
 
     /// Emits this frame's `DrawList` into `ctx`.

@@ -5,6 +5,8 @@ use std::time::Instant;
 
 use draw_backend_wgpu::{wgpu, WgpuBackend};
 use draw_core::{InputEvent, Key, PointerButton, Size, Vec2, Viewport};
+use draw_debug_ui::DebugOverlay;
+use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Profiler, StageTimes};
 use draw_render::{PaintContext, RenderBackend};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -34,6 +36,12 @@ struct App {
     cursor: Vec2,
     demo: Demo,
     last_frame: Instant,
+    /// Frame timings / counters for the debug overlay.
+    profiler: Profiler,
+    /// Findings from inspecting the previous frame's `DrawList`.
+    report: InspectionReport,
+    /// Performance panel, toggled with the backtick key.
+    overlay: DebugOverlay,
 }
 
 impl App {
@@ -48,6 +56,9 @@ impl App {
             cursor: Vec2::ZERO,
             demo: Demo::new(),
             last_frame: Instant::now(),
+            profiler: Profiler::new(),
+            report: InspectionReport::new(),
+            overlay: DebugOverlay::new(),
         }
     }
 
@@ -124,6 +135,18 @@ impl App {
     }
 
     fn feed(&mut self, event: &InputEvent) {
+        // Backtick toggles the debug overlay and is never routed further.
+        if let InputEvent::KeyDown {
+            key: Key::Character('`'),
+        } = event
+        {
+            self.overlay.toggle();
+            return;
+        }
+        // The overlay sits on top: consume input over its panel, pass the rest on.
+        if self.overlay.handle_input(event).is_handled() {
+            return;
+        }
         self.demo.event(event);
     }
 
@@ -142,14 +165,27 @@ impl App {
         );
         let viewport = Viewport::new(logical);
 
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_frame).as_secs_f32().min(0.1);
-        self.last_frame = now;
+        // -- timed pipeline phases ----------------------------------------
+        let frame_start = Instant::now();
+        let dt = frame_start
+            .duration_since(self.last_frame)
+            .as_secs_f32()
+            .min(0.1);
+        self.last_frame = frame_start;
+
         self.demo.update(viewport, dt);
+        let update_done = Instant::now();
+
+        self.demo.layout(viewport);
+        let layout_done = Instant::now();
 
         let mut ctx = PaintContext::new();
         self.demo.paint(&mut ctx);
+        // Show last frame's findings, then paint the panel on top.
+        self.overlay.update(&self.profiler, &self.report, viewport);
+        self.overlay.paint(&mut ctx);
         let list = ctx.into_draw_list();
+        let paint_done = Instant::now();
 
         let surface_texture = match surface.get_current_texture() {
             Ok(texture) => texture,
@@ -175,8 +211,30 @@ impl App {
             let _ = backend.submit(&list);
             let _ = backend.end_frame();
         }
+        let render_done = Instant::now();
 
         surface_texture.present();
+        let frame_done = Instant::now();
+
+        // -- record + inspect the frame -----------------------------------
+        let stats = FrameStats {
+            index: self.profiler.next_index(),
+            frame_ms: millis(frame_done - frame_start),
+            stages: StageTimes::new(
+                millis(update_done - frame_start),
+                millis(layout_done - update_done),
+                millis(paint_done - layout_done),
+                millis(render_done - paint_done),
+            ),
+            counters: FrameCounters::new(
+                self.demo.scene_node_count(),
+                self.demo.control_count(),
+                list.len(),
+                1,
+            ),
+        };
+        self.profiler.record(stats);
+        self.report = inspect(&list, &stats);
     }
 }
 
@@ -253,6 +311,10 @@ fn pointer_button(button: MouseButton) -> PointerButton {
         MouseButton::Middle => PointerButton::Middle,
         _ => PointerButton::Left,
     }
+}
+
+fn millis(duration: std::time::Duration) -> f32 {
+    duration.as_secs_f32() * 1000.0
 }
 
 fn map_key(key: &WinitKey) -> Option<Key> {

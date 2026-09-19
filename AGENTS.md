@@ -37,10 +37,13 @@ draw_core            (no draw_* deps)
 draw_scene    -> draw_core, draw_render
 draw_ui       -> draw_core, draw_scene, draw_render
 draw_render   -> draw_core
+draw_profile  -> draw_core, draw_render
+draw_debug_ui -> draw_core, draw_render, draw_ui, draw_profile
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core
 web_demo      -> draw_core, draw_render, draw_scene, draw_wasm
-wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, draw_backend_wgpu, winit
+wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, draw_backend_wgpu,
+                 draw_profile, draw_debug_ui, winit
 ```
 
 `draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
@@ -63,6 +66,8 @@ The native window API (`winit`) is only allowed in `demos/wgpu_demo`.
 - [x] Stage 8 — second backend validation (required case covered by
       `draw_backend_recording`; an extra native backend was tried and removed)
 - [x] Stage 9 — wgpu backend (`draw_backend_wgpu`, offscreen + pixel readback)
+- [x] Stage 10 — performance inspection (`draw_profile`) + debug overlay
+      (`draw_debug_ui`)
 
 ## Per-stage gate (must run)
 
@@ -94,6 +99,33 @@ that with `winit`. Transform/opacity/clip are resolved on the CPU; one
 textured-triangle pipeline handles solid shapes, registered images, and a
 built-in `8x8` bitmap-font atlas. `wgpu` must stay confined to this crate plus
 its own tests and the demo; core/scene/UI/render never see it.
+
+## Performance inspection (Stage 10, `draw_profile` + `draw_debug_ui`)
+
+`draw_profile` is a backend-neutral observer of the pipeline. It depends only on
+`draw_core` + `draw_render` and never measures time itself: the host samples
+`Instant` per phase and feeds milliseconds in, so the model is deterministic and
+unit-testable.
+
+- `FrameStats` = `index`, `frame_ms`, `StageTimes` (`update`/`layout`/`paint`/
+  `render`) and `FrameCounters` (`scene_nodes`, `controls`, `draw_commands`,
+  `draw_lists`).
+- `Profiler` keeps a bounded ring buffer of `FrameStats`, can be disabled at
+  runtime (no-op hot path), and derives a `FrameSummary` (avg/min/max, per-phase
+  averages, max commands, FPS).
+- `inspect(&DrawList, &FrameStats) -> InspectionReport` audits the frame with
+  `Severity`-ranked `Finding`s, aggregated by `FindingCode`: save/restore
+  balance, non-finite geometry/transform, degenerate rect/circle/stroke/clip,
+  opacity range, empty text, and command/frame-time/entity budgets
+  (`InspectionConfig`, default 2048 commands / 16.7 ms / 10k entities).
+
+`draw_debug_ui::DebugOverlay` turns a `Profiler` + `InspectionReport` into an
+ordinary `draw_ui` panel (its own `Ui` tree, painted after the app UI). It is
+toggled by the host and is a no-op while closed. `demos/wgpu_demo` instruments
+its frame, runs `inspect`, and toggles the overlay with the backtick key.
+
+Like all core crates these two are verified with native `cargo test`; the window
+overlay itself is not screenshot-verified (see `docs/testing.md`).
 
 ## API priority: API -> test -> implementation -> integration.
 

@@ -1,0 +1,12 @@
+[package]
+name = "draw_debug_ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+draw_core.workspace = true
+draw_render.workspace = true
+draw_ui.workspace = true
+draw_profile.workspace = true

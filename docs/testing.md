@@ -10,6 +10,11 @@
 - wgpu pixel readback — `draw_backend_wgpu` renders to an offscreen texture and
   asserts on returned RGBA8 pixels (`tests/render.rs`); no window is created.
 - Layout / hit-test / input tests — `draw_ui` unit tests.
+- Profiler / inspector tests — `draw_profile` (ring buffer, summary math, every
+  `FindingCode`, budget escalation). Pure data, no clock.
+- Debug overlay tests — `draw_debug_ui` asserts the computed `OverlayText`, that
+  the UI labels mirror it, that the panel is pinned, and that paint emits the
+  expected `DrawText`/`FillRect` commands (and nothing while closed).
 
 Core behavior must be testable with native `cargo test`, without a browser.
 Only the Canvas backend and WASM glue need a browser.
@@ -45,3 +50,8 @@ so it runs under plain `cargo test`. Its windowed demo `demos/wgpu_demo` opens a
 real window and cannot be verified without a display; it is compiled by
 `cargo check` and run manually, and the render path it uses is the same one
 covered by the readback tests.
+
+The `demos/wgpu_demo` performance overlay is host-wired: its panel text, layout
+and emitted commands are covered by `draw_debug_ui` tests, and the numbers it
+displays come from `draw_profile` (tested with injected durations). The windowed
+overlay itself is **not** screenshot-verified.

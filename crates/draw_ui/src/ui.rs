@@ -82,6 +82,11 @@ impl Ui {
         self.root
     }
 
+    /// Number of controls in this UI (root included).
+    pub fn control_count(&self) -> usize {
+        self.controls.len()
+    }
+
     pub fn control(&self, id: NodeId) -> Option<&ControlData> {
         self.controls.get(&id)
     }

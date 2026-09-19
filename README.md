@@ -16,6 +16,8 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 | `draw_scene` | `Node`, `SceneTree`, `CanvasItem`, `Node2D`, transforms |
 | `draw_ui` | `Control`, layout, containers, UI behavior |
 | `draw_render` | `DrawCommand`, `DrawList`, `PaintContext`, `RenderBackend` |
+| `draw_profile` | frame timing/counters, `Profiler`, `inspect` / `InspectionReport` |
+| `draw_debug_ui` | `DebugOverlay` performance panel (built on `draw_ui`) |
 | `draw_backend_canvas` | Canvas 2D backend |
 | `draw_backend_recording` | headless recording backend for tests |
 | `draw_backend_wgpu` | native `wgpu` backend (offscreen, pixel readback) |
@@ -26,18 +28,19 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 9 (wgpu backend). `draw_core` provides math, colors, handles and
-the viewport model; `draw_scene` provides the scene tree with transform/visibility
-propagation and a `SceneTree::paint` step; `draw_render` provides the
-backend-neutral IR (`DrawCommand`/`DrawList`/`PaintContext`) and the
-`RenderBackend` trait; `draw_backend_recording` records frames for the fully
-headless `Scene -> DrawList -> RenderBackend` test pipeline; `draw_backend_canvas`
-+ `draw_wasm` render that IR to an HTML Canvas with DPR handling and input;
-`draw_backend_wgpu` renders the same IR with `wgpu` to an offscreen texture and
-reads the pixels back for native `cargo test`; and `draw_ui` provides `Control`,
-layout (anchors/offsets/containers), reusable components
+Stage 10 (performance inspection + debug overlay). `draw_core` provides math,
+colors, handles and the viewport model; `draw_scene` provides the scene tree
+with transform/visibility propagation and a `SceneTree::paint` step;
+`draw_render` provides the backend-neutral IR (`DrawCommand`/`DrawList`/
+`PaintContext`) and the `RenderBackend` trait; `draw_backend_recording` records
+frames for the fully headless `Scene -> DrawList -> RenderBackend` test pipeline;
+`draw_backend_canvas` + `draw_wasm` render that IR to an HTML Canvas with DPR
+handling and input; `draw_backend_wgpu` renders the same IR with `wgpu` to an
+offscreen texture and reads the pixels back for native `cargo test`; `draw_ui`
+provides `Control`, layout (anchors/offsets/containers), reusable components
 (`Panel`/`VBox`/`HBox`/`Label`/`Button`), hit-tested pointer/keyboard input, and
-click callbacks.
+click callbacks; `draw_profile` records per-phase timings/counters and audits
+frames; and `draw_debug_ui` renders that data as a toggleable debug panel.
 
 Three independent renderers consume the same `DrawList`:
 `draw_backend_canvas`, `draw_backend_recording`, and `draw_backend_wgpu`.
@@ -48,7 +51,7 @@ Three independent renderers consume the same `DrawList`:
 |---|---|
 | `demos/component_demo` | Recommended component API (compose, layout, `on_click`, state, WASM) |
 | `demos/web_demo` | Raw scene + UI API and the Canvas backend |
-| `demos/wgpu_demo` | Native window + `wgpu` backend (surface presentation) |
+| `demos/wgpu_demo` | Native window + `wgpu` backend (surface presentation) + debug overlay |
 
 ## Build & test
 
@@ -79,4 +82,5 @@ python3 -m http.server 8080 --directory demos/web_demo
 cargo run -p wgpu_demo --release
 ```
 
-See `demos/wgpu_demo/README.md` for details.
+See `demos/wgpu_demo/README.md` for details. Press `` ` `` to toggle the
+performance/debug overlay; see `docs/debug.md` for wiring it into your own app.
