@@ -169,11 +169,12 @@ Phase1 -> Phase2 -> Phase3 -> Phase4 -> Phase5 -> Phase6 -> Phase7
 MVP = Phase 1 -> 2 -> 3 -> 4 (world + camera + CanvasLayer UI running).
 Phase 5-6 are the second batch.
 
-## Decisions (recommended defaults, pending sign-off)
+## Decisions (LOCKED, confirmed)
 
 1. **`Viewport` naming.** `draw_core::Viewport` is only a size + DPR helper.
    Rename it to `draw_core::ViewportSize` and give the new scene-level
    render-context node the name `Viewport` (root instance `RootViewport`).
+   The rename lands in Phase 2, not Phase 1.
 2. **Tree access from `Ui`.** Pass `&mut SceneTree` explicitly to
    `mount` / `layout` / `paint` / `handle_input`. Prefer explicit borrowing over
    `Rc<RefCell<SceneTree>>`.
@@ -192,3 +193,90 @@ Do not guess these; confirm from the Godot tree (downloaded by the user).
 | Q4 | GUI pick order across `CanvasLayer` (layer vs `z_index` vs tree order vs `mouse_filter`); ordering of `_input` / `_gui_input` / `_unhandled_input`. | `scene/main/viewport.cpp` (`_gui_find_control`, `_gui_input_event`, `_push_unhandled_input`), `scene/gui/control.cpp` (`_gui_input`) |
 | Q5 | How `Camera2D` writes the canvas transform (`anchor_mode`, `zoom`, `offset`, limits, smoothing) and when `current` takes effect. | `scene/2d/camera_2d.cpp` |
 | Q6 | Are `Control` and `Node2D` mixed under one parent allowed? How do `Container`s treat non-`Control` children? Must a UI subtree be pure `Control`? | `scene/gui/container.cpp`, `scene/gui/control.cpp`, `scene/2d/node_2d.cpp` |
+
+Q1/Q3/Q4/Q6 matter for Phases 2-5; **Phase 1 is unblocked** and only relies on
+Godot's node/CanvasItem structure, which is already settled.
+
+---
+
+## Stage 25.1 — executable plan (Phase 1)
+
+Scope: generalize `draw_scene` so a single tree can host world nodes, canvas
+layers and engine/UI data. **No rendering or coordinate change yet.**
+
+### Deliverables
+
+1. **Generic node data slot** (the Phase 1 reason-to-exist).
+   ```rust
+   // draw_scene::Node
+   impl Node {
+       pub fn set_data<T: 'static>(&mut self, value: T);
+       pub fn data<T: 'static>(&self) -> Option<&T>;
+       pub fn data_mut<T: 'static>(&mut self) -> Option<&mut T>;
+       pub fn has_data<T: 'static>(&self) -> bool;
+       pub fn take_data<T: 'static>(&mut self) -> Option<T>;
+   }
+   ```
+   Backing store: `Option<Box<dyn Any>>`. Downcast by `TypeId`.
+   `draw_scene` stays generic and backend-neutral; it never names `ControlData`.
+
+2. **Node kinds:** add `NodeKind::CanvasLayer` and `NodeKind::Camera2D`.
+   `Camera2D` implies a `CanvasItem` (it is a 2D node with a transform);
+   `CanvasLayer` has no `CanvasItem`.
+
+3. **Dedicated engine data** (not the generic slot), owned by `Node`:
+   ```rust
+   pub struct CanvasLayerData {
+       pub layer: i32,
+       pub transform: Transform2D,
+       pub follow_viewport: bool,
+   }
+   pub struct Camera2DData {
+       pub enabled: bool,
+       pub current: bool,
+       pub zoom: Vec2,
+       pub offset: Vec2,
+   }
+   ```
+
+4. **Layer resolution:** `SceneTree::canvas_layer_of(id) -> Option<(NodeId, CanvasLayerData)>`
+   returns the nearest ancestor `CanvasLayer` (or `None` for the default
+   canvas). No transform math yet.
+
+5. **Constructors/exports:** `SceneTree::add_canvas_layer(parent, name)`,
+   `SceneTree::add_camera_2d(parent, name)`; re-export the new types from
+   `draw_scene::lib`.
+
+### Decision to settle in this stage
+
+`Node` / `SceneTree` currently `derive(Clone)`. `Box<dyn Any>` is not `Clone`.
+Nothing in the workspace clones them (checked), so **drop `Clone`** from `Node`
+and `SceneTree` and implement `Debug for Node` manually. If a real user appears,
+fall back to an `Rc<RefCell<Box<dyn Any>>>` slot.
+
+### Explicitly out of scope
+
+- No `Viewport` node, no camera math, no `SetTransform` change (Phase 2).
+- No `CanvasLayer` painting order (Phase 3).
+- `SceneTree::paint` keeps painting only world `Visual` (unchanged).
+
+### Tests (native, headless)
+
+- data slot: set / get / get_mut / has / take; wrong-type downcast returns
+  `None`; two nodes keep independent data.
+- `add_canvas_layer` / `add_camera_2d` create the right `NodeKind`; camera has a
+  `CanvasItem`, layer does not.
+- `canvas_layer_of` resolves the nearest ancestor; returns `None` without one;
+  survives `reparent` out of a layer.
+- existing `draw_scene` transform/paint tests stay green (no behavior change).
+
+### Gate
+
+```bash
+cargo fmt --all -- --check
+cargo check --workspace
+cargo test --workspace
+cargo bench --workspace --no-run
+```
+
+Then emit the Stage 25.1 report and stop for approval before Phase 2.
