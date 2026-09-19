@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn paints_yellow_bounds_and_name_id_labels() {
         let ui = ui();
-        let mut overlay = DebugOverlay::new();
+        let overlay = DebugOverlay::new();
         let mut ctx = PaintContext::new();
         overlay.paint(&ui, &mut ctx);
         let list = ctx.into_draw_list();

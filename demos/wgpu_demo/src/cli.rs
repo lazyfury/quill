@@ -116,11 +116,8 @@ mod tests {
         assert!(!options(&["--no-debug-ui"]).debug_ui);
         assert!(options(&["--performance"]).performance);
         assert!(!options(&["--no-profiler"]).profiler);
-        assert_eq!(options(&["--no-debug-ui", "--debug-ui"]).debug_ui, true);
-        assert_eq!(
-            options(&["--performance", "--no-performance"]).performance,
-            false
-        );
+        assert!(options(&["--no-debug-ui", "--debug-ui"]).debug_ui);
+        assert!(!options(&["--performance", "--no-performance"]).performance);
     }
 
     #[test]
