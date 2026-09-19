@@ -291,12 +291,7 @@ impl App {
                 millis(paint_done - layout_done),
                 millis(render_done - paint_done),
             ),
-            counters: FrameCounters::new(
-                self.demo.scene_node_count(),
-                self.demo.control_count(),
-                list.len(),
-                1,
-            ),
+            counters: FrameCounters::new(0, self.demo.control_count(), list.len(), 1),
         };
         self.profiler.record(stats);
         // Only audit when the performance panel can actually show it.

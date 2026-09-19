@@ -1,7 +1,8 @@
 //! quill native `wgpu` demo.
 //!
-//! Opens a window, renders the same `SceneTree` + `Ui` used by the web demos
-//! through [`draw_backend_wgpu::WgpuBackend`], and presents it to a wgpu surface:
+//! Opens a window and renders the shared, backend-neutral three-column
+//! `demo_app::DemoApp` UI through [`draw_backend_wgpu::WgpuBackend`], presenting
+//! it to a wgpu surface:
 //!
 //! ```text
 //! winit events -> InputEvent -> Demo (Scene/UI) -> DrawList -> WgpuBackend -> surface

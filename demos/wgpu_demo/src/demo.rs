@@ -89,11 +89,6 @@ impl Demo {
         self.app.ui()
     }
 
-    /// Scene nodes in the built-in demo scene.
-    pub fn scene_node_count(&self) -> usize {
-        self.app.scene_node_count()
-    }
-
     /// Controls in the demo UI.
     pub fn control_count(&self) -> usize {
         self.app.control_count()

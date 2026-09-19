@@ -23,7 +23,7 @@ python3 -m http.server 8080 --directory .
   from `draw_kit` themed components (`Text`, `Badge`, `Divider`, `Button`,
   `Checkbox`, `Switch`) on the shared `demo_app::DemoApp`,
 - monochrome rounded-square placeholders for icons and images,
-- a rotating `SceneTree` node clipped inside the detail hero,
+- a static image placeholder (monochrome rounded square) in the detail hero,
 - selection state (click a note or nav row) reflected in the detail pane,
 - pointer input (hover/click) and viewport-responsive layout (resize the window).
 

@@ -13,7 +13,10 @@
 //! ```
 //!
 //! Icons and images are monochrome rounded squares (placeholders). The detail
-//! hero renders a rotating `SceneTree` node, clipped to the hero rectangle.
+//! hero renders a static image placeholder (monochrome rounded square).
+//!
+//! The app is intentionally **static**: nothing animates, so a host can profile
+//! the idle cost (layout caching, paint and GPU submit) without animation noise.
 //!
 //! Hosts drive it through the usual pipeline:
 //!
@@ -34,7 +37,6 @@ use draw_kit::{
     Divider, Kit, SurfaceStyle, Switch, Text, Tone,
 };
 use draw_render::PaintContext;
-use draw_scene::{SceneTree, Visual};
 use draw_theme::{radius, space, TextSize, Theme};
 use draw_ui::{Align, Flex, Justify, Label, Panel, TextOptions, Ui};
 
@@ -117,8 +119,6 @@ pub struct DemoApp {
     ui: Ui,
     kit: Kit,
     theme: Theme,
-    scene: SceneTree,
-    rotating: NodeId,
     sidebar: NodeId,
     list: NodeId,
     detail: NodeId,
@@ -133,9 +133,7 @@ pub struct DemoApp {
     selected: Rc<Cell<usize>>,
     selected_nav: Rc<Cell<usize>>,
     clicks: Rc<Cell<u32>>,
-    hero_center: Vec2,
     viewport: Viewport,
-    time: f32,
 }
 
 impl Default for DemoApp {
@@ -448,25 +446,28 @@ impl DemoApp {
         kit.add(ui, actions.id(), Button::secondary("Duplicate"));
         kit.add(ui, actions.id(), Button::ghost("Delete"));
 
-        // ---- hero scene (clipped to the hero rect at paint time) --------
-        let mut scene = SceneTree::new();
-        let scene_root = scene.root();
-        let rotating = scene.add_node2d(scene_root, "Hero");
-        scene.set_visual(
-            rotating,
-            Visual::Rect {
-                size: Size::new(56.0, 56.0),
-                color: theme.palette.muted,
-            },
-        );
-        scene.update();
+        // ---- hero: a static image placeholder --------------------------
+        // No animation: the app is static so idle performance can be profiled.
+        kit.foreground(hero.id(), |ctx, rect, theme, _| {
+            let side = 64.0f32
+                .min(rect.size.width - 24.0)
+                .min(rect.size.height - 24.0)
+                .max(0.0);
+            if side > 0.0 {
+                let inner = Rect::from_center_size(rect.center(), Size::splat(side));
+                fill_rounded_rect(
+                    ctx,
+                    inner,
+                    radius::MD,
+                    theme.palette.subtle.with_alpha(0.18),
+                );
+            }
+        });
 
         Self {
             ui: ui_storage,
             kit,
             theme,
-            scene,
-            rotating,
             sidebar: sidebar.id(),
             list: list.id(),
             detail: detail.id(),
@@ -481,9 +482,7 @@ impl DemoApp {
             selected,
             selected_nav,
             clicks,
-            hero_center: Vec2::new(DETAIL_X + 400.0, 320.0),
             viewport: Viewport::new(Size::new(1100.0, 720.0)),
-            time: 0.0,
         }
     }
 
@@ -496,10 +495,6 @@ impl DemoApp {
     /// Mutable UI access, e.g. to inject a text measurer.
     pub fn ui_mut(&mut self) -> &mut Ui {
         &mut self.ui
-    }
-
-    pub fn scene(&self) -> &SceneTree {
-        &self.scene
     }
 
     pub fn theme(&self) -> &Theme {
@@ -570,10 +565,10 @@ impl DemoApp {
 
     // -- pipeline ----------------------------------------------------------
 
-    /// Advances time and refreshes state-driven text.
-    pub fn update(&mut self, viewport: Viewport, dt: f32) {
+    /// Updates state-driven text. The app is static: `dt` is accepted for a
+    /// uniform host pipeline but nothing animates.
+    pub fn update(&mut self, viewport: Viewport, _dt: f32) {
         self.viewport = viewport;
-        self.time += dt;
 
         let index = self.selected.get().min(NOTES.len() - 1);
         let note = &NOTES[index];
@@ -586,22 +581,16 @@ impl DemoApp {
         );
     }
 
-    /// Resolves UI layout and positions the hero scene node.
+    /// Resolves UI layout for `viewport`.
     pub fn layout(&mut self, viewport: Viewport) {
         self.viewport = viewport;
         self.ui.layout(viewport);
-        if let Some(hero) = self.ui.control(self.hero) {
-            self.hero_center = hero.rect.center();
-        }
-        self.scene.set_position(self.rotating, self.hero_center);
-        self.scene.set_rotation(self.rotating, self.time);
-        self.scene.update();
     }
 
     /// Emits this frame's `DrawList` into `ctx`.
     ///
-    /// Order: window background, kit surfaces, clipped hero scene, UI content,
-    /// kit foregrounds (indicators, icons).
+    /// Order: window background, kit surfaces, UI content, kit foregrounds
+    /// (indicators, icons, the hero image placeholder).
     pub fn paint(&self, ctx: &mut PaintContext) {
         let size = self.viewport.logical_size();
         ctx.fill_rect(
@@ -610,14 +599,6 @@ impl DemoApp {
         );
 
         self.kit.paint_surfaces(&self.ui, ctx);
-
-        if let Some(hero) = self.ui.control(self.hero) {
-            ctx.save();
-            ctx.clip_rect(hero.rect);
-            self.scene.paint(ctx);
-            ctx.restore();
-        }
-
         self.ui.paint(ctx);
         self.kit.paint_foreground(&self.ui, ctx);
     }
@@ -631,11 +612,6 @@ impl DemoApp {
         } else {
             ui_result
         }
-    }
-
-    /// Scene nodes in the built-in demo scene.
-    pub fn scene_node_count(&self) -> usize {
-        self.scene.node_count()
     }
 
     /// Controls in the demo UI.
@@ -1013,6 +989,6 @@ mod tests {
             .any(|c| matches!(c, DrawCommand::DrawText { .. })));
         assert!(commands
             .iter()
-            .any(|c| matches!(c, DrawCommand::ClipRect { .. })));
+            .any(|c| matches!(c, DrawCommand::FillRoundedRect { .. })));
     }
 }

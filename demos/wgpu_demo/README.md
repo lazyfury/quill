@@ -26,7 +26,7 @@ cargo run -p wgpu_demo --release
   - **content list** (324px): header, note rows with thumbnail placeholders,
     selection highlight and an accent bar,
   - **detail**: toolbar with icon buttons, a hero image placeholder that renders
-    a rotating `SceneTree` node (clipped to the hero rect), title/metadata,
+    a static image placeholder (monochrome rounded square), title/metadata,
     wrapping body text, preference controls and action buttons.
 - Icons and images are monochrome rounded-square placeholders.
 - Clicking a note row (or the back/forward icon buttons) updates the detail
