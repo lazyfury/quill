@@ -41,6 +41,8 @@ draw_profile  -> draw_core, draw_render
 draw_debug_ui -> draw_core, draw_render, draw_ui, draw_profile
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core
+draw_bench    (no draw_* deps; std only)
+draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui
 web_demo      -> draw_core, draw_render, draw_scene, draw_wasm
 wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, draw_backend_wgpu,
                  draw_profile, draw_debug_ui, winit
@@ -68,6 +70,7 @@ The native window API (`winit`) is only allowed in `demos/wgpu_demo`.
 - [x] Stage 9 — wgpu backend (`draw_backend_wgpu`, offscreen + pixel readback)
 - [x] Stage 10 — performance inspection (`draw_profile`) + debug overlay
       (`draw_debug_ui`)
+- [x] Stage 11 — benchmarking (`draw_bench` harness + `draw_bench_suite`)
 
 ## Per-stage gate (must run)
 
@@ -75,6 +78,7 @@ The native window API (`winit`) is only allowed in `demos/wgpu_demo`.
 cargo fmt --all -- --check
 cargo check --workspace
 cargo test --workspace
+cargo bench --workspace --no-run
 ```
 
 Then emit the fixed report format and stop for approval.
@@ -135,6 +139,39 @@ with `DebugOverlay`, and shows `PerformanceOverlay`; shortcuts are F3 / ` / d
 
 Like all core crates these are verified with native `cargo test`; the window
 overlays themselves are not screenshot-verified (see `docs/testing.md`).
+
+## Benchmarking (Stage 11, `draw_bench` + `draw_bench_suite`)
+
+A profiler says *where* time goes; a benchmark says *whether a change helped* and
+*keeps it from regressing*. `draw_profile` is the former; `draw_bench` is the
+latter.
+
+`draw_bench` is a dependency-free (`std` only, no randomness) harness:
+
+- `BenchRunner` warms up, calibrates an iteration count for one sample, collects
+  `BenchOptions::samples` samples, and returns `Stats` (min/max/mean/median/
+  stddev, p90/p95/p99).
+- `Baseline` is a plain-text file of `name -> median_ns`; `compare` yields
+  `Verdict::{Regression, Improvement, Stable, New, Removed}` at a ratio threshold.
+- `RunConfig` parses shared CLI flags (`--filter`, `--baseline`,
+  `--save-baseline`, `--threshold`, `--samples`, ...). `finish` prints the report,
+  saves/compares the baseline, and returns exit code `1` on any regression -- the
+  CI gate.
+
+`draw_bench_suite` owns deterministic scenarios (no I/O, fixed sizes) at 100 /
+1_000 / 10_000 entities: `scene/update_clean`, `scene/update_dirty_all`,
+`scene/paint`, `ui/layout`, `ui/hit_test`, `ui/paint`, and the end-to-end
+`pipeline/ui_frame`. It submits through `SinkBackend`, a consuming `RenderBackend`
+that counts commands and retains nothing. `draw_backend_wgpu` has its own
+`benches/wgpu.rs` for the offscreen render + readback path; it skips when no
+adapter is available.
+
+`cargo bench` uses the `bench` profile, pinned to `opt-level = 3`. Bench targets
+use `harness = false`; pass harness flags via the explicit target, e.g.
+`cargo bench -p draw_bench_suite --bench pipeline -- --filter scene/update`.
+Baselines are machine-sensitive: pin the toolchain and compare on the same host.
+
+See `docs/benchmarking.md`.
 
 ## API priority: API -> test -> implementation -> integration.
 

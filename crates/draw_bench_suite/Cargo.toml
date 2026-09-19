@@ -1,0 +1,17 @@
+[package]
+name = "draw_bench_suite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+draw_bench.workspace = true
+draw_core.workspace = true
+draw_render.workspace = true
+draw_scene.workspace = true
+draw_ui.workspace = true
+
+[[bench]]
+name = "pipeline"
+harness = false

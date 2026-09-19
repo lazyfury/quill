@@ -47,6 +47,7 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 - Stage 9 — `wgpu` backend (`draw_backend_wgpu`, offscreen + pixel readback) [done]
 - Stage 10 — performance inspection (`draw_profile`) + debug overlay
   (`draw_debug_ui`) [done]
+- Stage 11 — benchmarking (`draw_bench` harness + `draw_bench_suite`) [done]
 
 ## Debugging & performance inspection (Stage 10)
 
@@ -76,6 +77,29 @@ frame_start -> update -> layout -> paint -> render -> frame_done
   input.
 
 See `docs/debug.md`.
+
+## Benchmarking (Stage 11)
+
+The profiler observes a frame; a benchmark pins a path to a number and guards it
+against regression. The harness is dependency-free and lives outside the
+pipeline:
+
+```text
+draw_bench_suite          ->  draw_bench
+deterministic fixtures        BenchRunner -> Stats
+drive one stage               Baseline   -> Verdict
+```
+
+- `draw_bench` measures and compares only; it never builds a scene or touches a
+  backend.
+- `draw_bench_suite` builds fixtures and drives scene/ui/render; it contains no
+  timing code.
+- `draw_backend_wgpu` adds a GPU benchmark for the offscreen render + readback
+  path.
+
+`draw_bench` and `draw_bench_suite` sit beside the pipeline (like the demos):
+they depend on the core crates but no core crate depends on them. See
+`docs/benchmarking.md`.
 
 ## Backend replaceability
 

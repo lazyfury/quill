@@ -18,3 +18,8 @@ wgpu = "24"
 
 [dev-dependencies]
 draw_scene.workspace = true
+draw_bench.workspace = true
+
+[[bench]]
+name = "wgpu"
+harness = false

@@ -18,6 +18,13 @@
 - Performance panel tests — `draw_debug_ui` asserts the computed `OverlayText`,
   that the labels mirror it, that the panel is pinned, and that paint emits the
   expected `DrawText`/`FillRect` commands (and nothing while closed).
+- Benchmark harness tests — `draw_bench` asserts stats math, percentile
+  interpolation, baseline text round-trips, verdict classification (including
+  threshold boundaries) and the filter/runner behavior. These are pure data, no
+  timing assertions.
+- Benchmark scenario tests — `draw_bench_suite` asserts fixtures are
+  deterministic (identical `DrawList`s), start clean, and hit-test to the
+  expected control. They never assert on measured time.
 
 Core behavior must be testable with native `cargo test`, without a browser.
 Only the Canvas backend and WASM glue need a browser.
@@ -41,6 +48,15 @@ capturing one.
 `DrawList` is deterministic. `draw_scene`'s `scene_to_draw_list_is_deterministic`
 and `draw_render`'s `drawing_is_deterministic` compare exact command sequences.
 Extend by asserting the `Vec<DrawCommand>` directly.
+
+## Benchmarks vs tests
+
+Benchmarks live in `benches/` targets (`harness = false`) and are run with
+`cargo bench`, never `cargo test`. They measure time and are machine-dependent,
+so they are **not** part of the correctness suite and make no assertions on
+measured time. What *is* tested is the harness itself (`draw_bench`) and the
+determinism of every scenario fixture (`draw_bench_suite`). The `bench` profile is
+pinned to `opt-level = 3`. See `docs/benchmarking.md`.
 
 ## What needs a browser
 

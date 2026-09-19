@@ -18,6 +18,8 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 | `draw_render` | `DrawCommand`, `DrawList`, `PaintContext`, `RenderBackend` |
 | `draw_profile` | frame timing/counters, `Profiler`, `inspect` / `InspectionReport` |
 | `draw_debug_ui` | component debug bounds (`DebugOverlay`) + performance panel (`PerformanceOverlay`) |
+| `draw_bench` | dependency-free benchmark harness (`BenchRunner`, `Baseline`, regression verdicts) |
+| `draw_bench_suite` | deterministic CPU pipeline benchmarks (scene / ui / pipeline) |
 | `draw_backend_canvas` | Canvas 2D backend |
 | `draw_backend_recording` | headless recording backend for tests |
 | `draw_backend_wgpu` | native `wgpu` backend (offscreen, pixel readback) |
@@ -28,7 +30,7 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 10 (performance inspection + debug overlay). `draw_core` provides math,
+Stage 11 (benchmarking). `draw_core` provides math,
 colors, handles and the viewport model; `draw_scene` provides the scene tree
 with transform/visibility propagation and a `SceneTree::paint` step;
 `draw_render` provides the backend-neutral IR (`DrawCommand`/`DrawList`/
@@ -61,7 +63,25 @@ Three independent renderers consume the same `DrawList`:
 cargo check --workspace
 cargo test --workspace
 cargo fmt --all -- --check
+cargo bench --workspace --no-run
 ```
+
+## Benchmark
+
+```bash
+cargo bench -p draw_bench_suite                       # CPU pipeline suite
+cargo bench -p draw_bench_suite --bench pipeline -- --filter scene/update
+cargo bench -p draw_backend_wgpu --bench wgpu         # offscreen + readback (skips with no adapter)
+```
+
+Save a baseline and later fail on a regression:
+
+```bash
+cargo bench -p draw_bench_suite --bench pipeline -- --save-baseline benches/cpu.txt
+cargo bench -p draw_bench_suite --bench pipeline -- --baseline benches/cpu.txt
+```
+
+See `docs/benchmarking.md`.
 
 ## Run the web demo
 
