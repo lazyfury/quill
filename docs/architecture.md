@@ -44,6 +44,7 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 - Stage 6 — `Control` / layout / input [done]
 - Stage 7 — reusable component demo [done]
 - Stage 8 — second backend validation (`draw_backend_recording`) [done]
+- Stage 9 — `wgpu` backend (`draw_backend_wgpu`, offscreen + pixel readback) [done]
 
 ## Backend replaceability
 
@@ -51,11 +52,14 @@ Same `Scene` + `UI` + `DrawList` must run on any backend without changing
 Scene/UI code. Backend-specific code lives only in `draw_backend_*`,
 `draw_wasm`, and the demos.
 
-Validated by two independent renderers consuming the same IR:
+Validated by three independent renderers consuming the same IR:
 
 - `draw_backend_canvas` (HTML Canvas 2D, WASM) — `demos/web_demo`,
   `demos/component_demo`.
 - `draw_backend_recording` (headless recording backend) — `tests/pipeline.rs`.
+- `draw_backend_wgpu` (native `wgpu`, offscreen target + pixel readback, and
+  window-surface presentation) — `crates/draw_backend_wgpu/tests/render.rs`,
+  `demos/wgpu_demo`.
 
 Reused unchanged by both: `draw_core`, `draw_scene`, `draw_ui`, and the
 `DrawList` / `RenderBackend` contract in `draw_render`.

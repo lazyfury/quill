@@ -40,6 +40,7 @@ draw_render   -> draw_core
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core
 web_demo      -> draw_core, draw_render, draw_scene, draw_wasm
+wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, draw_backend_wgpu, winit
 ```
 
 `draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
@@ -47,6 +48,7 @@ IR (no backend/browser deps), and the pipeline's Paint step (Scene -> DrawList)
 lives in the scene. This does not weaken backend replaceability.
 
 Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo`.
+The native window API (`winit`) is only allowed in `demos/wgpu_demo`.
 
 ## Stages
 
@@ -58,8 +60,9 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 - [x] Stage 5 — Canvas2D backend + WASM
 - [x] Stage 6 — Control / layout / input
 - [x] Stage 7 — reusable component demo
-- [ ] Stage 8 — second backend validation (required case covered by
+- [x] Stage 8 — second backend validation (required case covered by
       `draw_backend_recording`; an extra native backend was tried and removed)
+- [x] Stage 9 — wgpu backend (`draw_backend_wgpu`, offscreen + pixel readback)
 
 ## Per-stage gate (must run)
 
@@ -79,6 +82,18 @@ The required second-backend validation is satisfied by `draw_backend_recording`
 A native macOS Core Graphics backend plus a `macos_demo` was implemented and then
 **removed by request**: the result was judged not worth the added complexity. Do
 not reintroduce it without an explicit request.
+
+## wgpu backend (Stage 9)
+
+`draw_backend_wgpu` is a third `RenderBackend` over the same `DrawList`. It
+renders to an **offscreen** `Rgba8Unorm` texture by default and exposes
+`WgpuBackend::read_pixels()` so tests assert on real pixels under native
+`cargo test` (no window, no screenshot). It can also draw into an external view
+(window surface texture) via `begin_frame_with_view`; `demos/wgpu_demo` presents
+that with `winit`. Transform/opacity/clip are resolved on the CPU; one
+textured-triangle pipeline handles solid shapes, registered images, and a
+built-in `8x8` bitmap-font atlas. `wgpu` must stay confined to this crate plus
+its own tests and the demo; core/scene/UI/render never see it.
 
 ## API priority: API -> test -> implementation -> integration.
 

@@ -1,0 +1,413 @@
+//! Headless `DrawList -> wgpu -> pixels` tests.
+//!
+//! The backend renders to an offscreen texture and the tests read the pixels
+//! back programmatically. No window and no screenshot are involved (see
+//! `AGENTS.md`).
+//!
+//! If no adapter is available (e.g. a GPU-less CI box) the tests skip rather
+//! than fail, so the rest of the workspace still builds and tests.
+
+use draw_backend_wgpu::{wgpu, PixelBuffer, WgpuBackend};
+use draw_core::{Color, Rect, Size, Vec2, Viewport};
+use draw_render::{Paint, PaintContext, RenderBackend, TextAlign, TextureId};
+
+/// Attempts to create a backend; `None` means "skip, no GPU adapter".
+fn backend() -> Option<WgpuBackend> {
+    match WgpuBackend::new() {
+        Ok(backend) => Some(backend),
+        Err(error) => {
+            eprintln!("skipping wgpu test: {error}");
+            None
+        }
+    }
+}
+
+fn viewport(width: f32, height: f32) -> Viewport {
+    Viewport::new(Size::new(width, height))
+}
+
+fn render(backend: &mut WgpuBackend, ctx: PaintContext, viewport: Viewport) -> PixelBuffer {
+    backend.begin_frame(viewport).unwrap();
+    backend.submit(&ctx.into_draw_list()).unwrap();
+    backend.end_frame().unwrap();
+    backend.read_pixels().unwrap()
+}
+
+fn assert_pixel(pixels: &PixelBuffer, x: u32, y: u32, expected: [u8; 4]) {
+    assert_pixel_tol(pixels, x, y, expected, 2);
+}
+
+fn assert_pixel_tol(pixels: &PixelBuffer, x: u32, y: u32, expected: [u8; 4], tolerance: i32) {
+    let actual = pixels.pixel(x, y).expect("pixel in bounds");
+    let close = actual
+        .iter()
+        .zip(expected.iter())
+        .all(|(a, b)| (*a as i32 - *b as i32).abs() <= tolerance);
+    assert!(
+        close,
+        "pixel ({x}, {y}) = {actual:?}, expected {expected:?} (+/- {tolerance})"
+    );
+}
+
+#[test]
+fn fills_rect_with_solid_color() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    let mut ctx = PaintContext::new();
+    ctx.fill_rect(
+        Rect::from_min_size(Vec2::ZERO, Size::new(32.0, 32.0)),
+        Color::RED,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_eq!(pixels.width, 32);
+    assert_eq!(pixels.height, 32);
+    assert_pixel(&pixels, 16, 16, [255, 0, 0, 255]);
+}
+
+#[test]
+fn clear_color_fills_the_untouched_target() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend.set_clear_color(Color::rgb(0.0, 0.0, 1.0));
+
+    let pixels = render(&mut backend, PaintContext::new(), viewport(16.0, 16.0));
+    assert_pixel(&pixels, 8, 8, [0, 0, 255, 255]);
+}
+
+#[test]
+fn scale_factor_resizes_target_and_scales_geometry() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend.set_scale_factor(2.0);
+    assert_eq!(backend.scale_factor(), 2.0);
+
+    // Logical 8x8 rect at the origin on a logical 16x16 viewport.
+    let mut ctx = PaintContext::new();
+    ctx.fill_rect(
+        Rect::from_min_size(Vec2::ZERO, Size::splat(8.0)),
+        Color::BLUE,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(16.0, 16.0));
+    // DPR doubled the backing store...
+    assert_eq!(pixels.width, 32);
+    assert_eq!(pixels.height, 32);
+    // ...and the logical rect now covers device [0, 16).
+    assert_pixel(&pixels, 4, 4, [0, 0, 255, 255]);
+    assert_pixel(&pixels, 24, 24, [0, 0, 0, 0]);
+}
+
+#[test]
+fn clip_rect_limits_subsequent_drawing() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    let full = Rect::from_min_size(Vec2::ZERO, Size::splat(32.0));
+
+    let mut ctx = PaintContext::new();
+    ctx.fill_rect(full, Color::RED);
+    ctx.clip_rect(Rect::from_min_size(Vec2::splat(4.0), Size::splat(8.0)));
+    ctx.fill_rect(full, Color::GREEN);
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 8, 8, [0, 255, 0, 255]); // inside the clip
+    assert_pixel(&pixels, 16, 16, [255, 0, 0, 255]); // clipped away
+    assert_pixel(&pixels, 2, 2, [255, 0, 0, 255]); // outside the clip
+}
+
+#[test]
+fn opacity_blends_toward_the_background() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend.set_clear_color(Color::BLACK);
+
+    let mut ctx = PaintContext::new();
+    ctx.set_opacity(0.5);
+    ctx.fill_rect(
+        Rect::from_min_size(Vec2::ZERO, Size::splat(16.0)),
+        Color::WHITE,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(16.0, 16.0));
+    assert_pixel(&pixels, 8, 8, [128, 128, 128, 255]);
+}
+
+#[test]
+fn save_restore_restores_opacity() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend.set_clear_color(Color::BLACK);
+
+    let mut ctx = PaintContext::new();
+    ctx.set_opacity(0.5);
+    ctx.save();
+    ctx.set_opacity(1.0);
+    ctx.restore();
+    ctx.fill_rect(
+        Rect::from_min_size(Vec2::ZERO, Size::splat(16.0)),
+        Color::WHITE,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(16.0, 16.0));
+    assert_pixel(&pixels, 8, 8, [128, 128, 128, 255]);
+}
+
+#[test]
+fn transform_is_baked_into_the_geometry() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+
+    let mut ctx = PaintContext::new();
+    ctx.set_transform(draw_core::Transform2D::from_translation(Vec2::new(
+        8.0, 8.0,
+    )));
+    ctx.fill_rect(
+        Rect::from_min_size(Vec2::ZERO, Size::splat(8.0)),
+        Color::GREEN,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 12, 12, [0, 255, 0, 255]); // translated
+    assert_pixel(&pixels, 2, 2, [0, 0, 0, 0]); // origin left untouched
+}
+
+#[test]
+fn circle_covers_center_but_not_corner() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+
+    let mut ctx = PaintContext::new();
+    ctx.fill_circle(Vec2::new(16.0, 16.0), 8.0, Color::RED);
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 16, 16, [255, 0, 0, 255]);
+    assert_pixel(&pixels, 1, 1, [0, 0, 0, 0]);
+}
+
+#[test]
+fn stroke_rect_outline_leaves_the_center_empty() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+
+    let mut ctx = PaintContext::new();
+    ctx.stroke_rect(
+        Rect::from_min_size(Vec2::new(4.0, 4.0), Size::splat(16.0)),
+        2.0,
+        Color::WHITE,
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 5, 5, [255, 255, 255, 255]); // on the top edge
+    assert_pixel(&pixels, 12, 12, [0, 0, 0, 0]); // hole in the middle
+}
+
+#[test]
+fn draw_image_samples_a_registered_texture() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    // 2x2: top-left red, top-right green, bottom-left blue, bottom-right white.
+    let texture = [
+        255, 0, 0, 255, 0, 255, 0, 255, // row 0
+        0, 0, 255, 255, 255, 255, 255, 255, // row 1
+    ];
+    let id = TextureId::new(1);
+    backend.register_texture(id, 2, 2, &texture).unwrap();
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        id,
+        Rect::from_min_size(Vec2::ZERO, Size::splat(32.0)),
+        None,
+        Paint::new(Color::WHITE),
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    // Linear filtering blends slightly at the two-texel boundary, so allow a
+    // wider tolerance than the exact-fill assertions.
+    assert_pixel_tol(&pixels, 8, 8, [255, 0, 0, 255], 16);
+    assert_pixel_tol(&pixels, 24, 8, [0, 255, 0, 255], 16);
+    assert_pixel_tol(&pixels, 8, 24, [0, 0, 255, 255], 16);
+    assert_pixel_tol(&pixels, 24, 24, [255, 255, 255, 255], 16);
+}
+
+#[test]
+fn draw_image_honours_the_source_subrect() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    // 2x2 with only the bottom-right white; sample just that texel.
+    let texture = [
+        0, 0, 0, 0, 0, 0, 0, 0, // row 0 transparent
+        0, 0, 0, 0, 255, 255, 255, 255, // row 1 bottom-right white
+    ];
+    let id = TextureId::new(2);
+    backend.register_texture(id, 2, 2, &texture).unwrap();
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        id,
+        Rect::from_min_size(Vec2::ZERO, Size::splat(16.0)),
+        Some(Rect::from_min_size(Vec2::new(1.0, 1.0), Size::splat(1.0))),
+        Paint::new(Color::WHITE),
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(16.0, 16.0));
+    assert_pixel(&pixels, 8, 8, [255, 255, 255, 255]);
+}
+
+#[test]
+fn draw_text_rasterizes_visible_glyphs() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend.set_clear_color(Color::BLACK);
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_text(
+        "M",
+        Vec2::new(4.0, 20.0),
+        16.0,
+        TextAlign::Left,
+        Paint::new(Color::WHITE),
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    // The glyph cell occupies x in [4, 20), y in [4, 20). Look for ink.
+    let inked = (4..20).any(|y| (4..20).any(|x| pixels.pixel(x, y).unwrap()[0] > 128));
+    assert!(
+        inked,
+        "expected the glyph to draw at least one bright pixel"
+    );
+}
+
+#[test]
+fn text_alignment_shifts_the_glyph() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    backend.set_clear_color(Color::BLACK);
+
+    let mut left = PaintContext::new();
+    left.draw_text(
+        "I",
+        Vec2::new(16.0, 24.0),
+        16.0,
+        TextAlign::Left,
+        Paint::new(Color::WHITE),
+    );
+    let left_pixels = render(&mut backend, left, viewport(32.0, 32.0));
+
+    let mut right = PaintContext::new();
+    right.draw_text(
+        "I",
+        Vec2::new(16.0, 24.0),
+        16.0,
+        TextAlign::Right,
+        Paint::new(Color::WHITE),
+    );
+    let right_pixels = render(&mut backend, right, viewport(32.0, 32.0));
+
+    assert_ne!(left_pixels.data, right_pixels.data);
+}
+
+#[test]
+fn scene_tree_renders_through_the_backend_unchanged() {
+    use draw_scene::{SceneTree, Visual};
+
+    let Some(mut backend) = backend() else {
+        return;
+    };
+
+    // A scene built with the same API the other backends consume.
+    let mut tree = SceneTree::new();
+    let root = tree.root();
+    let node = tree.add_node2d(root, "Box");
+    tree.set_position(node, Vec2::new(6.0, 6.0));
+    tree.set_visual(
+        node,
+        Visual::Rect {
+            size: Size::splat(10.0),
+            color: Color::RED,
+        },
+    );
+    tree.update();
+
+    let mut ctx = PaintContext::new();
+    tree.paint(&mut ctx);
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 10, 10, [255, 0, 0, 255]);
+    assert_pixel(&pixels, 2, 2, [0, 0, 0, 0]);
+}
+
+#[test]
+fn renders_into_an_external_texture_view() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    let size = 16u32;
+    // A `Bgra8Unorm` view mirrors a typical window-surface format, exercising
+    // the per-format pipeline cache.
+    let texture = backend.device().create_texture(&wgpu::TextureDescriptor {
+        label: Some("test.external"),
+        size: wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+
+    let mut ctx = PaintContext::new();
+    ctx.fill_rect(
+        Rect::from_min_size(Vec2::ZERO, Size::splat(16.0)),
+        Color::RED,
+    );
+
+    backend
+        .begin_frame_with_view(
+            view,
+            size,
+            size,
+            wgpu::TextureFormat::Bgra8Unorm,
+            viewport(16.0, 16.0),
+        )
+        .unwrap();
+    assert!(!backend.is_offscreen_frame());
+    backend.submit(&ctx.into_draw_list()).unwrap();
+    backend.end_frame().unwrap();
+
+    // Whatever the target format, `read_texture` returns the raw texel bytes;
+    // for `Bgra8Unorm` that is B, G, R, A, so red reads back as [0, 0, 255, 255].
+    let pixels = backend.read_texture(&texture, size, size).unwrap();
+    assert_pixel(&pixels, 8, 8, [0, 0, 255, 255]);
+}
+
+#[test]
+fn frame_lifecycle_reports_misuse() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    assert!(backend.submit(&draw_render::DrawList::new()).is_err());
+    assert!(backend.end_frame().is_err());
+
+    backend.begin_frame(viewport(8.0, 8.0)).unwrap();
+    assert!(backend.begin_frame(viewport(8.0, 8.0)).is_err());
+    backend.end_frame().unwrap();
+}

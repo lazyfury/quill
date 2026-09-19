@@ -18,6 +18,7 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 | `draw_render` | `DrawCommand`, `DrawList`, `PaintContext`, `RenderBackend` |
 | `draw_backend_canvas` | Canvas 2D backend |
 | `draw_backend_recording` | headless recording backend for tests |
+| `draw_backend_wgpu` | native `wgpu` backend (offscreen, pixel readback) |
 | `draw_wasm` | browser glue (events, RAF, canvas wiring) |
 
 Dependency direction is enforced by crate boundaries: the pure core crates never
@@ -25,17 +26,21 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 8 (second backend validation). `draw_core` provides math, colors, handles and
+Stage 9 (wgpu backend). `draw_core` provides math, colors, handles and
 the viewport model; `draw_scene` provides the scene tree with transform/visibility
 propagation and a `SceneTree::paint` step; `draw_render` provides the
 backend-neutral IR (`DrawCommand`/`DrawList`/`PaintContext`) and the
 `RenderBackend` trait; `draw_backend_recording` records frames for the fully
 headless `Scene -> DrawList -> RenderBackend` test pipeline; `draw_backend_canvas`
-+ `draw_wasm` render that IR to an HTML Canvas with DPR handling and input; and
-`draw_ui` provides `Control`, layout (anchors/offsets/containers), reusable
-components (`Panel`/`VBox`/`HBox`/`Label`/`Button`), hit-tested pointer/keyboard
-input, and click callbacks. `draw_backend_recording` provides the second,
-headless `RenderBackend` (same `DrawList`, no Scene/UI changes).
++ `draw_wasm` render that IR to an HTML Canvas with DPR handling and input;
+`draw_backend_wgpu` renders the same IR with `wgpu` to an offscreen texture and
+reads the pixels back for native `cargo test`; and `draw_ui` provides `Control`,
+layout (anchors/offsets/containers), reusable components
+(`Panel`/`VBox`/`HBox`/`Label`/`Button`), hit-tested pointer/keyboard input, and
+click callbacks.
+
+Three independent renderers consume the same `DrawList`:
+`draw_backend_canvas`, `draw_backend_recording`, and `draw_backend_wgpu`.
 
 ## Demos
 
@@ -43,6 +48,7 @@ headless `RenderBackend` (same `DrawList`, no Scene/UI changes).
 |---|---|
 | `demos/component_demo` | Recommended component API (compose, layout, `on_click`, state, WASM) |
 | `demos/web_demo` | Raw scene + UI API and the Canvas backend |
+| `demos/wgpu_demo` | Native window + `wgpu` backend (surface presentation) |
 
 ## Build & test
 
@@ -66,3 +72,11 @@ cargo install wasm-bindgen-cli --version 0.2.128
 python3 -m http.server 8080 --directory demos/web_demo
 # open http://localhost:8080/
 ```
+
+## Run the native wgpu demo
+
+```bash
+cargo run -p wgpu_demo --release
+```
+
+See `demos/wgpu_demo/README.md` for details.

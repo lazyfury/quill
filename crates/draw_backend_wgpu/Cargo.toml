@@ -1,0 +1,20 @@
+[package]
+name = "draw_backend_wgpu"
+version.workspace = true
+edition.workspace = true
+# `wgpu` 24 requires Rust 1.76, so this crate opts out of the workspace's 1.75.
+rust-version = "1.76"
+license.workspace = true
+
+[dependencies]
+draw_core.workspace = true
+draw_render.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bytemuck = { version = "1", features = ["derive"] }
+font8x8 = "0.3"
+pollster = "0.4"
+wgpu = "24"
+
+[dev-dependencies]
+draw_scene.workspace = true
