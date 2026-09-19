@@ -40,8 +40,6 @@ draw_render   -> draw_core
 draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core
 web_demo      -> draw_core, draw_render, draw_scene, draw_wasm
-macos_demo    -> draw_core, draw_render, draw_scene, draw_ui,
-                 draw_backend_coregraphics
 ```
 
 `draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
@@ -60,7 +58,8 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 - [x] Stage 5 — Canvas2D backend + WASM
 - [x] Stage 6 — Control / layout / input
 - [x] Stage 7 — reusable component demo
-- [x] Stage 8 — second backend validation (macOS Core Graphics)
+- [ ] Stage 8 — second backend validation (required case covered by
+      `draw_backend_recording`; an extra native backend was tried and removed)
 
 ## Per-stage gate (must run)
 
@@ -71,6 +70,15 @@ cargo test --workspace
 ```
 
 Then emit the fixed report format and stop for approval.
+
+## Second backend (Stage 8)
+
+The required second-backend validation is satisfied by `draw_backend_recording`
+(a different `RenderBackend` consuming the same `DrawList`, no Scene/UI changes).
+
+A native macOS Core Graphics backend plus a `macos_demo` was implemented and then
+**removed by request**: the result was judged not worth the added complexity. Do
+not reintroduce it without an explicit request.
 
 ## API priority: API -> test -> implementation -> integration.
 

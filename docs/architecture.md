@@ -43,7 +43,7 @@ with half-open membership `[min, max)`. `Viewport` stores logical size only;
 - Stage 5 — Canvas 2D backend + WASM [done]
 - Stage 6 — `Control` / layout / input [done]
 - Stage 7 — reusable component demo [done]
-- Stage 8 — second backend validation (macOS Core Graphics, `draw_backend_coregraphics`) [done]
+- Stage 8 — second backend validation (`draw_backend_recording`) [done]
 
 ## Backend replaceability
 
@@ -55,8 +55,7 @@ Validated by two independent renderers consuming the same IR:
 
 - `draw_backend_canvas` (HTML Canvas 2D, WASM) — `demos/web_demo`,
   `demos/component_demo`.
-- `draw_backend_coregraphics` (macOS Core Graphics + Core Text) —
-  `demos/macos_demo`.
+- `draw_backend_recording` (headless recording backend) — `tests/pipeline.rs`.
 
 Reused unchanged by both: `draw_core`, `draw_scene`, `draw_ui`, and the
 `DrawList` / `RenderBackend` contract in `draw_render`.
