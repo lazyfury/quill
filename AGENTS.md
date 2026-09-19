@@ -28,12 +28,16 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
 
 ```
 draw_core            (no draw_* deps)
-draw_scene    -> draw_core
+draw_scene    -> draw_core, draw_render
 draw_ui       -> draw_core, draw_scene
 draw_render   -> draw_core
 draw_backend_* -> draw_render
 draw_wasm     -> draw_render, draw_backend_canvas
 ```
+
+`draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
+IR (no backend/browser deps), and the pipeline's Paint step (Scene -> DrawList)
+lives in the scene. This does not weaken backend replaceability.
 
 Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo`.
 
@@ -42,7 +46,7 @@ Browser APIs only allowed in `draw_backend_canvas`, `draw_wasm`, `demos/web_demo
 - [x] Stage 0 — workspace skeleton
 - [x] Stage 1 — core types / math
 - [x] Stage 2 — SceneTree / Node / CanvasItem
-- [ ] Stage 3 — DrawList / render IR
+- [x] Stage 3 — DrawList / render IR
 - [ ] Stage 4 — RecordingBackend / headless tests
 - [ ] Stage 5 — Canvas2D backend + WASM
 - [ ] Stage 6 — Control / layout / input
@@ -77,3 +81,13 @@ derives `world_transform` / `world_visible` using `DirtyFlags` (returns number o
 recomputed transforms; 0 when clean). Child lists are kept sorted by
 `(z_index, creation order)` for deterministic traversal. Transform propagation:
 `world = parent_world * local`.
+
+## Render IR (Stage 3, `draw_render`)
+
+`Paint` (solid color), `DrawCommand` (`Save`/`Restore`/`SetTransform`/
+`SetOpacity`/`ClipRect`/`FillRect`/`StrokeRect`/`FillCircle`/`StrokeCircle`/
+`DrawImage`/`DrawText`), `DrawList`, `PaintContext`, `TextureId`.
+`PaintContext::save`/`restore` are balanced. Scene paints via
+`SceneTree::paint(&mut PaintContext)`; `Visual::{None,Rect,Circle}` on `Node2D`
+are a temporary built-in primitive. Geometry is in current-transform space;
+`ClipRect` is in viewport/logical space. No backend types in the IR.

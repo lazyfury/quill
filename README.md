@@ -25,9 +25,11 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 2 (SceneTree / Node / CanvasItem). `draw_core` provides math, colors,
-handles and the viewport model; `draw_scene` provides the scene tree with
-transform/visibility propagation. Render IR arrives in Stage 3.
+Stage 3 (DrawList / render IR). `draw_core` provides math, colors, handles and
+the viewport model; `draw_scene` provides the scene tree with transform/visibility
+propagation and a `SceneTree::paint` step; `draw_render` provides the
+backend-neutral IR (`DrawCommand`/`DrawList`/`PaintContext`). A recording
+backend and headless test pipeline arrive in Stage 4.
 
 ## Build & test
 

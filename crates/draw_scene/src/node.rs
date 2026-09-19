@@ -1,4 +1,23 @@
-use draw_core::{NodeId, Transform2D};
+use draw_core::{Color, NodeId, Size, Transform2D};
+
+/// A minimal built-in visual for canvas items.
+///
+/// This is a temporary primitive that lets `Node2D` participate in the
+/// `Scene -> DrawList` pipeline before custom drawing (`Control`, Stage 6) and
+/// richer node types exist. The default is [`Visual::None`].
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Visual {
+    #[default]
+    None,
+    Rect {
+        size: Size,
+        color: Color,
+    },
+    Circle {
+        radius: f32,
+        color: Color,
+    },
+}
 
 /// The role a node plays in the scene tree.
 ///
@@ -48,6 +67,7 @@ pub struct CanvasItem {
     pub(crate) transform: Transform2D,
     pub(crate) world_transform: Transform2D,
     pub(crate) world_visible: bool,
+    pub(crate) visual: Visual,
     pub(crate) dirty: DirtyFlags,
 }
 
@@ -65,6 +85,7 @@ impl CanvasItem {
             transform: Transform2D::IDENTITY,
             world_transform: Transform2D::IDENTITY,
             world_visible: true,
+            visual: Visual::None,
             dirty: DirtyFlags::DIRTY,
         }
     }
@@ -96,6 +117,10 @@ impl CanvasItem {
 
     pub fn dirty_flags(&self) -> DirtyFlags {
         self.dirty
+    }
+
+    pub fn visual(&self) -> Visual {
+        self.visual
     }
 }
 
@@ -173,6 +198,12 @@ impl Node {
 
     pub fn world_transform(&self) -> Option<Transform2D> {
         self.canvas.as_ref().map(CanvasItem::world_transform)
+    }
+
+    pub fn visual(&self) -> Visual {
+        self.canvas
+            .as_ref()
+            .map_or(Visual::None, CanvasItem::visual)
     }
 
     /// Effective visibility including ancestors (valid after update).

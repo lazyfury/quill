@@ -1,11 +1,28 @@
-//! `draw_render` — backend-neutral render IR.
+//! `draw_render` — the backend-neutral render intermediate representation (IR).
 //!
-//! Owns `DrawCommand`, `DrawList`, `PaintContext`, resource handles and the
-//! `RenderBackend` trait. Must not depend on any concrete backend or browser API.
-//! Concrete types arrive in Stages 3-4.
+//! Owns [`DrawCommand`], [`DrawList`], [`PaintContext`], [`Paint`] and resource
+//! handles ([`TextureId`]). It depends only on `draw_core` and **must never**
+//! reference a concrete backend, browser API, or GPU object, so any backend can
+//! consume the same IR.
+//!
+//! # Pipeline position
+//!
+//! ```text
+//! Scene / UI --paint--> PaintContext --> DrawList --> RenderBackend --> Pixels
+//! ```
+//!
+//! The `RenderBackend` trait itself arrives in Stage 4.
 
-/// Crate name, used by Stage 0 smoke tests.
+/// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_render";
+
+mod command;
+mod list;
+mod texture;
+
+pub use command::{DrawCommand, Paint, TextAlign};
+pub use list::{DrawList, PaintContext};
+pub use texture::TextureId;
 
 #[cfg(test)]
 mod tests {

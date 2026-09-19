@@ -15,9 +15,10 @@
 pub const CRATE: &str = "draw_scene";
 
 mod node;
+mod paint;
 mod tree;
 
-pub use node::{CanvasItem, DirtyFlags, Node, NodeKind};
+pub use node::{CanvasItem, DirtyFlags, Node, NodeKind, Visual};
 pub use tree::{PreorderIter, SceneTree};
 
 #[cfg(test)]
