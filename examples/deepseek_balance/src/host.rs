@@ -96,7 +96,7 @@ fn panel_device_size(scale: f32) -> Size {
 #[cfg(target_os = "macos")]
 const MENU_BAR_MAX: f32 = 40.0;
 /// Menu-bar refresh interval when `--every` is not given.
-const DEFAULT_REFRESH_SECS: u64 = 60;
+const DEFAULT_REFRESH_SECS: u64 = 60 * 5;
 /// How long after a panel hides itself a status-item click is ignored. See
 /// [`App::toggle_panel`].
 #[cfg(target_os = "macos")]
