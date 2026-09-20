@@ -52,7 +52,7 @@ use winit::monitor::MonitorHandle;
 use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::api::{self, Balance};
-use crate::badge;
+use crate::badge::{self, BadgeApp};
 use crate::ui::{BalanceApp, ARROW_HEIGHT};
 
 #[cfg(target_os = "macos")]
@@ -414,13 +414,17 @@ struct App {
 }
 
 /// The borderless badge window of the multi-window test, with everything it
-/// needs to paint: its own surface, backend and surface configuration, exactly
-/// like the main window's set but never shared with it.
+/// needs to paint: its own surface, backend, surface configuration and
+/// component view ([`BadgeApp`]), exactly like the main window's set but never
+/// shared with it.
 struct Badge {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     backend: WgpuBackend,
     config: wgpu::SurfaceConfiguration,
+    /// The view: a `Card` with two `Text` lines, laid out and painted through
+    /// `draw_ui` like any other view in this repo.
+    view: BadgeApp,
 }
 
 impl App {
@@ -655,8 +659,8 @@ impl App {
 
     // -- the badge window (multi-window test) ------------------------------
 
-    /// Creates the second window: a borderless, transparent card that sits in
-    /// the desktop's bottom-right corner, with its own surface and backend.
+    /// Creates the second window: a borderless, transparent card flush with the
+    /// bottom-left corner of the desktop, with its own surface and backend.
     ///
     /// It shares nothing with the main window's set — that is the point of the
     /// test. Events reach it through the `WindowId` dispatch in
@@ -667,6 +671,7 @@ impl App {
         }
         let attributes = Window::default_attributes()
             .with_title("DeepSeek 徽章")
+            .with_window_level(WindowLevel::AlwaysOnBottom)
             .with_decorations(false)
             .with_transparent(true)
             .with_resizable(false)
@@ -712,7 +717,10 @@ impl App {
         surface.configure(backend.device(), &config);
 
         backend.set_scale_factor(window.scale_factor() as f32);
-        backend.set_clear_color(clear_color(true, self.view.theme().palette.background));
+        // The view owns its theme now (a value, like the main view), so both the
+        // clear colour and the card come from the same tokens.
+        let mut view = BadgeApp::new(*self.view.theme());
+        backend.set_clear_color(clear_color(true, view.theme().palette.background));
         let font_config = FontConfig {
             mode: self.font_mode,
             device_pixel_rasterization: true,
@@ -720,21 +728,23 @@ impl App {
         if let Err(error) = backend.set_font_config(font_config) {
             eprintln!("badge font setup failed, using fallback: {error}");
         }
+        // Measure with the backend's real font, exactly like the main view —
+        // otherwise the card is laid out for one font and painted with another.
+        view.set_text_measurer(Rc::new(BackendTextMeasurer {
+            metrics: backend.text_metrics(),
+        }));
 
-        // Bottom-right corner of the primary monitor, inset by the margin.
+        // Bottom-left corner of the primary monitor, flush with both edges.
         // Monitor geometry is physical pixels with a top-left origin — the
         // same space `set_outer_position` takes.
         let monitor = event_loop
             .primary_monitor()
             .or_else(|| event_loop.available_monitors().next());
         if let Some(monitor) = monitor {
-            let margin = (badge::SCREEN_MARGIN * monitor.scale_factor() as f32).round() as i32;
             let at = monitor.position();
             let bounds = monitor.size();
-            let position = PhysicalPosition::new(
-                at.x + bounds.width as i32 - size.width as i32 - margin,
-                at.y + bounds.height as i32 - size.height as i32 - margin,
-            );
+            let position =
+                PhysicalPosition::new(at.x, at.y + bounds.height as i32 - size.height as i32);
             window.set_outer_position(position);
             self.trace(&format!(
                 "徽章窗口 {w}×{h} @ ({x}, {y})，显示器 {mp:?} {ms:?}",
@@ -753,6 +763,7 @@ impl App {
             surface,
             backend,
             config,
+            view,
         });
     }
 
@@ -794,11 +805,10 @@ impl App {
         badge.window.request_redraw();
     }
 
-    /// Runs one badge frame: paint, submit, present. Static content, so the
-    /// frame is identical every time — the loop is still event-driven and the
-    /// badge only redraws when asked.
+    /// Runs one badge frame: lay out the component tree, paint, submit, present.
+    /// Static content, so the frame is identical every time — the loop is still
+    /// event-driven and the badge only redraws when asked.
     fn render_badge(&mut self) {
-        let palette = self.view.theme().palette;
         let Some(badge) = self.badge.as_mut() else {
             return;
         };
@@ -808,8 +818,10 @@ impl App {
         let logical = Size::new(width as f32 / scale, height as f32 / scale);
         let viewport = ViewportSize::new(logical);
 
+        // Same three steps as the main window: layout, paint, submit.
+        badge.view.layout(viewport);
         let mut ctx = PaintContext::new();
-        badge::paint(&mut ctx, logical.width, logical.height, &palette);
+        badge.view.paint(&mut ctx);
         let list = ctx.into_draw_list();
         let commands = list.len();
 

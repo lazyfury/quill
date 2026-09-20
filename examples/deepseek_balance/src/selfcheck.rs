@@ -26,6 +26,7 @@ use draw_render::{CornerRadii, DrawCommand, PaintContext, RenderBackend};
 use draw_theme::Theme;
 
 use crate::api::{Balance, BalanceInfo};
+use crate::badge::{self, BadgeApp};
 use crate::ui::BalanceApp;
 
 /// Window-layout size the self-check renders (matches `ui.rs`'s tests).
@@ -264,13 +265,9 @@ fn dump_frame(frame: &RecordedFrame) {
 
 /// Prints the visible UI tree: structure, widget kind and each control's
 /// laid-out rect, so a layout problem is visible without rendering.
-fn dump_tree(app: &BalanceApp) {
-    let tree = app.tree();
+fn dump_tree(tree: &draw_scene::SceneTree, controls: usize) {
     let total = tree.iter().count();
-    println!(
-        "  ui tree: {total} nodes, {} controls (hidden subtrees pruned)",
-        app.control_count()
-    );
+    println!("  ui tree: {total} nodes, {controls} controls (hidden subtrees pruned)");
     for id in tree.iter_visible() {
         let node = tree.node(id);
         let mut depth = 0;
@@ -383,6 +380,30 @@ fn semantic_checks(app: &BalanceApp, frame: &RecordedFrame, panel: bool) -> Vec<
     failures
 }
 
+/// Counts an inspection report: prints each finding and turns every Error into
+/// a failure line. Shared by the main view's layouts and the badge window.
+fn report_findings(report: &InspectionReport, failures: &mut Vec<String>) {
+    if report.is_clean() {
+        println!("  inspect: clean");
+        return;
+    }
+    println!("  inspect: {} finding(s)", report.len());
+    for finding in report.findings() {
+        println!(
+            "    {} {}: {}",
+            finding.severity.label(),
+            finding.code.label(),
+            finding.summary()
+        );
+    }
+    if report.count_of(Severity::Error) > 0 {
+        failures.push(format!(
+            "{} Error-severity finding(s) from inspect",
+            report.count_of(Severity::Error)
+        ));
+    }
+}
+
 /// One self-check run: record, inspect, report. Returns the failure lines
 /// (empty = pass); findings are printed as they are seen. With `dump` the
 /// whole UI tree and every draw command are printed, so a frame can be read
@@ -400,32 +421,111 @@ fn run_one(
     println!("  frame: {} commands", frame.command_count());
 
     if dump {
-        dump_tree(&app);
+        dump_tree(app.tree(), app.control_count());
         dump_frame(&frame);
     }
 
     let report = inspect_frame(&app, &frame);
     let mut failures = semantic_checks(&app, &frame, panel);
+    report_findings(&report, &mut failures);
 
-    if report.is_clean() {
-        println!("  inspect: clean");
-    } else {
-        println!("  inspect: {} finding(s)", report.len());
-        for finding in report.findings() {
-            println!(
-                "    {} {}: {}",
-                finding.severity.label(),
-                finding.code.label(),
-                finding.summary()
-            );
+    for line in &failures {
+        println!("  FAIL {line}");
+    }
+    if failures.is_empty() {
+        println!("  ok");
+    }
+    failures
+}
+
+// -- the badge window -------------------------------------------------------
+
+/// Records one badge frame. The same lifecycle as [`record_frame`], minus the
+/// view state: the badge has no data layer, so layout and paint are the whole
+/// frame.
+fn record_badge_frame(mut app: BadgeApp) -> (BadgeApp, RecordedFrame) {
+    let viewport = ViewportSize::new(Size::new(badge::BADGE_WIDTH, badge::BADGE_HEIGHT));
+    app.layout(viewport);
+
+    let mut backend = RecordingBackend::new();
+    backend.begin_frame(viewport).expect("begin frame");
+    let mut ctx = PaintContext::new();
+    app.paint(&mut ctx);
+    backend.submit(&ctx.into_draw_list()).expect("submit frame");
+    backend.end_frame().expect("end frame");
+
+    let frame = backend.last_frame().expect("a frame was recorded").clone();
+    (app, frame)
+}
+
+/// Semantic checks for the badge, which is its own surface and so gets its own
+/// list instead of joining [`semantic_checks`].
+fn badge_checks(frame: &RecordedFrame) -> Vec<String> {
+    let mut failures = Vec::new();
+    let size = frame.viewport.logical_size();
+    let commands = frame.commands();
+
+    if frame.command_count() == 0 {
+        failures.push("the badge frame recorded no draw commands".to_string());
+        return failures;
+    }
+
+    // The card is the badge's backdrop as well as its content: a border on the
+    // edge and a fill just inside it, so the two together have to cover the
+    // surface. A pixel of slack lets the hairline sit where the theme puts it.
+    match commands.first() {
+        Some(DrawCommand::FillRoundedRect { rect, .. }) => {
+            let covered = rect.origin.x <= 1.0
+                && rect.origin.y <= 1.0
+                && rect.right() >= size.width - 1.0
+                && rect.bottom() >= size.height - 1.0;
+            if !covered {
+                failures.push(format!(
+                    "badge: the card does not cover the {size:?} surface: {rect:?}"
+                ));
+            }
         }
-        if report.count_of(Severity::Error) > 0 {
-            failures.push(format!(
-                "{} Error-severity finding(s) from inspect",
-                report.count_of(Severity::Error)
-            ));
+        other => failures.push(format!(
+            "badge: the first command should be the card's fill, found {other:?}"
+        )),
+    }
+
+    for (what, needle) in [("title", badge::TITLE), ("balance", badge::BALANCE_LINE)] {
+        match text_commands(frame, needle).first() {
+            Some((_, position)) if on_screen(*position, size.width, size.height) => {}
+            Some((_, position)) => failures.push(format!(
+                "badge {what}: `{needle}` is drawn at {position:?}, outside the {size:?} surface"
+            )),
+            None => failures.push(format!("badge {what}: `{needle}` is not in the draw list")),
         }
     }
+
+    failures
+}
+
+/// The badge window's self-check: the second window gets the same treatment as
+/// the first, so both are verified without a screen.
+fn run_badge(dump: bool) -> Vec<String> {
+    let (width, height) = (badge::BADGE_WIDTH, badge::BADGE_HEIGHT);
+    println!("self-check: badge ({width}x{height})");
+    let (app, frame) = record_badge_frame(BadgeApp::new(Theme::dark()));
+    println!("  frame: {} commands", frame.command_count());
+
+    if dump {
+        dump_tree(app.tree(), draw_ui::control_count(app.tree()));
+        dump_frame(&frame);
+    }
+
+    let mut stats = FrameStats::new(0);
+    stats.counters = FrameCounters::new(
+        0,
+        draw_ui::control_count(app.tree()),
+        frame.command_count(),
+        1,
+    );
+    let report = inspect(&frame.draw_list, &stats);
+    let mut failures = badge_checks(&frame);
+    report_findings(&report, &mut failures);
 
     for line in &failures {
         println!("  FAIL {line}");
@@ -465,6 +565,8 @@ pub fn run(dump: bool) -> i32 {
         dump,
     )
     .len();
+
+    failed += run_badge(dump).len();
 
     if failed == 0 {
         println!("self-check: all layouts pass");
@@ -525,6 +627,32 @@ mod tests {
         assert!(
             semantic_checks(&app, &frame, true).is_empty(),
             "semantic checks failed"
+        );
+    }
+
+    /// The badge window is a second surface with its own view, so it gets its
+    /// own frame check: the card still has to cover it and both lines land on
+    /// screen.
+    #[test]
+    fn the_badge_frame_passes_every_check() {
+        let (app, frame) = record_badge_frame(BadgeApp::new(Theme::dark()));
+        assert!(
+            badge_checks(&frame).is_empty(),
+            "badge semantic checks failed"
+        );
+
+        let mut stats = FrameStats::new(0);
+        stats.counters = FrameCounters::new(
+            0,
+            draw_ui::control_count(app.tree()),
+            frame.command_count(),
+            1,
+        );
+        let report = inspect(&frame.draw_list, &stats);
+        assert!(
+            report.max_severity() < Some(Severity::Error),
+            "structural findings: {:?}",
+            report.findings()
         );
     }
 
