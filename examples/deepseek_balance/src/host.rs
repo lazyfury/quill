@@ -76,7 +76,7 @@ const PANEL_WIDTH: f32 = 300.0;
 /// The body's height for the current content: header, status line, error line,
 /// the currency cards and the footer (hint plus the countdown row). The cards
 /// keep their own height, so this is what decides how much room the footer has.
-const PANEL_HEIGHT: f32 = 420.0;
+const PANEL_HEIGHT: f32 = 450.0;
 /// Gap between the status item and the top of the panel window, in logical
 /// pixels. Zero: the window's top edge *is* the arrow's tip, so the wedge
 /// touches the menu bar the way a system popover's does.

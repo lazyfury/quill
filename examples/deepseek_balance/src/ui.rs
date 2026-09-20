@@ -99,6 +99,12 @@ const FOOTER_HINT: &str = "DEEPSEEK_API_KEY / DEEPSEEK_BALANCE_URL 可覆盖默�
 /// [`BalanceApp::set_countdown`]).
 const COUNTDOWN_PREFIX: &str = "自动刷新";
 
+/// The error the debug button stages, long enough to wrap and exercise the
+/// error line's `max_lines(2)` layout.
+const TEST_ERROR: &str = "请求失败：HTTP 500 内部错误，端点暂时不可用，请稍后重试（测试文案）";
+/// Label of the debug button that stages / clears the test error.
+const TEST_ERROR_BUTTON_LABEL: &str = "测试错误";
+
 /// Fewest seconds between two refresh starts, unless the host overrides it with
 /// `--min-gap`.
 ///
@@ -167,6 +173,9 @@ struct Feed {
     loading: Rc<Cell<bool>>,
     /// What the button currently shows.
     state: Rc<Cell<RefreshState>>,
+    /// A pending test error the debug button wants on screen, or `None` to clear
+    /// it. Read by [`BalanceApp::update`] and reset, like the refresh intent.
+    test_error: Rc<Cell<Option<&'static str>>>,
 }
 
 impl Feed {
@@ -175,6 +184,7 @@ impl Feed {
             requested: Rc::new(Cell::new(false)),
             loading: Rc::new(Cell::new(false)),
             state: Rc::new(Cell::new(RefreshState::Idle)),
+            test_error: Rc::new(Cell::new(None)),
         }
     }
 }
@@ -218,6 +228,8 @@ pub struct BalanceApp {
     refresh_label_node: NodeId,
     status: NodeId,
     error: NodeId,
+    /// The rule between the error line and the cards, hidden when the error is.
+    divider: NodeId,
     countdown: NodeId,
     /// The countdown line currently on screen, so a repeat of the same second
     /// costs nothing. `None` means the line is hidden.
@@ -280,8 +292,9 @@ impl BalanceApp {
                     .max_lines(2)
                     .ref_(&refs.error),
             )
+            .child(Divider::horizontal(theme).ref_(&refs.divider))
             .child(currencies(theme, &refs))
-            .child(footer(theme, &refs));
+            .child(footer(theme, &refs, &feed));
 
         let tree = Flex::column()
             .mouse_filter(MouseFilter::Ignore)
@@ -313,6 +326,7 @@ impl BalanceApp {
             refresh_label_node,
             status: refs.status.get().expect("status label mounted"),
             error: refs.error.get().expect("error label mounted"),
+            divider: refs.divider.get().expect("divider mounted"),
             countdown: refs.countdown.get().expect("countdown label mounted"),
             countdown_line: None,
             available_ok: refs.available_ok.get().expect("availability label mounted"),
@@ -361,6 +375,8 @@ impl BalanceApp {
         // The countdown line waits for the host to report a timer.
         let countdown = app.countdown;
         app.set_visible(countdown, false);
+        // The error line starts empty, so its divider is hidden too.
+        app.set_error("");
         let hidden: Vec<NodeId> = app.slots[1..].iter().map(|slot| slot.card).collect();
         for card in hidden {
             app.set_visible(card, false);
@@ -505,6 +521,12 @@ impl BalanceApp {
         if self.feed.requested.get() {
             self.begin_refresh(now);
         }
+        // The debug button stages a test error (or clears it); consume it here
+        // like the refresh intent so the view stays the single writer of the
+        // error line.
+        if let Some(message) = self.feed.test_error.replace(None) {
+            self.set_error(message);
+        }
         self.sync_button(now)
     }
 
@@ -626,7 +648,7 @@ impl BalanceApp {
         self.feed.loading.set(true);
         self.blocked_until = Some(now + self.min_gap);
         draw_components::set_text(&mut self.tree, self.status, STATUS_BUSY);
-        draw_components::set_text(&mut self.tree, self.error, "");
+        self.set_error("");
     }
 
     /// Writes the button's state into its label and into the cell its decor
@@ -705,7 +727,7 @@ impl BalanceApp {
                 // flight at a time, which is what the `loading` gate is for.
                 self.blocked_until = None;
                 draw_components::set_text(&mut self.tree, self.status, STATUS_FAILED);
-                draw_components::set_text(&mut self.tree, self.error, message);
+                self.set_error(&message);
             }
         }
 
@@ -721,7 +743,7 @@ impl BalanceApp {
             balance.balance_infos.len()
         );
         draw_components::set_text(&mut self.tree, self.status, stamp);
-        draw_components::set_text(&mut self.tree, self.error, "");
+        self.set_error("");
 
         let (ok, bad) = (self.available_ok, self.available_bad);
         self.set_visible(ok, balance.is_available);
@@ -774,6 +796,16 @@ impl BalanceApp {
             draw_ui::mark_dirty(&mut self.tree, id);
         }
     }
+
+    /// Writes the error line and keeps it (and its divider) collapsible: an
+    /// empty message hides both so they take no height, a non-empty one shows
+    /// them and puts the text in place.
+    fn set_error(&mut self, message: &str) {
+        let visible = !message.is_empty();
+        self.set_visible(self.error, visible);
+        self.set_visible(self.divider, visible);
+        draw_components::set_text(&mut self.tree, self.error, message);
+    }
 }
 
 /// Node slots the declarative builders write into.
@@ -782,7 +814,9 @@ struct Refs {
     refresh: NodeRef,
     status: NodeRef,
     error: NodeRef,
+    divider: NodeRef,
     countdown: NodeRef,
+    test_error: NodeRef,
     available_ok: NodeRef,
     available_bad: NodeRef,
     slots: Vec<SlotRefs>,
@@ -863,7 +897,9 @@ fn currencies(theme: Theme, refs: &Refs) -> Column {
 /// The footer: what the environment can override, then how long until the next
 /// automatic refresh. The countdown node is hidden unless the host starts a
 /// timer, so this reads as one line in window mode.
-fn footer(theme: Theme, refs: &Refs) -> Column {
+fn footer(theme: Theme, refs: &Refs, feed: &Feed) -> Column {
+    let test_error = feed.test_error.clone();
+
     Column::new()
         .gap(space::XXS)
         .child(Text::caption(FOOTER_HINT, theme).tone(Tone::Subtle))
@@ -871,6 +907,19 @@ fn footer(theme: Theme, refs: &Refs) -> Column {
             Text::caption("", theme)
                 .tone(Tone::Subtle)
                 .ref_(&refs.countdown),
+        )
+        .child(
+            // Debug aid: stages the test error (or clears it) so the error line's
+            // layout can be eyeballed without a real failure.
+            Button::secondary(TEST_ERROR_BUTTON_LABEL, theme)
+                .on_click(move || {
+                    let next = match test_error.get() {
+                        Some(_) => None,
+                        None => Some(TEST_ERROR),
+                    };
+                    test_error.set(next);
+                })
+                .ref_(&refs.test_error),
         )
 }
 
