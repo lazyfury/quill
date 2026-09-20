@@ -43,7 +43,7 @@ deepseek_balance — 查询 DeepSeek 账户余额
 
 选项:
       --window         用普通窗口而不是菜单栏（非 macOS 上只能这样）
-      --badge          额外开一个无边框小窗（贴桌面右下角，多窗口测试）
+      --badge          额外开一个无边框小窗（贴桌面右下角，多窗口测试；默认就开）
       --cli            只在终端打印结果，不打开窗口
       --selfcheck      无头自检：同一套 UI 绘制进 RecordingBackend，
                        用 draw_profile 体检 + 断言关键内容，失败退出码 1
@@ -108,7 +108,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         window: false,
         every: None,
         min_gap: None,
-        badge: false,
+        badge: true,
     };
     let mut cli = false;
 
@@ -263,10 +263,14 @@ mod tests {
         }
     }
 
+    /// The badge rides along by default: the multi-window path is what this tool
+    /// is a test bed for, so an ordinary run opens both windows. `--badge` is
+    /// kept as an explicit way to say the same thing (a script can pass it and
+    /// not care whether the default ever changes back).
     #[test]
-    fn badge_flag_is_opt_in() {
+    fn the_badge_window_is_on_by_default() {
         match parse(&args(&[])) {
-            Ok(Command::Run(options)) => assert!(!options.badge, "no badge unless asked"),
+            Ok(Command::Run(options)) => assert!(options.badge, "badge on by default"),
             _ => panic!("expected a window run"),
         }
         match parse(&args(&["--badge"])) {

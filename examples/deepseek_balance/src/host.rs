@@ -163,6 +163,8 @@ pub struct Options {
     /// Open the second window (the borderless badge in the desktop's
     /// bottom-right corner) alongside the mode's own surface. The multi-window
     /// test: one event loop, two windows, two surfaces, two backends.
+    ///
+    /// On by default — see `parse` in `main.rs`; `--badge` only says it out loud.
     pub badge: bool,
     /// Fewest seconds between two refresh starts (`--min-gap`). `None` keeps the
     /// view's own default; `Some(0)` turns the throttle off, which is what a
