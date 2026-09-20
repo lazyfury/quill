@@ -86,6 +86,11 @@ themed library. Remaining polish, in priority order:
    for a frame that does not move). Keying slots by `index % pool_size` would
    re-bind only the rows entering and leaving, which is worth ~12x on the scroll
    path. Deferred: the current cost is 0.4% of a 60 Hz budget.
+7. **Wheel pump in the other two hosts** — `examples/file_browser` translates
+   winit's `MouseScrollDelta` into `InputEvent::Wheel` (`host::wheel_pixels`, a
+   pure function with tests); `wgpu_demo` and the Canvas runner (DOM `wheel`)
+   still need the same few lines, and until they have them a `List` inside them
+   simply does not scroll.
 
 ## UI runtime — `Ui` boundary & lifecycle (folded into Stage 25)
 
@@ -151,6 +156,15 @@ priority order and add native tests.
   1 K, 10 K and 100 K rows (73 µs) against a naive mounted-everything list's
   3 000 / 30 000 / 300 000 controls (1.75 ms → 261 ms). See
   `docs/components.md` and `docs/benchmarking.md`.
+- `examples/file_browser`: the first real consumer of `List` — a directory
+  browser with the scan on a worker thread, keyboard + wheel navigation, and a
+  headless `--selfcheck` that asserts the frame does not grow when the listing
+  goes from 5 000 to 200 000 rows (85 controls, 64 commands, 19 pooled rows at
+  900x620). It is also the first host to translate a platform wheel into
+  `InputEvent::Wheel` (`host::wheel_pixels`).
+- `draw_core::Key` has no `PageUp` / `PageDown`, so list UIs cannot map a
+  page-step key yet (the browser falls back to arrows + `Home` / `End`). Adding
+  the two variants is additive and would let `List` offer a page step.
 
 - `Router` view switching: `draw_components::Router` shows exactly one child
   view at a time by toggling scene visibility from a shared route cell. Layout,

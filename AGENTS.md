@@ -71,6 +71,13 @@ deepseek_balance -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                  draw_components, draw_backend_wgpu, winit, ureq
                  (standalone tool: own workspace, NOT a workspace member,
                   so it stays out of `cargo check --workspace`)
+file_browser   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
+                 draw_components, draw_backend_wgpu, draw_backend_recording,
+                 draw_profile, winit
+                 (standalone demo: own workspace, NOT a workspace member;
+                  the first real consumer of `draw_components::List`, and the
+                  first host to translate a platform wheel into
+                  `InputEvent::Wheel`)
 ```
 
 Planned (Stage 25, see `docs/godot-migration.md`):
@@ -91,9 +98,10 @@ scene. This does not weaken backend replaceability.
 Browser APIs only in `draw_backend_canvas`, `draw_wasm`, and the WASM example
 (`examples/web_demo`).
 `winit` only in the window hosts: `examples/wgpu_demo` and the standalone,
-non-member `examples/deepseek_balance` tool (its UI is built from
-`draw_theme` / `draw_components` / `draw_ui`; the network call runs on a worker
-thread and comes back through a winit `EventLoopProxy`). `wgpu` only in
+non-member `examples/deepseek_balance` and `examples/file_browser` tools (their
+UI is built from `draw_theme` / `draw_components` / `draw_ui`; blocking work —
+the network call, the directory scan — runs on a worker thread and comes back
+through a winit `EventLoopProxy`). `wgpu` only in
 `draw_backend_wgpu` (plus its tests/bench) and those window hosts. Font parsing
 (`ab_glyph`), text shaping
 (`rustybuzz`, `unicode-bidi`) and system-font discovery live only in
@@ -218,6 +226,10 @@ thread and comes back through a winit `EventLoopProxy`). `wgpu` only in
       72 commands per frame at 1 K, 10 K and 100 K rows; `docs/benchmarking.md`).
       Additive to the frozen core: no `Widget` variant, existing `ControlData`
       fields unchanged. Recorded in `docs/design-system.md`.
+      **Stage 25.14 demo:** `examples/file_browser` (own workspace) is the first
+      real consumer of `List` and the first host that turns a platform wheel into
+      `InputEvent::Wheel` (`host::wheel_pixels`); it scans directories on a worker
+      thread and verifies itself headlessly with `--selfcheck` / `--dump`.
 
 ## Per-stage gate (must run)
 

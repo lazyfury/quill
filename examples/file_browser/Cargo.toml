@@ -1,0 +1,31 @@
+[package]
+name = "file_browser"
+version = "0.1.0"
+edition = "2021"
+# `winit` / `wgpu` (pulled in by `draw_backend_wgpu`) need newer Rust than the
+# workspace default, exactly like `examples/wgpu_demo`.
+rust-version = "1.76"
+publish = false
+
+[[bin]]
+name = "file_browser"
+path = "src/main.rs"
+
+[dependencies]
+# The UI is built with the workspace's own layers (see AGENTS.md).
+draw_core = { path = "../../crates/draw_core" }
+draw_render = { path = "../../crates/draw_render" }
+draw_scene = { path = "../../crates/draw_scene" }
+draw_theme = { path = "../../crates/draw_theme" }
+draw_ui = { path = "../../crates/draw_ui" }
+draw_components = { path = "../../crates/draw_components" }
+draw_backend_wgpu = { path = "../../crates/draw_backend_wgpu" }
+# Headless self-check (`--selfcheck`): record draw lists + inspect them,
+# so the UI can be verified without a window or a screenshot.
+draw_backend_recording = { path = "../../crates/draw_backend_recording" }
+draw_profile = { path = "../../crates/draw_profile" }
+winit = "0.30"
+
+# 独立的小工具：不加入主 workspace，避免影响 cargo check --workspace 关卡。
+# 它只以 path 依赖引用工作区的 crate，工作区本身看不到这个包。
+[workspace]

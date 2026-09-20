@@ -285,11 +285,14 @@ delta }` and hands it to the nearest ancestor with a scroll callback
 `on_click`/`on_drag`). It returns `Handled` only when a callback took it, so an
 unclaimed wheel still reaches the host.
 
-The *core* routes the wheel; a host still has to produce it. Neither `wgpu_demo`
-(winit `WindowEvent::MouseWheel`) nor the Canvas runner (DOM `wheel`) translates
-its platform event into `InputEvent::Wheel` yet, so a list inside those demos
-does not scroll until that translation is added — `handle_input` is the contract,
-the pump is the host's job.
+The *core* routes the wheel; a host still has to produce it. `examples/file_browser`
+is the reference pump: `host::wheel_pixels` turns winit's `MouseScrollDelta` into
+logical pixels (`y > 0` scrolls down) and feeds `InputEvent::Wheel`. The event's
+sign convention is the one knob to flip if a platform reports the opposite, and
+the function is a pure one-liner with tests. Neither `wgpu_demo` (winit
+`WindowEvent::MouseWheel`) nor the Canvas runner (DOM `wheel`) has that
+translation yet, so a list inside those demos does not scroll until it is added —
+`handle_input` is the contract, the pump is the host's job.
 
 `draw_components::List` mounts only the rows its viewport can show and recycles
 them as it scrolls, so the node count, the layout work and the emitted commands
@@ -342,6 +345,11 @@ buffer that makes the next scroll step a pure offset change. Row count therefore
 costs nothing per frame — `docs/benchmarking.md` has the measured shape
 (107 controls and 72 commands per frame at 1 K, 10 K and 100 K rows, against a
 naive list's 300 K controls and 200 K commands at 100 K).
+
+`examples/file_browser` is the end-to-end example: a directory scanner feeding a
+`List`, with the scan on a worker thread, keyboard navigation, and a headless
+self-check that asserts the frame stays flat when the listing grows from 5 000
+to 200 000 rows.
 
 ## Switch views (Router)
 
