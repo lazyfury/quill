@@ -441,10 +441,13 @@ fn run_one(
 // -- the badge window -------------------------------------------------------
 
 /// Records one badge frame. The same lifecycle as [`record_frame`], minus the
-/// view state: the badge has no data layer, so layout and paint are the whole
-/// frame.
+/// view state: the badge has no data source of its own, so "the host applied a
+/// reply" and "paint a frame" are the whole story.
 fn record_badge_frame(mut app: BadgeApp) -> (BadgeApp, RecordedFrame) {
     let viewport = ViewportSize::new(Size::new(badge::BADGE_WIDTH, badge::BADGE_HEIGHT));
+    // One fetch, two windows: this is the same canned reply [`record_frame`]
+    // feeds the main view, handed over exactly as the host would.
+    app.apply_result(&Ok(sample_balance()));
     app.layout(viewport);
 
     let mut backend = RecordingBackend::new();
@@ -470,28 +473,27 @@ fn badge_checks(frame: &RecordedFrame) -> Vec<String> {
         return failures;
     }
 
-    // The card is the badge's backdrop as well as its content: a border on the
-    // edge and a fill just inside it, so the two together have to cover the
-    // surface. A pixel of slack lets the hairline sit where the theme puts it.
-    match commands.first() {
-        Some(DrawCommand::FillRoundedRect { rect, .. }) => {
-            let covered = rect.origin.x <= 1.0
-                && rect.origin.y <= 1.0
-                && rect.right() >= size.width - 1.0
-                && rect.bottom() >= size.height - 1.0;
-            if !covered {
-                failures.push(format!(
-                    "badge: the card does not cover the {size:?} surface: {rect:?}"
-                ));
-            }
-        }
-        other => failures.push(format!(
-            "badge: the first command should be the card's fill, found {other:?}"
-        )),
+    // The badge is a transparent overlay, so text is the *only* thing it may
+    // paint. A fill or a border here would cover the desktop — and would bring
+    // the window-server shadow back with it, since AppKit traces the shadow
+    // from the window's alpha.
+    if let Some(other) = commands
+        .iter()
+        .find(|command| !matches!(command, DrawCommand::DrawText { .. }))
+    {
+        failures.push(format!(
+            "badge: a transparent overlay may only paint text, found {other:?}"
+        ));
     }
 
-    for (what, needle) in [("title", badge::TITLE), ("balance", badge::BALANCE_LINE)] {
-        match text_commands(frame, needle).first() {
+    // Mirroring is the badge's whole job, so the frame has to carry the *value*
+    // the host handed it — not merely some text. The canned reply is CNY
+    // 110.00, so that is its headline and that is what should be on screen.
+    let headline = sample_balance().headline();
+    let expected = badge::State::Ready(headline).line();
+    let needles: [(&str, String); 2] = [("title", badge::TITLE.to_string()), ("balance", expected)];
+    for (what, needle) in needles {
+        match text_commands(frame, &needle).first() {
             Some((_, position)) if on_screen(*position, size.width, size.height) => {}
             Some((_, position)) => failures.push(format!(
                 "badge {what}: `{needle}` is drawn at {position:?}, outside the {size:?} surface"
@@ -509,7 +511,11 @@ fn run_badge(dump: bool) -> Vec<String> {
     let (width, height) = (badge::BADGE_WIDTH, badge::BADGE_HEIGHT);
     println!("self-check: badge ({width}x{height})");
     let (app, frame) = record_badge_frame(BadgeApp::new(Theme::dark()));
-    println!("  frame: {} commands", frame.command_count());
+    println!(
+        "  frame: {} commands, 余额行 {:?}",
+        frame.command_count(),
+        app.balance_text().unwrap_or("（无）")
+    );
 
     if dump {
         dump_tree(app.tree(), draw_ui::control_count(app.tree()));
@@ -631,8 +637,7 @@ mod tests {
     }
 
     /// The badge window is a second surface with its own view, so it gets its
-    /// own frame check: the card still has to cover it and both lines land on
-    /// screen.
+    /// own frame check: nothing but text on it, and both lines land on screen.
     #[test]
     fn the_badge_frame_passes_every_check() {
         let (app, frame) = record_badge_frame(BadgeApp::new(Theme::dark()));
@@ -669,5 +674,31 @@ mod tests {
         let stats = FrameStats::new(0);
         let report = inspect(&list, &stats);
         assert!(report.max_severity() == Some(Severity::Error), "{report:?}");
+    }
+
+    /// Same story for the badge's one structural rule: an opaque command has to
+    /// be caught, or "only text" could pass without ever looking at anything.
+    #[test]
+    fn a_backdrop_on_the_badge_trips_the_check() {
+        let viewport = ViewportSize::new(Size::new(badge::BADGE_WIDTH, badge::BADGE_HEIGHT));
+        let mut backend = RecordingBackend::new();
+        backend.begin_frame(viewport).expect("begin frame");
+        let mut ctx = PaintContext::new();
+        ctx.fill_rect(
+            Rect::from_min_size(
+                Vec2::ZERO,
+                Size::new(badge::BADGE_WIDTH, badge::BADGE_HEIGHT),
+            ),
+            Color::WHITE,
+        );
+        backend.submit(&ctx.into_draw_list()).expect("submit frame");
+        backend.end_frame().expect("end frame");
+        let frame = backend.last_frame().expect("a frame was recorded").clone();
+
+        let failures = badge_checks(&frame);
+        assert!(
+            failures.iter().any(|line| line.contains("only paint text")),
+            "a fill must be reported, got {failures:?}"
+        );
     }
 }

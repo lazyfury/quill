@@ -29,8 +29,13 @@
 //!    [`App::tick`], the state half of a frame, when no window is on screen),
 //! 2. runs [`api::fetch`] on a thread,
 //! 3. posts the result back as a [`UserEvent`], which wakes the loop,
-//! 4. hands it to [`BalanceApp::apply_result`], mirrors the new total into the
-//!    status item, and asks for a redraw.
+//! 4. hands it to [`App::apply_result`], which gives that one reply to every
+//!    window that shows it — [`BalanceApp::apply_result`] for the panel or the
+//!    window, [`BadgeApp::apply_result`] for the badge — mirrors the new total
+//!    into the status item, and asks for a redraw.
+//!
+//! One request, one result, every window: the badge is a *view* of the same
+//! fetch, never a second data source with a schedule of its own.
 //!
 //! The UI therefore stays responsive while the request is in flight.
 
@@ -49,6 +54,7 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::monitor::MonitorHandle;
+use winit::platform::macos::WindowAttributesExtMacOS;
 use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::api::{self, Balance};
@@ -422,8 +428,9 @@ struct Badge {
     surface: wgpu::Surface<'static>,
     backend: WgpuBackend,
     config: wgpu::SurfaceConfiguration,
-    /// The view: a `Card` with two `Text` lines, laid out and painted through
-    /// `draw_ui` like any other view in this repo.
+    /// The view: one `Column` with two `Text` lines, laid out and painted
+    /// through `draw_ui` like any other view in this repo. It paints no
+    /// backdrop, so the window stays transparent around the text.
     view: BadgeApp,
 }
 
@@ -659,8 +666,8 @@ impl App {
 
     // -- the badge window (multi-window test) ------------------------------
 
-    /// Creates the second window: a borderless, transparent card flush with the
-    /// bottom-left corner of the desktop, with its own surface and backend.
+    /// Creates the second window: a borderless, transparent overlay flush with
+    /// the bottom-left corner of the desktop, with its own surface and backend.
     ///
     /// It shares nothing with the main window's set — that is the point of the
     /// test. Events reach it through the `WindowId` dispatch in
@@ -675,6 +682,7 @@ impl App {
             .with_decorations(false)
             .with_transparent(true)
             .with_resizable(false)
+            .with_has_shadow(false)
             .with_inner_size(LogicalSize::new(badge::BADGE_WIDTH, badge::BADGE_HEIGHT));
 
         let window = Arc::new(
@@ -682,6 +690,14 @@ impl App {
                 .create_window(attributes)
                 .expect("create badge window"),
         );
+        // Read the state back off the live window rather than trusting the
+        // attribute above — this line is the shadow's evidence in a
+        // screenshot-free run (AGENTS.md rule 7).
+        #[cfg(target_os = "macos")]
+        {
+            use winit::platform::macos::WindowExtMacOS;
+            self.trace(&format!("徽章窗口 阴影={}", window.has_shadow()));
+        }
         let surface = self
             .instance
             .create_surface(window.clone())
@@ -717,8 +733,8 @@ impl App {
         surface.configure(backend.device(), &config);
 
         backend.set_scale_factor(window.scale_factor() as f32);
-        // The view owns its theme now (a value, like the main view), so both the
-        // clear colour and the card come from the same tokens.
+        // The view owns its theme now (a value, like the main view), so the text
+        // colours and the (invisible) clear colour come from the same tokens.
         let mut view = BadgeApp::new(*self.view.theme());
         backend.set_clear_color(clear_color(true, view.theme().palette.background));
         let font_config = FontConfig {
@@ -729,10 +745,18 @@ impl App {
             eprintln!("badge font setup failed, using fallback: {error}");
         }
         // Measure with the backend's real font, exactly like the main view —
-        // otherwise the card is laid out for one font and painted with another.
+        // otherwise the text is laid out for one font and painted with another.
         view.set_text_measurer(Rc::new(BackendTextMeasurer {
             metrics: backend.text_metrics(),
         }));
+        // In menu-bar mode the on-open refresh is already in flight by the time
+        // this window exists, so the badge shows what the view is already doing
+        // instead of an idle that was never true.
+        if self.view.is_loading() {
+            let line = badge::State::Loading.line();
+            view.set_state(badge::State::Loading);
+            self.trace(&format!("徽章初始行 {line}"));
+        }
 
         // Bottom-left corner of the primary monitor, flush with both edges.
         // Monitor geometry is physical pixels with a top-left origin — the
@@ -1144,8 +1168,38 @@ impl App {
             self.request_redraw();
         }
         if self.view.take_refresh_request() {
+            // The badge narrates the same request: it flips to "刷新中…" now and
+            // back to a value when *this* request comes home.
+            self.show_badge(badge::State::Loading);
             self.spawn_fetch();
         }
+    }
+
+    /// Hands a finished request to every window that shows it.
+    ///
+    /// The refresh itself stays where it was — the main view asks for it and
+    /// [`App::tick`] spawns the one fetch — so this is only about the *result*:
+    /// the main view and the badge read the same one, which is why the two
+    /// windows can never disagree and why the badge needs no endpoint, no
+    /// worker and no timer of its own.
+    fn apply_result(&mut self, result: Result<Balance, String>) {
+        self.view.apply_result(result.clone());
+        self.show_badge(badge::State::from_result(&result));
+    }
+
+    /// Pushes a state onto the badge window: rewrite its view, then ask for its
+    /// frame — the badge, like everything else here, only redraws when told. A
+    /// no-op when the run has no badge.
+    fn show_badge(&mut self, state: badge::State) {
+        // The line first: `trace` needs `&self` and the badge borrow below needs
+        // `&mut self`.
+        let line = state.line();
+        let Some(badge) = self.badge.as_mut() else {
+            return;
+        };
+        badge.view.set_state(state);
+        badge.window.request_redraw();
+        self.trace(&format!("徽章余额行 → {line}"));
     }
 
     /// Mirrors the throttle onto the status item's `刷新余额`, and returns a
@@ -1431,11 +1485,11 @@ impl ApplicationHandler<UserEvent> for App {
                 // whole window + worker + apply path without any screenshot.
                 if self.exit_on_result {
                     report(&result);
-                    self.view.apply_result(result);
+                    self.apply_result(result);
                     event_loop.exit();
                     return;
                 }
-                self.view.apply_result(result);
+                self.apply_result(result);
                 #[cfg(target_os = "macos")]
                 self.sync_menubar();
             }

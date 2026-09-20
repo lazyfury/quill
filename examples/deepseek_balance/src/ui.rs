@@ -379,8 +379,9 @@ impl BalanceApp {
         draw_ui::set_text_measurer(&mut self.tree, measurer);
     }
 
-    /// Whether a request is in flight.
-    #[cfg(test)]
+    /// Whether a request is in flight. The host asks before the badge exists
+    /// (menu-bar mode opens the view before the second window), so it starts the
+    /// badge on the state the view is already in.
     pub fn is_loading(&self) -> bool {
         self.feed.loading.get()
     }
