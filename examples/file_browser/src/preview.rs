@@ -1,9 +1,26 @@
-//! 二进制预览：把一个文件的前 [`PREVIEW_LIMIT`] 字节读成 hex dump 的行。
+//! 二进制 / 文本预览：把一个文件的前 [`PREVIEW_LIMIT`] 字节变成行。
 //!
 //! 这是 `file_browser` 右栏的数据层，跟目录扫描 [`crate::scan`] 的职责一样：
 //! **读盘不发生在主线程上**。视图只说"我想看这个文件"
 //! （[`crate::ui::Browser::take_preview_request`]），宿主起一个线程跑
 //! [`Preview::read`]，结果送回来。
+//!
+//! ## 两种看法，一份字节
+//!
+//! [`PreviewMode`] 选的是**怎么看**这 64 KiB，不是读什么：
+//!
+//! - [`PreviewMode::Binary`]：hexdump，16 字节一行，偏移量 / 十六进制 / ascii。
+//! - [`PreviewMode::Text`]：按换行切，行号 / 这一行的内容。
+//!
+//! 切换只换行的算法，**不重新读盘**，所以是瞬时的。
+//!
+//! ## 已知取舍
+//!
+//! 文本模式看不出缩进：`draw_ui` 的换行是按词排的，会把**前导空白折叠掉**
+//! （`draw_ui::layout::text::wrap_hard_line`）。要保住缩进得让那一列的
+//! `TextOptions.wrap` 关掉 —— 但 `List` 的列目前没有这个开关，所以记在
+//! `docs/plan.md` 里，没为它动组件 API。
+//!
 //!
 //! ## 为什么只读前 64 KiB
 //!
@@ -28,6 +45,43 @@ pub const BYTES_PER_ROW: usize = 16;
 /// 最多读这么多字节。
 pub const PREVIEW_LIMIT: usize = 64 * 1024;
 
+/// 文本模式一行最多显示这么多字符。
+///
+/// 一个压缩过的 JS 就是一"行"，把 64 KiB 全画出来既看不出东西又慢，所以截断
+/// 并在末尾点一个省略号 —— 文本模式是看结构，不是看全文。
+pub const MAX_LINE_CHARS: usize = 400;
+
+/// 右栏显示字节的两种方式。
+///
+/// 同一份 [`Preview::bytes`]，两种看法。切换不需要重新读盘，所以模式是视图的
+/// 状态，不是请求的一部分。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PreviewMode {
+    /// hexdump：偏移量 / 十六进制 / ascii。看魔数、看结构。
+    #[default]
+    Binary,
+    /// 文本：行号 / 内容。看配置文件、日志、代码。
+    Text,
+}
+
+impl PreviewMode {
+    /// 右栏两个切换按钮上写的字。
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Binary => "二进制",
+            Self::Text => "文本",
+        }
+    }
+
+    /// 另一个模式（`T` 键和点击按钮都走它）。
+    pub fn toggled(&self) -> Self {
+        match self {
+            Self::Binary => Self::Text,
+            Self::Text => Self::Binary,
+        }
+    }
+}
+
 /// 一次预览的结果。
 ///
 /// `error` 有值时 `bytes` 为空：目录、权限不足、打不开都走这条路，视图把它
@@ -42,6 +96,11 @@ pub struct Preview {
     pub size: u64,
     /// 读到的字节，最多 [`PREVIEW_LIMIT`] 个。
     pub bytes: Vec<u8>,
+    /// 每一行文本在 `bytes` 里的起点。
+    ///
+    /// 读进来就算好一次，之后按行取是 O(1) —— 文本模式的列表只问"即将显示"
+    /// 的那几行，不能每次都从头扫一遍 64 KiB。
+    line_starts: Vec<usize>,
     pub error: Option<String>,
 }
 
@@ -53,6 +112,7 @@ impl Preview {
             name: String::new(),
             size: 0,
             bytes: Vec::new(),
+            line_starts: Vec::new(),
             error: None,
         }
     }
@@ -69,17 +129,20 @@ impl Preview {
             name,
             size: 0,
             bytes: Vec::new(),
+            line_starts: Vec::new(),
             error: Some(error.into()),
         }
     }
 
     /// 一个凭空造出来的预览（自检和单测用，不碰磁盘）。
     pub fn fixture(name: &str, bytes: Vec<u8>) -> Self {
+        let line_starts = line_starts(&bytes);
         Self {
             path: PathBuf::from(name),
             name: name.to_string(),
             size: bytes.len() as u64,
             bytes,
+            line_starts,
             error: None,
         }
     }
@@ -112,18 +175,33 @@ impl Preview {
             return Self::failed(path, format!("读失败：{error}"));
         }
 
+        let line_starts = line_starts(&bytes);
         Self {
             path: path.to_path_buf(),
             name,
             size,
             bytes,
+            line_starts,
             error: None,
         }
     }
 
-    /// hex dump 有多少行。
+    /// hex dump 有多少行（[`PreviewMode::Binary`] 的行数）。
     pub fn rows(&self) -> usize {
         (self.bytes.len() + BYTES_PER_ROW - 1) / BYTES_PER_ROW
+    }
+
+    /// 文本模式有多少行（[`PreviewMode::Text`] 的行数）。
+    pub fn text_rows(&self) -> usize {
+        self.line_starts.len()
+    }
+
+    /// 当前模式下有多少行。列表只认这个数。
+    pub fn rows_in(&self, mode: PreviewMode) -> usize {
+        match mode {
+            PreviewMode::Binary => self.rows(),
+            PreviewMode::Text => self.text_rows(),
+        }
     }
 
     /// 第 `index` 行的字节（最后一行可能不满 [`BYTES_PER_ROW`]）。
@@ -136,37 +214,96 @@ impl Preview {
         &self.bytes[start..end]
     }
 
+    /// 文本模式的第 `index` 行：不含换行符（`\r\n` 的两个字符都去掉）。
+    pub fn text_line(&self, index: usize) -> &[u8] {
+        let Some(start) = self.line_starts.get(index).copied() else {
+            return &[];
+        };
+        let end = self
+            .line_starts
+            .get(index + 1)
+            .copied()
+            .unwrap_or(self.bytes.len());
+        let mut end = end;
+        // 行尾的换行符属于"分隔"，不属于这一行 —— 留着会多画一个 `·`。
+        while end > start && (self.bytes[end - 1] == b'\n' || self.bytes[end - 1] == b'\r') {
+            end -= 1;
+        }
+        &self.bytes[start..end]
+    }
+
+    /// 当前模式下第 `index` 行的列内容。列表的 `source` 闭包问的就是这个。
+    pub fn row_cells_in(&self, mode: PreviewMode, index: usize) -> Vec<String> {
+        match mode {
+            PreviewMode::Binary => self.binary_row_cells(index),
+            PreviewMode::Text => self.text_row_cells(index),
+        }
+    }
+
+    /// 二进制模式的一行：偏移量 / 十六进制 / ascii。
+    pub fn binary_row_cells(&self, index: usize) -> Vec<String> {
+        let row = self.row(index);
+        if row.is_empty() {
+            return Vec::new();
+        }
+        vec![format_offset(index), format_hex(row), format_ascii(row)]
+    }
+
+    /// 文本模式的一行：行号 / 内容。
+    pub fn text_row_cells(&self, index: usize) -> Vec<String> {
+        if index >= self.text_rows() {
+            return Vec::new();
+        }
+        vec![
+            format_line_number(index),
+            format_text_line(self.text_line(index)),
+        ]
+    }
+
     /// 字节被截断了（文件比 [`PREVIEW_LIMIT`] 大）。
     pub fn truncated(&self) -> bool {
         self.size > self.bytes.len() as u64
     }
 
+    /// 读到的字节里有 NUL。
+    ///
+    /// 文本模式看这种文件只会是乱码，副标题里说一句，别让人以为是预览坏了。
+    pub fn looks_binary(&self) -> bool {
+        self.bytes.iter().any(|byte| *byte == 0)
+    }
+
     /// 右栏标题：文件名 + 磁盘上的大小。
     pub fn headline(&self) -> String {
         if self.name.is_empty() {
-            return "二进制预览".to_string();
+            return "预览".to_string();
         }
         format!("{} · {}", self.name, crate::scan::format_bytes(self.size))
     }
 
-    /// 标题下面那一行：读了什么、或者为什么没读到。
-    pub fn detail(&self) -> String {
+    /// 标题下面那一行：读了什么、怎么在读、或者为什么没读到。
+    pub fn detail(&self, mode: PreviewMode) -> String {
         if let Some(error) = self.error.as_deref() {
             return error.to_string();
         }
         if self.name.is_empty() {
             return "选中一个文件，这里显示它的前 64 KiB".to_string();
         }
-        let read = crate::scan::format_bytes(self.bytes.len() as u64);
+        let mut out = format!(
+            "{} · {} · {} 行",
+            mode.label(),
+            crate::scan::format_bytes(self.bytes.len() as u64),
+            self.rows_in(mode)
+        );
         if self.truncated() {
-            return format!(
-                "前 {}（共 {}，已截断） · {} 行",
-                read,
-                crate::scan::format_bytes(self.size),
-                self.rows()
-            );
+            out.push_str(&format!(
+                "（共 {}，已截断）",
+                crate::scan::format_bytes(self.size)
+            ));
         }
-        format!("{} · {} 行", read, self.rows())
+        if mode == PreviewMode::Text && self.looks_binary() {
+            out.push_str(" · 看着像二进制");
+        }
+        out
     }
 }
 
@@ -215,14 +352,50 @@ fn is_printable(byte: u8) -> bool {
     (0x20..=0x7e).contains(&byte)
 }
 
-/// 列表要的一行三列：偏移量、十六进制、ascii。
+/// 文本模式的行号，从 1 开始。
 ///
-/// 只有**即将显示**的行会走到这里，所以这里的分配是每帧几十次，不是几千次。
-pub fn row_cells(bytes: &[u8], index: usize) -> Vec<String> {
+/// **不补前导空格**：`draw_ui` 的换行会把前导空白折叠掉（按词排版），补了也
+/// 白补。对齐靠列的定宽，不靠空格。
+pub fn format_line_number(index: usize) -> String {
+    format!("{}", index + 1)
+}
+
+/// 文本模式的一行内容。
+///
+/// 制表符摊成四个空格（不然后面的列会跟着内容跳），控制字符（含 `\r`）画成
+/// `·` —— 它们没有字形，留着会让排版错位。超长行截到 [`MAX_LINE_CHARS`]。
+pub fn format_text_line(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '\t' => out.push_str("    "),
+            character if character.is_control() => out.push('·'),
+            character => out.push(character),
+        }
+    }
+    if out.chars().count() > MAX_LINE_CHARS {
+        let kept: String = out.chars().take(MAX_LINE_CHARS).collect();
+        return format!("{kept}…");
+    }
+    out
+}
+
+/// 每一行文本的起点。
+///
+/// 末尾那个换行不产生一个空行：`"a\n"` 是一行，不是两行 —— 不然每个以换行
+/// 结尾的 Unix 文件末尾都会多出一行空白。
+fn line_starts(bytes: &[u8]) -> Vec<usize> {
     if bytes.is_empty() {
         return Vec::new();
     }
-    vec![format_offset(index), format_hex(bytes), format_ascii(bytes)]
+    let mut starts = vec![0usize];
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte == b'\n' && index + 1 < bytes.len() {
+            starts.push(index + 1);
+        }
+    }
+    starts
 }
 
 #[cfg(test)]
@@ -235,8 +408,8 @@ mod tests {
 
     #[test]
     fn a_row_is_offset_hex_and_ascii() {
-        let row = bytes("Hello, world!\n");
-        let cells = row_cells(&row, 0);
+        let preview = Preview::fixture("hi", bytes("Hello, world!\n"));
+        let cells = preview.binary_row_cells(0);
         assert_eq!(cells[0], "00000000");
         assert_eq!(
             cells[1].trim_end(),
@@ -282,9 +455,11 @@ mod tests {
     fn an_empty_preview_has_no_rows() {
         let preview = Preview::empty();
         assert_eq!(preview.rows(), 0);
-        assert_eq!(row_cells(&[], 0), Vec::<String>::new());
-        assert_eq!(preview.headline(), "二进制预览");
-        assert!(preview.detail().contains("选中一个文件"));
+        assert_eq!(preview.text_rows(), 0);
+        assert_eq!(preview.binary_row_cells(0), Vec::<String>::new());
+        assert_eq!(preview.text_row_cells(0), Vec::<String>::new());
+        assert_eq!(preview.headline(), "预览");
+        assert!(preview.detail(PreviewMode::Binary).contains("选中一个文件"));
     }
 
     #[test]
@@ -293,7 +468,7 @@ mod tests {
         preview.size = 4 * 1024 * 1024 * 1024;
         assert!(preview.truncated());
         assert_eq!(preview.rows(), PREVIEW_LIMIT / BYTES_PER_ROW);
-        let detail = preview.detail();
+        let detail = preview.detail(PreviewMode::Binary);
         assert!(detail.contains("已截断"), "{detail}");
         assert!(detail.contains("GB"), "{detail}");
         assert!(detail.contains("64"), "读了 64 KiB：{detail}");
@@ -330,5 +505,75 @@ mod tests {
         let preview = Preview::read(Path::new("/definitely/not/here.bin"));
         assert!(preview.error.is_some());
         assert_eq!(preview.rows(), 0);
+        assert_eq!(preview.text_rows(), 0);
+    }
+
+    // -- 文本模式 --------------------------------------------------------
+
+    #[test]
+    fn text_mode_splits_on_newlines() {
+        let preview = Preview::fixture("a.txt", bytes("one\ntwo\nthree\n"));
+        assert_eq!(preview.text_rows(), 3, "末尾的换行不产生一个空行");
+        let cells = preview.text_row_cells(1);
+        assert_eq!(cells[0], "2");
+        assert_eq!(cells[1], "two");
+        assert_eq!(preview.rows_in(PreviewMode::Text), 3);
+        // 同一份字节，二进制模式只有一行。
+        assert_eq!(preview.rows_in(PreviewMode::Binary), 1);
+    }
+
+    #[test]
+    fn a_trailing_newline_does_not_make_an_empty_last_line() {
+        assert_eq!(Preview::fixture("a", bytes("only\n")).text_rows(), 1);
+        assert_eq!(Preview::fixture("a", bytes("one\ntwo")).text_rows(), 2);
+        assert_eq!(Preview::fixture("a", Vec::new()).text_rows(), 0);
+    }
+
+    /// `\r\n` 的文件不该每行末尾多一个点。
+    #[test]
+    fn windows_line_endings_are_trimmed() {
+        let preview = Preview::fixture("a.txt", bytes("one\r\ntwo\r\n"));
+        assert_eq!(preview.text_rows(), 2);
+        assert_eq!(preview.text_line(0), b"one");
+        assert_eq!(preview.text_row_cells(0)[1], "one");
+    }
+
+    /// 没有换行符就是一行 —— 一个压缩过的 JS 就是这种，所以有长度上限。
+    #[test]
+    fn a_file_without_newlines_is_one_long_line() {
+        let preview = Preview::fixture("min.js", vec![b'x'; MAX_LINE_CHARS + 50]);
+        assert_eq!(preview.text_rows(), 1);
+        let line = &preview.text_row_cells(0)[1];
+        assert!(line.ends_with('…'), "超长行要截住：{}", line.len());
+        assert!(line.chars().count() <= MAX_LINE_CHARS + 1);
+    }
+
+    #[test]
+    fn tabs_and_control_characters_are_renderable() {
+        assert_eq!(format_text_line(b"a\tb"), "a    b");
+        assert_eq!(format_text_line(b"a\x00b"), "a·b");
+        assert_eq!(format_text_line(b"a\r"), "a·");
+    }
+
+    /// 文本模式看二进制文件只会是乱码 —— 副标题得说清楚，别让人以为预览坏了。
+    #[test]
+    fn text_mode_warns_about_binary_files() {
+        let preview = Preview::fixture("blob.bin", vec![0x41, 0x00, 0x42]);
+        assert!(preview.looks_binary());
+        let detail = preview.detail(PreviewMode::Text);
+        assert!(detail.contains("看着像二进制"), "{detail}");
+        assert!(
+            !preview.detail(PreviewMode::Binary).contains("看着像二进制"),
+            "二进制模式不用提醒"
+        );
+    }
+
+    #[test]
+    fn the_mode_toggles_between_the_two() {
+        assert_eq!(PreviewMode::Binary.toggled(), PreviewMode::Text);
+        assert_eq!(PreviewMode::Text.toggled(), PreviewMode::Binary);
+        assert_eq!(PreviewMode::default(), PreviewMode::Binary);
+        assert_eq!(PreviewMode::Binary.label(), "二进制");
+        assert_eq!(PreviewMode::Text.label(), "文本");
     }
 }

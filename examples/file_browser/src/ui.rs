@@ -1,4 +1,4 @@
-//! 文件浏览器视图：左边一个虚拟列表，右边一个可拖拽的二进制预览栏。
+//! 文件浏览器视图：左边一个虚拟列表，右边一个可拖拽的预览栏。
 //!
 //! 全部后端无关 —— 视图是一棵 `SceneTree`，由 `draw_components` 搭起来、
 //! `draw_ui` 排布。宿主（[`crate::host`]）拥有窗口、wgpu 后端和读盘的工作
@@ -7,6 +7,14 @@
 //! ```text
 //! Input -> Browser::event -> Browser::layout -> Browser::paint
 //! ```
+//!
+//! ## 右栏的两种看法
+//!
+//! 预览栏有 [`PreviewMode`] 两种模式（hexdump / 文本），**字节只读一次**，
+//! 切换只是换"行怎么算"。实现上是两个 `List`（列数和列宽都不一样，而
+//! `List` 的列是构建时定死的），靠 `SceneTree::set_visible` 二选一 —— 藏起来
+//! 的那个连行池都不会挂（`ListState::sync` 看到零高度的容器直接返回），所以
+//! 待命的那个几乎不花钱。
 //!
 //! ## 两栏怎么分
 //!
@@ -44,20 +52,22 @@ use draw_components::{
     set_text, update_control, Component, Divider, Flex, List, ListColumn, ListState, NodeRef,
     ResizeHandle, Text,
 };
-use draw_core::{Edges, EventResult, InputEvent, Key, NodeId, ViewportSize};
+use draw_core::{Edges, EventResult, InputEvent, Key, NodeId, Vec2, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{space, Theme, Tone};
-use draw_ui::{MouseFilter, SizeBasis, TextMeasurer};
+use draw_theme::{space, SurfaceLevel, Theme, Tone};
+use draw_ui::{MouseFilter, SizeBasis, SurfaceStyle, TextMeasurer};
 
-use crate::preview::{self, Preview};
+use crate::preview::{Preview, PreviewMode};
 use crate::scan::{self, Entry, Listing};
 
 /// 目录列表一行的高度（逻辑像素）。列表的池大小 = `ceil(容器高 / 行高) + 1`。
 pub const ROW_HEIGHT: f32 = 26.0;
 
 /// hex dump 一行的高度：比目录行矮，一屏能多看好几行。
-pub const HEX_ROW_HEIGHT: f32 = 20.0;
+///
+/// 两种模式共用：列不一样，行高一样（列表的行高也是构建时定死的）。
+pub const PREVIEW_ROW_HEIGHT: f32 = 20.0;
 
 /// 三列的宽度：名字吃掉剩下的空间，尺寸和日期是定宽的（右对齐更好扫）。
 const SIZE_COLUMN: f32 = 84.0;
@@ -66,6 +76,9 @@ const TIME_COLUMN: f32 = 132.0;
 /// hex 行的三列：偏移量、十六进制、ascii。
 const OFFSET_COLUMN: f32 = 68.0;
 const HEX_COLUMN: f32 = 300.0;
+
+/// 文本行的两列：行号、内容。
+const LINE_NUMBER_COLUMN: f32 = 52.0;
 
 /// 分隔条的把手宽度（`ResizeHandle` 的默认值，画出来的线仍是 1px）。
 pub const RESIZE_GUTTER: f32 = 6.0;
@@ -77,7 +90,7 @@ pub const PREVIEW_MIN: f32 = 260.0;
 
 /// 状态行的操作提示。
 const HINTS: &str =
-    "↑↓ 选择 · Enter 打开 · Backspace 上级 · R 重扫 · H 隐藏文件 · 拖动分隔条调右栏";
+    "↑↓ 选择 · Enter 打开 · Backspace 上级 · R 重扫 · H 隐藏文件 · T 切文本/二进制 · 拖动分隔条调右栏";
 
 /// 节点槽位，声明式构建时填、构建后读。
 #[derive(Default)]
@@ -89,6 +102,9 @@ struct Refs {
     main: NodeRef,
     preview_title: NodeRef,
     preview_detail: NodeRef,
+    /// 两个模式切换按钮 —— 自检要能真的点一下，所以留个句柄。
+    text_tab: NodeRef,
+    binary_tab: NodeRef,
 }
 
 /// 状态行正在说什么。
@@ -118,10 +134,21 @@ pub struct Browser {
     /// 主栏节点 + 它的宽度。宽度是共享的：分隔条写、`clamp_main_width` 也写。
     main_pane: NodeId,
     main_width: Rc<Cell<f32>>,
-    /// 右栏正在显示的预览。hex 列表的 `source` 按行读它。
+    /// 右栏正在显示的预览。两个列表的 `source` 按行读它。
     preview: Rc<RefCell<Preview>>,
     preview_count: Rc<Cell<usize>>,
-    preview_state: ListState,
+    /// 右栏的两种看法：hexdump 和文本。字节只读一次，切换只换行的算法。
+    preview_mode: PreviewMode,
+    /// hexdump 列表（二进制模式）。
+    hex_state: ListState,
+    hex_container: NodeId,
+    /// 文本列表（文本模式）。两个列表同时在树上，藏起来的那个不占行池。
+    text_state: ListState,
+    text_container: NodeId,
+    /// 点切换按钮转交过来的模式（回调拿不到 `&mut self`）。
+    mode_request: Rc<Cell<Option<PreviewMode>>>,
+    text_tab: NodeId,
+    binary_tab: NodeId,
     /// "我想看这个文件"：宿主取走。
     preview_pending: Option<PathBuf>,
     /// 覆盖右栏副标题的一句话（"读取中…"）。真正的预览回来时清空。
@@ -183,15 +210,17 @@ impl Browser {
         // 组件会被 `child` 消费掉，所以先把手柄取出来。
         let state = list.state();
 
-        // -- 右栏：标题 + hex dump --
+        // -- 右栏：标题 + 模式切换 + hex dump / 文本 --
         let preview_bytes: Rc<RefCell<Preview>> = Rc::new(RefCell::new(Preview::empty()));
+        let preview_count = Rc::new(Cell::new(0));
+        let mode_request: Rc<Cell<Option<PreviewMode>>> = Rc::new(Cell::new(None));
+
         let hex_entries = preview_bytes.clone();
         let hex_source = move |index: usize| {
             let preview = hex_entries.borrow();
-            preview::row_cells(preview.row(index), index)
+            preview.row_cells_in(PreviewMode::Binary, index)
         };
-        let preview_count = Rc::new(Cell::new(0));
-        let hex_list = List::new(theme, HEX_ROW_HEIGHT, hex_source)
+        let hex_list = List::new(theme, PREVIEW_ROW_HEIGHT, hex_source)
             .columns(vec![
                 ListColumn::fixed(OFFSET_COLUMN).tone(Tone::Muted),
                 ListColumn::fixed(HEX_COLUMN),
@@ -199,7 +228,34 @@ impl Browser {
             ])
             .count(preview_count.clone())
             .grow(1.0);
-        let preview_state = hex_list.state();
+        let hex_state = hex_list.state();
+
+        let text_entries = preview_bytes.clone();
+        let text_source = move |index: usize| {
+            let preview = text_entries.borrow();
+            preview.row_cells_in(PreviewMode::Text, index)
+        };
+        let text_list = List::new(theme, PREVIEW_ROW_HEIGHT, text_source)
+            .columns(vec![
+                ListColumn::fixed(LINE_NUMBER_COLUMN).tone(Tone::Muted),
+                ListColumn::flexible(),
+            ])
+            .count(preview_count.clone())
+            .grow(1.0);
+        let text_state = text_list.state();
+
+        // 两个切换按钮：点一下就换模式，当前那个有底色。
+        let mode_flag: Rc<Cell<PreviewMode>> = Rc::new(Cell::new(PreviewMode::Binary));
+        let tabs = Flex::row()
+            .gap(space::XS)
+            .mouse_filter(MouseFilter::Ignore)
+            .child(
+                mode_tab(theme, PreviewMode::Text, &mode_flag, &mode_request).ref_(&refs.text_tab),
+            )
+            .child(
+                mode_tab(theme, PreviewMode::Binary, &mode_flag, &mode_request)
+                    .ref_(&refs.binary_tab),
+            );
 
         // 布局根的子节点按 anchors 摆，flex 从下一层才开始 —— 所以排页面的
         // column 是根的唯一子节点（`demo_app` 也是这个形状）。
@@ -235,18 +291,20 @@ impl Browser {
             .gap(space::XS)
             .padding(Edges::all(space::LG))
             .child(
-                Text::subheading("二进制预览", theme)
+                Text::subheading("预览", theme)
                     .max_lines(1)
                     .ellipsis(true)
                     .ref_(&refs.preview_title),
             )
+            .child(tabs)
             .child(
                 Text::caption("", theme)
                     .tone(Tone::Muted)
                     .ref_(&refs.preview_detail),
             )
             .child(Divider::horizontal(theme))
-            .child(hex_list);
+            .child(hex_list)
+            .child(text_list);
 
         let tree = Flex::column()
             .mouse_filter(MouseFilter::Ignore)
@@ -266,6 +324,9 @@ impl Browser {
             )
             .into_tree();
 
+        let hex_container = hex_state.container().expect("hex list mounted");
+        let text_container = text_state.container().expect("text list mounted");
+
         let mut app = Self {
             tree,
             theme,
@@ -278,7 +339,14 @@ impl Browser {
             main_width,
             preview: preview_bytes,
             preview_count,
-            preview_state,
+            preview_mode: PreviewMode::Binary,
+            hex_state,
+            hex_container,
+            text_state,
+            text_container,
+            mode_request,
+            text_tab: refs.text_tab.get().expect("text tab mounted"),
+            binary_tab: refs.binary_tab.get().expect("binary tab mounted"),
             preview_pending: None,
             preview_note: None,
             path_label: refs.path.get().expect("path label mounted"),
@@ -293,6 +361,9 @@ impl Browser {
             status: Status::Loading,
             viewport: ViewportSize::new(draw_core::Size::new(1100.0, 680.0)),
         };
+        // 两个列表都在树上，但只有一个在用：藏起来的那个容器高度是 0，
+        // `ListState::sync` 直接返回，连行池都不挂。
+        app.set_mode(PreviewMode::Binary);
         app.sync_labels();
         app.sync_preview_labels();
         app
@@ -305,8 +376,13 @@ impl Browser {
         draw_ui::set_text_measurer(&mut self.tree, measurer);
     }
 
-    /// 处理一次点击的"打开"请求（回调里转交过来的），返回是否动了树。
+    /// 处理点击转交过来的两件事："打开某一行"和"换个预览模式"。
+    ///
+    /// 两个回调都拿不到 `&mut self`，所以它们只往共享格子里写，这里取走。
     pub fn update(&mut self) -> bool {
+        if let Some(mode) = self.mode_request.take() {
+            self.set_mode(mode);
+        }
         let Some(index) = self.activated.take() else {
             return false;
         };
@@ -314,14 +390,17 @@ impl Browser {
         self.open(index)
     }
 
-    /// 排布：先量容器，再同步两个行池，池变了就再排一次。
+    /// 排布：先量容器，再同步三个行池（目录 + 两种预览），池变了就再排一次。
     pub fn layout(&mut self, viewport: ViewportSize) {
         self.viewport = viewport;
         // 窗口变窄时先把主栏收回来，否则预览栏会被挤成 0 宽。
         self.clamp_main_width();
         draw_ui::layout(&mut self.tree, viewport);
         let mut changed = self.state.sync(&mut self.tree);
-        if self.preview_state.sync(&mut self.tree) {
+        if self.hex_state.sync(&mut self.tree) {
+            changed = true;
+        }
+        if self.text_state.sync(&mut self.tree) {
             changed = true;
         }
         if changed {
@@ -395,14 +474,19 @@ impl Browser {
         self.sync_labels();
     }
 
-    /// 收下一份二进制预览（宿主从工作线程送回来的）。
+    /// 收下一份预览（宿主从工作线程送回来的）。
+    ///
+    /// 字节跟模式无关，所以这里不重置模式 —— 正在看文本的人不会因为切了个
+    /// 文件就被扔回 hexdump。
     pub fn apply_preview(&mut self, preview: Preview) {
-        let rows = preview.rows();
+        let rows = preview.rows_in(self.preview_mode);
         *self.preview.borrow_mut() = preview;
         self.preview_count.set(rows);
         // 行数可能没变但字节变了（重新选中同一个文件的不同版本），所以显式作废。
-        self.preview_state.invalidate();
-        self.preview_state.scroll_to(0);
+        self.hex_state.invalidate();
+        self.text_state.invalidate();
+        self.hex_state.scroll_to(0);
+        self.text_state.scroll_to(0);
         self.preview_note = None;
         self.sync_preview_labels();
     }
@@ -464,14 +548,16 @@ impl Browser {
                 self.preview_note = Some("读取中…".to_string());
                 *self.preview.borrow_mut() = Preview::empty();
                 self.preview_count.set(0);
-                self.preview_state.invalidate();
+                self.hex_state.invalidate();
+                self.text_state.invalidate();
             }
             _ => {
                 self.preview_pending = None;
                 self.preview_note = None;
                 *self.preview.borrow_mut() = Preview::empty();
                 self.preview_count.set(0);
-                self.preview_state.invalidate();
+                self.hex_state.invalidate();
+                self.text_state.invalidate();
             }
         }
         self.sync_preview_labels();
@@ -493,6 +579,7 @@ impl Browser {
             Key::Backspace => self.go_up(),
             Key::Character('r') | Key::F5 => self.reload(),
             Key::Character('h') => self.toggle_hidden(),
+            Key::Character('t') => self.toggle_mode(),
             _ => return false,
         }
         true
@@ -530,6 +617,39 @@ impl Browser {
     fn toggle_hidden(&mut self) {
         self.hidden = !self.hidden;
         self.reload();
+    }
+
+    // -- 预览模式 --------------------------------------------------------
+
+    /// 右栏当前是 hexdump 还是文本。
+    pub fn mode(&self) -> PreviewMode {
+        self.preview_mode
+    }
+
+    /// `T`：换一种看法。
+    pub fn toggle_mode(&mut self) {
+        let next = self.preview_mode.toggled();
+        self.set_mode(next);
+    }
+
+    /// 切换右栏的模式。
+    ///
+    /// **不重新读盘** —— 字节已经在 [`Preview`] 里了，换的只是"行怎么算"
+    /// （以及行数，所以两个列表都要作废重绑）。两个列表靠可见性二选一：藏起
+    /// 来的那个容器高度是 0，`sync` 根本不挂行。
+    pub fn set_mode(&mut self, mode: PreviewMode) {
+        self.preview_mode = mode;
+        self.tree
+            .set_visible(self.hex_container, mode == PreviewMode::Binary);
+        self.tree
+            .set_visible(self.text_container, mode == PreviewMode::Text);
+        self.preview_count.set(self.preview.borrow().rows_in(mode));
+        // 行数变了、行的内容也变了（同一个下标在两种模式下是不同的一行）。
+        self.hex_state.invalidate();
+        self.text_state.invalidate();
+        self.hex_state.scroll_to(0);
+        self.text_state.scroll_to(0);
+        self.sync_preview_labels();
     }
 
     // -- 分栏 ------------------------------------------------------------
@@ -585,9 +705,10 @@ impl Browser {
 
     /// 写回右栏的两行文字。
     fn sync_preview_labels(&mut self) {
+        let mode = self.preview_mode;
         let (title, detail) = {
             let preview = self.preview.borrow();
-            (preview.headline(), preview.detail())
+            (preview.headline(), preview.detail(mode))
         };
         let detail = self.preview_note.clone().unwrap_or(detail);
         set_text(&mut self.tree, self.preview_title_label, title);
@@ -614,14 +735,49 @@ impl Browser {
         self.state.pool_size()
     }
 
-    /// hex dump 挂在树上的行数。这是"预览不随文件大小增长"的证据。
+    /// 显示在用的那个预览列表挂在树上的行数（池大小，不是数据量）。
+    ///
+    /// 藏起来的那个列表池是 0 —— 这正是"待命的那个不花钱"的证据。
     pub fn preview_pool_size(&self) -> usize {
-        self.preview_state.pool_size()
+        match self.preview_mode {
+            PreviewMode::Binary => self.hex_state.pool_size(),
+            PreviewMode::Text => self.text_state.pool_size(),
+        }
     }
 
-    /// hex dump 一共有多少行（数据行数，不是挂了几行）。
+    /// 切换按钮的中心点。
+    ///
+    /// 自检要能**真的点一下**按钮来换模式，而不是直接调 `set_mode` —— 但它
+    /// 不能靠猜坐标（按钮的位置取决于标题和字号），所以从解析出来的矩形里拿。
+    pub fn tab_center(&self, mode: PreviewMode) -> Option<Vec2> {
+        let id = match mode {
+            PreviewMode::Text => self.text_tab,
+            PreviewMode::Binary => self.binary_tab,
+        };
+        draw_ui::control(&self.tree, id).map(|data| {
+            Vec2::new(
+                (data.rect.left() + data.rect.right()) / 2.0,
+                (data.rect.top() + data.rect.bottom()) / 2.0,
+            )
+        })
+    }
+
+    /// 待命的那个列表挂了几行（应该一直是 0）。
+    pub fn idle_pool_size(&self) -> usize {
+        match self.preview_mode {
+            PreviewMode::Binary => self.text_state.pool_size(),
+            PreviewMode::Text => self.hex_state.pool_size(),
+        }
+    }
+
+    /// 右栏有多少行数据（当前模式下）。
     pub fn preview_rows(&self) -> usize {
         self.preview_count.get()
+    }
+
+    /// 右栏副标题的文字（`--selfcheck` 用它断言模式写清楚了）。
+    pub fn preview_detail(&self) -> String {
+        self.preview.borrow().detail(self.preview_mode)
     }
 
     /// 视口覆盖到的数据行区间。
@@ -649,6 +805,33 @@ impl Browser {
     pub fn theme(&self) -> Theme {
         self.theme
     }
+}
+
+/// 一个模式切换按钮：写着模式名，**在用的那个有底色**。
+///
+/// 底色是每帧算的（`dynamic_background`），所以切换模式不用重建这棵树；点击
+/// 只往共享格子里写一个请求，由 [`Browser::update`] 取走（`on_click` 的回调
+/// 拿不到 `&mut Browser`）。
+fn mode_tab(
+    theme: Theme,
+    mode: PreviewMode,
+    active: &Rc<Cell<PreviewMode>>,
+    request: &Rc<Cell<Option<PreviewMode>>>,
+) -> Flex {
+    let flag = active.clone();
+    let clicked = request.clone();
+    Flex::row()
+        .gap(0.0)
+        .padding(Edges::new(space::SM, space::XS, space::SM, space::XS))
+        .on_click(move || clicked.set(Some(mode)))
+        .dynamic_background(move |_| {
+            if flag.get() == mode {
+                SurfaceStyle::new(theme.surface(SurfaceLevel::Raised))
+            } else {
+                SurfaceStyle::new(draw_core::Color::TRANSPARENT)
+            }
+        })
+        .child(Text::small(mode.label(), theme))
 }
 
 #[cfg(test)]
@@ -963,6 +1146,105 @@ mod tests {
         app.apply_preview(Preview::fixture("blob.bin", b"hello".to_vec()));
         app.layout(viewport());
         assert_eq!(app.preview_rows(), 1);
+    }
+
+    // -- 预览模式 --------------------------------------------------------
+
+    /// 同一份字节，两种看法：**行数不一样**，这就是模式存在的意义。
+    #[test]
+    fn the_mode_decides_what_a_row_is() {
+        let mut app = browser_with(10);
+        app.select(1);
+        app.apply_preview(Preview::fixture("a.txt", b"one\ntwo\nthree\n".to_vec()));
+        app.layout(viewport());
+
+        assert_eq!(app.mode(), PreviewMode::Binary, "默认看 hexdump");
+        assert_eq!(app.preview_rows(), 1, "14 字节是一行 hex");
+        app.set_mode(PreviewMode::Text);
+        app.layout(viewport());
+        assert_eq!(app.preview_rows(), 3, "同一个文件是三行文本");
+    }
+
+    /// 藏起来的那个列表连行池都不挂 —— 两种模式同时在树上也不花钱。
+    #[test]
+    fn only_the_visible_mode_owns_a_row_pool() {
+        let mut app = browser_with(10);
+        app.select(1);
+        app.apply_preview(Preview::fixture("big.bin", vec![0x5a; 64 * 1024]));
+        app.layout(viewport());
+        assert!(app.preview_pool_size() > 1, "hexdump 挂了行池");
+        assert_eq!(app.idle_pool_size(), 0, "待命的文本列表一行都没挂");
+
+        app.set_mode(PreviewMode::Text);
+        app.layout(viewport());
+        // 64 KiB 没有换行符，文本模式只有一行 —— 池就只有一行。
+        assert_eq!(app.preview_pool_size(), 1);
+        assert!(app.idle_pool_size() > 1, "hexdump 的行池留着，随时能切回去");
+    }
+
+    /// `T` 键：换一种看法。
+    #[test]
+    fn t_key_toggles_the_mode() {
+        let mut app = browser_with(10);
+        assert_eq!(app.mode(), PreviewMode::Binary);
+        app.key(Key::Character('t'));
+        assert_eq!(app.mode(), PreviewMode::Text);
+        app.key(Key::Character('t'));
+        assert_eq!(app.mode(), PreviewMode::Binary);
+    }
+
+    /// 换文件不该把人从文本模式扔回 hexdump —— 模式是"我怎么看"，不是"这是什么"。
+    #[test]
+    fn the_mode_survives_a_new_selection() {
+        let mut app = browser_with(10);
+        app.select(1);
+        app.apply_preview(Preview::fixture("a.txt", b"one\ntwo\n".to_vec()));
+        app.set_mode(PreviewMode::Text);
+        app.select(2);
+        app.apply_preview(Preview::fixture("b.txt", b"x\ny\nz\n".to_vec()));
+        app.layout(viewport());
+        assert_eq!(app.mode(), PreviewMode::Text);
+        assert_eq!(app.preview_rows(), 3);
+    }
+
+    /// 点一下按钮：`on_click` 只写共享格子，由 `update` 取走。
+    #[test]
+    fn clicking_a_tab_switches_the_mode() {
+        let mut app = browser_with(10);
+        app.layout(viewport());
+        let point = app
+            .tab_center(PreviewMode::Text)
+            .expect("切换按钮已经排布过了");
+        app.event(&InputEvent::PointerDown {
+            position: point,
+            button: PointerButton::Left,
+        });
+        app.event(&InputEvent::PointerUp {
+            position: point,
+            button: PointerButton::Left,
+        });
+        assert_eq!(app.mode(), PreviewMode::Binary, "还没 update");
+        app.update();
+        assert_eq!(app.mode(), PreviewMode::Text, "点一下就换过去了");
+    }
+
+    /// 副标题把模式写清楚 —— 否则看不出自己在看哪一种。
+    #[test]
+    fn the_detail_line_names_the_mode() {
+        let mut app = browser_with(10);
+        app.select(1);
+        app.apply_preview(Preview::fixture("a.txt", b"one\ntwo\n".to_vec()));
+        assert!(
+            app.preview_detail().contains("二进制"),
+            "{}",
+            app.preview_detail()
+        );
+        app.set_mode(PreviewMode::Text);
+        assert!(
+            app.preview_detail().contains("文本"),
+            "{}",
+            app.preview_detail()
+        );
     }
 
     /// 读失败的预览（目录、权限）把原因写进右栏，不留一个空的 hex 区。

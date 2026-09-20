@@ -163,11 +163,23 @@ priority order and add native tests.
   900x620). It is also the first host to translate a platform wheel into
   `InputEvent::Wheel` (`host::wheel_pixels`). Its right pane is a **resizable
   split** (`ResizeHandle::vertical` driving the main pane's basis) holding a
-  second `List`: a hex dump of the selected file's first 64 KiB, so 4 096 rows of
-  data cost the same ~30 mounted rows as 64 do. Two notes for whoever copies the
-  shape: a handle's `min`/`max` are build-time constants and cannot see the
-  viewport, so a resizing host must re-clamp on `layout`; and every virtualized
-  list in a view needs its own `ListState::sync` in the same frame step.
+  second `List`: the selected file's first 64 KiB, shown either as a hex dump or
+  as text (`PreviewMode::{Binary,Text}`, toggled with `T` or by clicking the pane's
+  tab) — the bytes are read once and the mode only changes how rows are computed,
+  so switching is free. The two modes are two `List`s (columns are fixed at build
+  time) chosen by `SceneTree::set_visible`; a hidden list's container has zero
+  height, so `ListState::sync` returns early and it owns no pool at all. So 4 096
+  rows of data cost the same ~30 mounted rows as 64 do. Two notes for whoever
+  copies the shape: a handle's `min`/`max` are build-time constants and cannot see
+  the viewport, so a resizing host must re-clamp on `layout`; and every
+  virtualized list in a view needs its own `ListState::sync` in the same frame
+  step.
+- **Text mode cannot show indentation**: `draw_ui`'s wrapping is word-based and
+  collapses leading whitespace (`draw_ui::layout::text::wrap_hard_line`), and
+  `List` builds its row cells with `max_lines(1)` + ellipsis, so a line's leading
+  spaces never reach the screen. Fixing it means a per-column `TextOptions.wrap`
+  on `ListColumn` (or a non-wrapping cell), which is an API change nobody has
+  asked for yet; the row content itself is correct.
 - `draw_core::Key` has no `PageUp` / `PageDown`, so list UIs cannot map a
   page-step key yet (the browser falls back to arrows + `Home` / `End`). Adding
   the two variants is additive and would let `List` offer a page step.

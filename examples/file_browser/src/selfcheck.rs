@@ -404,7 +404,7 @@ pub fn check() -> (usize, String) {
         .iter()
         .filter(|text| text.len() == 8 && text.chars().all(|ch| ch.is_ascii_hexdigit()))
         .count();
-    let hex_budget = (HEIGHT / crate::ui::HEX_ROW_HEIGHT).ceil() as usize + 2;
+    let hex_budget = (HEIGHT / crate::ui::PREVIEW_ROW_HEIGHT).ceil() as usize + 2;
     if big.preview_rows() == PREVIEW_BYTES / preview::BYTES_PER_ROW && hex_rows <= hex_budget {
         out.push_str(&format!(
             "  ok    {:.0} KiB 预览有 {} 行数据，只画了 {hex_rows} 行（<= {hex_budget}）\n",
@@ -441,6 +441,101 @@ pub fn check() -> (usize, String) {
             &mut out,
             &mut failures,
             format!("预览让控件数涨了 {grown} 个 —— 像是把数据全挂上了"),
+        );
+    }
+
+    // -- 文本模式：同一份字节，按换行看 --
+    let mut texted = previewed(b"Hello, world!\nsecond line\nthird\n".to_vec());
+    // 两种模式同时在树上，但藏起来的那个一行都不挂：它的容器高度是 0，
+    // `ListState::sync` 直接返回。
+    if texted.idle_pool_size() == 0 {
+        out.push_str(&format!(
+            "  ok    待命的文本列表一行都没挂（在用 {} 行）\n",
+            texted.preview_pool_size()
+        ));
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            format!(
+                "藏起来的那个列表也挂了 {} 行 —— 两种模式同时在花钱",
+                texted.idle_pool_size()
+            ),
+        );
+    }
+    let hex_pool = texted.preview_pool_size();
+    out.push_str(&format!("  右栏副标题：{}\n", texted.preview_detail()));
+
+    // 走真实的点击路径（点"文本"那个按钮），不是直接调 `set_mode` —— 这样
+    // "按钮在那儿、点得动"也被验证了。
+    let tab = texted
+        .tab_center(preview::PreviewMode::Text)
+        .expect("切换按钮已经排布过了");
+    texted.event(&InputEvent::PointerDown {
+        position: tab,
+        button: PointerButton::Left,
+    });
+    texted.event(&InputEvent::PointerUp {
+        position: tab,
+        button: PointerButton::Left,
+    });
+    texted.update();
+    texted.layout(viewport);
+    if texted.mode() == preview::PreviewMode::Text && texted.preview_rows() == 3 {
+        out.push_str(&format!(
+            "  ok    点\"文本\"按钮：模式切过去了，{} 行文本\n",
+            texted.preview_rows()
+        ));
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            format!(
+                "点了按钮没切成文本模式：{:?} / {} 行",
+                texted.mode(),
+                texted.preview_rows()
+            ),
+        );
+    }
+    let (texted, text_frame) = record(texted);
+    for needle in ["Hello, world!", "second line", "third"] {
+        if contains(&text_frame, needle) {
+            out.push_str(&format!("  ok    文本模式含 `{needle}`\n"));
+        } else {
+            fail(
+                &mut out,
+                &mut failures,
+                format!("文本模式里找不到 `{needle}`"),
+            );
+        }
+    }
+    // 行尾的换行符不该被画成一个 `·` —— 换行是分隔，不是内容。
+    if !contains(&text_frame, "!·") {
+        out.push_str("  ok    换行符没被当成内容画出来\n");
+    } else {
+        fail(&mut out, &mut failures, "行尾多画了一个换行符".to_string());
+    }
+    // 换过去之后 hex 那几列就不该还在画面上了。
+    if !contains(&text_frame, "48 65 6c 6c 6f") {
+        out.push_str("  ok    hex 那几列被换掉了\n");
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            "切到文本模式了还画着 hex 列".to_string(),
+        );
+    }
+    // 藏起来的那个不再长：hex 的行池停在切换前的规模，没有跟着文本模式的数据走。
+    let idle = texted.idle_pool_size();
+    if idle == hex_pool {
+        out.push_str(&format!(
+            "  ok    切过去后 hex 的行池停在 {idle} 行，没再长\n"
+        ));
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            format!("藏起来的 hex 列表从 {hex_pool} 行长到了 {idle} 行"),
         );
     }
 
@@ -678,6 +773,33 @@ mod tests {
         });
         app.layout(ViewportSize::new(Size::new(WIDTH, HEIGHT)));
         assert!((before - app.preview_width() - 60.0).abs() < 1e-3);
+    }
+
+    /// 文本模式：同一份字节，按换行看 —— 而且是真的点按钮切过去的。
+    #[test]
+    fn the_text_mode_shows_lines() {
+        let mut app = previewed(b"Hello, world!\nsecond line\n".to_vec());
+        assert_eq!(app.idle_pool_size(), 0, "藏起来的文本列表没挂行");
+        let tab = app
+            .tab_center(preview::PreviewMode::Text)
+            .expect("按钮已排布");
+        app.event(&InputEvent::PointerDown {
+            position: tab,
+            button: PointerButton::Left,
+        });
+        app.event(&InputEvent::PointerUp {
+            position: tab,
+            button: PointerButton::Left,
+        });
+        app.update();
+        app.layout(ViewportSize::new(Size::new(WIDTH, HEIGHT)));
+        assert_eq!(app.mode(), preview::PreviewMode::Text);
+        assert_eq!(app.preview_rows(), 2);
+
+        let (_, frame) = record(app);
+        assert!(contains(&frame, "Hello, world!"), "第一行原样");
+        assert!(contains(&frame, "second line"), "第二行原样");
+        assert!(!contains(&frame, "48 65 6c 6c 6f"), "hex 列被换掉了");
     }
 
     /// 分隔条（`min`/`max`）管不了窗口变窄，那一半由 `layout` 补。

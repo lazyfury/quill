@@ -357,11 +357,13 @@ naive list's 300 K controls and 200 K commands at 100 K).
 `examples/file_browser` is the end-to-end example: a directory scanner feeding a
 `List`, with the scan on a worker thread, keyboard navigation, and a headless
 self-check that asserts the frame stays flat when the listing grows from 5 000
-to 200 000 rows. Its right pane is a second `List` — a hex dump of the selected
-file's first 64 KiB (4 096 rows of data, ~30 rows mounted) — behind a
-`ResizeHandle`, which is also the cheapest way to see that **one view can hold
-several virtualized lists**: each needs its own `ListState::sync` in the same
-frame step (`layout` → sync every list → `layout` again if any changed).
+to 200 000 rows. Behind a `ResizeHandle`, its right pane holds a second view of
+the selected file's first 64 KiB (4 096 rows of data, ~30 rows mounted) in two
+modes — hex dump or text — which is the cheapest way to see that **one view can
+hold several virtualized lists**: each needs its own `ListState::sync` in the
+same frame step (`layout` → sync every list → `layout` again if any changed), and
+a list whose container is hidden gets no rect, so `sync` returns early and it
+owns no pool — the idle mode costs nothing.
 
 ## Switch views (Router)
 

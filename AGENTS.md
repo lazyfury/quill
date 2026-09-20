@@ -245,7 +245,21 @@ through a winit `EventLoopProxy`). `wgpu` only in
      mounted — formatted by `examples/file_browser/src/preview.rs` (pure
      offset/hex/ascii functions) and read on a worker thread with the same
      generation guard as the directory scan, so sweeping the selection with the
-     arrow keys leaves exactly one request in flight.`
+     arrow keys leaves exactly one request in flight.
+   - **Stage 25.16 (preview mode, demo layer only — no core change):** the right
+     pane now shows those bytes two ways — `PreviewMode::Binary` (offset/hex/ascii)
+     and `PreviewMode::Text` (line number + line content) — toggled with `T` or by
+     clicking the pane's two tab buttons. The bytes are read once; the mode only
+     changes how a row is computed, so switching is free and it survives selecting
+     another file. The two modes are two `List`s (a list's columns are fixed at
+     build time) chosen by `SceneTree::set_visible`: a hidden list's container has
+     zero height, so `ListState::sync` returns early and it owns no row pool at
+     all — the idle mode costs nothing. Tabs are
+     `Flex::row().on_click(..).dynamic_background(..)`, so the active one is
+     highlighted without rebuilding the tree, and the click only writes a shared
+     cell that `Browser::update` drains (`on_click` cannot borrow the view).
+     Known gap: `draw_ui`'s word-based wrapping collapses leading whitespace, so
+     text mode cannot show indentation — `docs/plan.md` tracks it.
 
 ## Per-stage gate (must run)
 
