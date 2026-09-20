@@ -38,7 +38,8 @@ deepseek_balance — 查询 DeepSeek 账户余额
       --cli            只在终端打印结果，不打开窗口
       --light          使用浅色主题（默认深色）
       --pixel-font     使用内置点阵字体（默认系统字体；点阵字体不含中文）
-      --every <秒>     自动刷新间隔，0 表示不自动刷新（菜单栏默认 60 秒）
+      --every <秒>     自动刷新间隔，0 表示不自动刷新（菜单栏默认 300 秒）
+      --min-gap <秒>   两次刷新之间的最短间隔，0 表示不节流（默认 10 秒）
       --frames <n>     渲染 n 帧后退出（用于自检真实渲染管线）
       --until-result   拿到第一次余额并写入界面后立即退出（自检端到端链路）
   -h, --help           显示本帮助
@@ -90,6 +91,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         until_result: false,
         window: false,
         every: None,
+        min_gap: None,
     };
     let mut cli = false;
 
@@ -112,6 +114,16 @@ fn parse(args: &[String]) -> Result<Command, String> {
                     .parse()
                     .map_err(|_| format!("--every 需要非负整数，收到 `{value}`"))?;
                 options.every = Some(seconds);
+            }
+            "--min-gap" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--min-gap 需要一个秒数".to_string())?;
+                index += 1;
+                let seconds: u64 = value
+                    .parse()
+                    .map_err(|_| format!("--min-gap 需要非负整数，收到 `{value}`"))?;
+                options.min_gap = Some(seconds);
             }
             "--frames" => {
                 let value = args
@@ -177,6 +189,7 @@ mod tests {
                 assert!(!options.until_result);
                 assert!(!options.window, "the menu bar is the default on macOS");
                 assert_eq!(options.every, None);
+                assert_eq!(options.min_gap, None, "the view's own default applies");
             }
             _ => panic!("expected a window run"),
         }
@@ -198,6 +211,8 @@ mod tests {
             "--window",
             "--every",
             "30",
+            "--min-gap",
+            "2",
         ])) {
             Ok(Command::Run(options)) => {
                 assert!(options.light);
@@ -206,6 +221,7 @@ mod tests {
                 assert!(options.until_result);
                 assert!(options.window);
                 assert_eq!(options.every, Some(30));
+                assert_eq!(options.min_gap, Some(2));
             }
             _ => panic!("expected a window run"),
         }
@@ -224,12 +240,24 @@ mod tests {
         assert!(parse(&args(&["--frames", "0"])).is_err());
         assert!(parse(&args(&["--every"])).is_err());
         assert!(parse(&args(&["--every", "-1"])).is_err());
+        assert!(parse(&args(&["--min-gap"])).is_err());
+        assert!(parse(&args(&["--min-gap", "-1"])).is_err());
     }
 
     #[test]
     fn every_zero_is_accepted_as_off() {
         match parse(&args(&["--every", "0"])) {
             Ok(Command::Run(options)) => assert_eq!(options.every, Some(0)),
+            _ => panic!("expected a window run"),
+        }
+    }
+
+    /// `--min-gap 0` is not the same as leaving it out: it means "no throttle",
+    /// which a scripted run needs so every request really goes out.
+    #[test]
+    fn min_gap_zero_is_accepted_as_no_throttle() {
+        match parse(&args(&["--min-gap", "0"])) {
+            Ok(Command::Run(options)) => assert_eq!(options.min_gap, Some(0)),
             _ => panic!("expected a window run"),
         }
     }

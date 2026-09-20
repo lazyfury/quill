@@ -62,6 +62,12 @@ pub const TITLE_IDLE: &str = "—";
 /// A live status-bar item. Dropping it removes the item.
 pub struct MenuBar {
     tray: TrayIcon,
+    /// Kept so the throttle can grey out `刷新余额` while it holds.
+    ///
+    /// With the panel closed this menu is the only place a refused refresh could
+    /// be explained, and an entry that looks live but silently does nothing is
+    /// worse than a greyed one.
+    refresh: MenuItem,
 }
 
 impl MenuBar {
@@ -90,7 +96,20 @@ impl MenuBar {
             .build()
             .map_err(|error| format!("创建状态栏项失败: {error}"))?;
 
-        Ok(Self { tray })
+        Ok(Self { tray, refresh })
+    }
+
+    /// Greys out or re-enables `刷新余额`, mirroring the view's throttle.
+    pub fn set_refresh_enabled(&self, enabled: bool) {
+        self.refresh.set_enabled(enabled);
+    }
+
+    /// Whether `刷新余额` is currently enabled, read back from the platform.
+    ///
+    /// The self-check narrates this: a screenshot is the only other way to see a
+    /// greyed-out native menu item, and this project does not take screenshots.
+    pub fn refresh_enabled(&self) -> bool {
+        self.refresh.is_enabled()
     }
 
     /// Replaces the text beside the item.

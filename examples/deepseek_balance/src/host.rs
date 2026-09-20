@@ -153,6 +153,10 @@ pub struct Options {
     /// ([`DEFAULT_REFRESH_SECS`] in menu-bar mode, no timer in window mode) and
     /// `Some(0)` turns the timer off.
     pub every: Option<u64>,
+    /// Fewest seconds between two refresh starts (`--min-gap`). `None` keeps the
+    /// view's own default; `Some(0)` turns the throttle off, which is what a
+    /// scripted run that wants every request to go out asks for.
+    pub min_gap: Option<u64>,
 }
 
 /// Work finished off-thread, delivered back onto the UI thread.
@@ -220,18 +224,41 @@ impl Source {
     }
 }
 
-/// When the run loop should wake next.
+/// The earlier of the two deadlines the run loop is waiting on, or `None` to
+/// park in [`ControlFlow::Wait`] until an event arrives.
 ///
-/// With the panel open the countdown has to tick, so the loop wakes on the
-/// second — unless the refresh is due sooner, in which case that comes first.
-/// With the panel closed there is nothing to animate and the loop sleeps
-/// straight through to the refresh.
+/// Two things on screen tick: the footer's countdown to the next automatic
+/// refresh, and the refresh button counting its cooldown down. While either is
+/// visible the loop wakes on the second — unless the refresh is due sooner, which
+/// comes first — because a countdown that only moves on unrelated events reads as
+/// frozen. A closed panel has neither, so it sleeps straight through to the next
+/// refresh; and with no timer at all (`--every 0`) it sleeps until an event.
+///
+/// Both deadlines are *absolute* instants, and that is the whole point: see
+/// [`next_tick`].
 #[cfg(target_os = "macos")]
-fn wake_at(now: Instant, refresh_due: Instant, counting: bool) -> Instant {
-    if counting {
-        (now + COUNTDOWN_TICK).min(refresh_due)
-    } else {
-        refresh_due
+fn wake_at(refresh_due: Option<Instant>, tick_due: Option<Instant>) -> Option<Instant> {
+    match (refresh_due, tick_due) {
+        (Some(refresh), Some(tick)) => Some(refresh.min(tick)),
+        (Some(at), None) | (None, Some(at)) => Some(at),
+        (None, None) => None,
+    }
+}
+
+/// The countdown's next step: the stored deadline while it is still ahead, and
+/// one tick from now only once it has come due.
+///
+/// The `now + COUNTDOWN_TICK` must not be recomputed on every event batch. The
+/// loop on macOS wakes many times a second for reasons of its own, and a
+/// deadline that is pushed forward on every one of those passes is never reached
+/// — the countdown timer then silently never fires and the loop is left doing
+/// nothing but burning wakeups. Advancing only a due deadline is what keeps the
+/// wake-up rate at the rate the countdown actually needs.
+#[cfg(target_os = "macos")]
+fn next_tick(now: Instant, tick_at: Option<Instant>) -> Instant {
+    match tick_at {
+        Some(at) if at > now => at,
+        _ => now + COUNTDOWN_TICK,
     }
 }
 
@@ -294,6 +321,10 @@ struct MenuBarState {
     interval: Option<Duration>,
     /// When the timer next fires.
     next: Option<Instant>,
+    /// When the loop next has to come back for the on-screen countdowns.
+    ///
+    /// Kept as a deadline rather than recomputed per batch — see [`next_tick`].
+    tick_at: Option<Instant>,
     /// The last status-item rectangle reported, so the trace only speaks when
     /// it changes.
     last_tray: Option<Rect>,
@@ -387,6 +418,16 @@ impl App {
             None => None,
         };
 
+        let mut view = match mode {
+            Mode::MenuBar => BalanceApp::new_panel(theme, api::endpoint()),
+            Mode::Window => BalanceApp::new(theme, api::endpoint()),
+        };
+        // The throttle belongs to the view, so an absent flag leaves the view's
+        // own default in place.
+        if let Some(seconds) = options.min_gap {
+            view.set_min_refresh_gap(Duration::from_secs(seconds));
+        }
+
         Self {
             instance: wgpu::Instance::default(),
             window: None,
@@ -395,10 +436,7 @@ impl App {
             config: None,
             scale_factor: 1.0,
             cursor: Vec2::ZERO,
-            view: match mode {
-                Mode::MenuBar => BalanceApp::new_panel(theme, api::endpoint()),
-                Mode::Window => BalanceApp::new(theme, api::endpoint()),
-            },
+            view,
             font_mode: if options.pixel_font {
                 FontMode::Pixel
             } else {
@@ -839,18 +877,44 @@ impl App {
     }
 
     /// The state half of a frame: advance the view and hand any pending refresh
-    /// to the worker thread. Nothing is painted.
+    /// to the worker thread. Nothing is painted, and it is idempotent within a
+    /// batch — the second call in a frame finds nothing left to do.
     ///
-    /// Menu-bar mode needs this because the view's state machine must keep
-    /// going while the panel is closed — that is what makes the status bar text
-    /// update without a window on screen.
+    /// Menu-bar mode runs this from [`App::service_menu_bar`], i.e. once per
+    /// event batch with the panel up or down, so the view's state machine — the
+    /// status item's text, the button's cooldown — never depends on a frame
+    /// happening to be drawn. It schedules the frame itself when something
+    /// moved.
     fn tick(&mut self) {
         let dt = self.frame_delta();
         let viewport = self.viewport();
-        self.view.update(viewport, dt);
+        if self.view.update(viewport, dt) {
+            // The button's label is the throttle made visible, and the menu item
+            // carries the same state — narrating both is how a run without
+            // screenshots can tell they agree.
+            let menu = self.sync_refresh_menu();
+            self.trace(&format!(
+                "按钮 → {}{menu}",
+                self.view.refresh_label().unwrap_or("（无）")
+            ));
+            // A moved label needs a frame of its own: with the panel sitting
+            // still there is nothing else guaranteed to schedule one.
+            self.request_redraw();
+        }
         if self.view.take_refresh_request() {
             self.spawn_fetch();
         }
+    }
+
+    /// Mirrors the throttle onto the status item's `刷新余额`, and returns a
+    /// fragment for the trace (empty when there is no menu bar to mirror onto).
+    fn sync_refresh_menu(&self) -> String {
+        #[cfg(target_os = "macos")]
+        if let Some(item) = self.menu.item.as_ref() {
+            item.set_refresh_enabled(self.view.refresh_ready());
+            return format!("（菜单项 enabled={}）", item.refresh_enabled());
+        }
+        String::new()
     }
 
     /// Feeds an input event to the view.
@@ -991,33 +1055,43 @@ impl App {
         self.trace_tray(event_loop);
         if self.menu.open {
             self.reposition_panel(event_loop);
-        } else {
-            self.tick();
         }
 
-        let Some(interval) = self.menu.interval else {
-            // `--every 0`: no timer, so no countdown line either.
-            self.update_countdown();
-            return;
-        };
+        // The view advances on *every* batch, panel open or not. This is what
+        // makes a wake-up worth anything: the cooldown ticks, the status item is
+        // mirrored, and `tick` asks for the frame that shows the new label.
+        //
+        // Leaving this to the paint path instead — where it used to live, behind
+        // `render` — made the countdown advance only on the batches that
+        // happened to schedule a frame, which while the panel is up are the
+        // ones carrying pointer events. The panel then looked frozen until the
+        // mouse moved over it.
+        self.tick();
 
         let now = Instant::now();
-        let due = *self.menu.next.get_or_insert(now + interval);
-        if now >= due {
-            self.menu.next = Some(now + interval);
-            self.view.request_refresh();
-            self.tick();
-            self.request_redraw();
+        if let Some(interval) = self.menu.interval {
+            let due = *self.menu.next.get_or_insert(now + interval);
+            if now >= due {
+                self.menu.next = Some(now + interval);
+                self.view.request_refresh();
+                self.tick();
+                self.request_redraw();
+            }
         }
-
         self.update_countdown();
 
-        let refresh_due = self.menu.next.unwrap_or(now + interval);
-        event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at(
-            now,
-            refresh_due,
-            self.menu.open,
-        )));
+        // The footer countdown only exists with a timer; the button counts its
+        // cooldown down either way, so a run with `--every 0` still has something
+        // to animate while the panel is open.
+        let ticking =
+            self.menu.open && (self.menu.interval.is_some() || !self.view.refresh_ready());
+        let tick_at = ticking.then(|| next_tick(now, self.menu.tick_at));
+        self.menu.tick_at = tick_at;
+
+        event_loop.set_control_flow(match wake_at(self.menu.next, tick_at) {
+            Some(at) => ControlFlow::WaitUntil(at),
+            None => ControlFlow::Wait,
+        });
     }
 
     /// Pushes the time left before the next automatic refresh into the view, and
@@ -1635,30 +1709,69 @@ mod tests {
         assert_eq!(tray.size.height, 24.0 * 2.0);
     }
 
-    /// The wedges of the countdown loop: while the panel is up the loop has to
-    /// come back on the second to move the line, but a refresh that falls due
-    /// first wins — and a closed panel goes straight to the refresh.
+    /// The wedges of the wake rule: the loop comes back for whichever of the two
+    /// deadlines comes first, and parks in `Wait` when neither is pending.
     #[cfg(target_os = "macos")]
     #[test]
-    fn the_loop_wakes_on_the_second_only_while_the_countdown_is_visible() {
+    fn the_loop_wakes_for_whichever_deadline_comes_first() {
         let now = Instant::now();
         let soon = now + Duration::from_millis(400);
         let far = now + Duration::from_secs(300);
+        let tick = now + COUNTDOWN_TICK;
 
         assert_eq!(
-            wake_at(now, far, false),
-            far,
+            wake_at(Some(far), None),
+            Some(far),
             "closed: sleep to the refresh"
         );
         assert_eq!(
-            wake_at(now, far, true),
-            now + COUNTDOWN_TICK,
-            "open: come back for the countdown"
+            wake_at(Some(far), Some(tick)),
+            Some(tick),
+            "open: the countdown is nearer"
         );
         assert_eq!(
-            wake_at(now, soon, true),
-            soon,
+            wake_at(Some(soon), Some(tick)),
+            Some(soon),
             "a refresh due before the tick still wins"
+        );
+        assert_eq!(
+            wake_at(None, Some(tick)),
+            Some(tick),
+            "`--every 0`: no refresh to wait for, but the button still ticks"
+        );
+        assert_eq!(wake_at(None, None), None, "nothing on screen to animate");
+    }
+
+    /// The bug this rule exists for: recomputing `now + 1s` on every batch means
+    /// the deadline is pushed forward as fast as the loop wakes, so it is never
+    /// reached and the second hand never moves. A stored deadline has to survive
+    /// the batches that happen before it falls due.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_stored_tick_deadline_is_not_pushed_forward() {
+        let now = Instant::now();
+        let due = now + COUNTDOWN_TICK;
+
+        assert_eq!(next_tick(now, Some(due)), due, "still ahead: keep it");
+        assert_eq!(
+            next_tick(now + Duration::from_millis(500), Some(due)),
+            due,
+            "half a second later the same instant is still the deadline"
+        );
+        assert_eq!(
+            next_tick(due, Some(due)),
+            due + COUNTDOWN_TICK,
+            "due: step to the next second"
+        );
+        assert_eq!(
+            next_tick(due + Duration::from_millis(250), Some(due)),
+            due + Duration::from_millis(250) + COUNTDOWN_TICK,
+            "late (the loop was busy): count from now, not from the missed one"
+        );
+        assert_eq!(
+            next_tick(now, None),
+            now + COUNTDOWN_TICK,
+            "nothing stored: start a second from now"
         );
     }
 

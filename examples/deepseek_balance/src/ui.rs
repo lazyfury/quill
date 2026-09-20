@@ -30,10 +30,23 @@
 //! ([`BalanceApp::set_countdown`]). The view formats it and hides the line when
 //! there is no timer, so a window run (no timer) never shows a countdown for a
 //! refresh that will not happen.
+//!
+//! ## Throttle and button state
+//!
+//! A click, `R` / `F5`, the menu item and the timer all express an *intent*;
+//! [`BalanceApp::update`] is the one place that decides whether it goes out. A
+//! request is dropped (not queued) while one is in flight, and while the throttle
+//! is holding: at most one refresh per [`DEFAULT_MIN_REFRESH_GAP`], counted from
+//! the request rather than from the reply. A refused request costs nothing —
+//! either the answer is already on its way or the numbers were fetched seconds
+//! ago — and the button is the feedback: it counts the wait down
+//! (`刷新 (7s)`) and dims itself ([`RefreshState`]) so it does not read as
+//! pressable. A *failed* refresh lifts the throttle, because nothing fresh is on
+//! screen and the next press is the retry.
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use draw_components::{Button, Card, Column, Component, Divider, Flex, NodeRef, Ref, Row, Text};
 use draw_core::{
@@ -86,16 +99,74 @@ const FOOTER_HINT: &str = "DEEPSEEK_API_KEY / DEEPSEEK_BALANCE_URL 可覆盖默�
 /// [`BalanceApp::set_countdown`]).
 const COUNTDOWN_PREFIX: &str = "自动刷新";
 
+/// Fewest seconds between two refresh starts, unless the host overrides it with
+/// `--min-gap`.
+///
+/// The panel refreshes every time it opens, and a menu-bar item gets clicked far
+/// more often than the numbers change, so without a floor a curious user would
+/// hit the endpoint on every toggle. Ten seconds is comfortably shorter than any
+/// interval worth watching (`--every` defaults to five minutes) and long enough
+/// that a double click, a key repeat, or a re-open cannot stack requests.
+pub const DEFAULT_MIN_REFRESH_GAP: Duration = Duration::from_secs(10);
+
+/// Alpha of the wash painted over the refresh button while it is not pressable.
+///
+/// The button is drawn [`RefreshState::Busy`] and [`RefreshState::Cooling`] with
+/// a translucent black film over its accent fill. A film rather than a token
+/// swap because `draw_components::Button` has a fixed variant and a fixed label
+/// colour: no palette entry can be both legible on `on_accent` and look disabled
+/// in both themes. Keeping the accent's hue means the label keeps the contrast it
+/// was designed for, and the wash only has to read as "not now".
+const DISABLED_WASH_ALPHA: f32 = 0.25;
+
+/// What the refresh button shows, i.e. whether pressing it would do anything.
+///
+/// One value drives the label *and* the wash its decor paints, so the two can
+/// never disagree about what the button is doing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RefreshState {
+    /// Ready: a press starts a refresh.
+    Idle,
+    /// A request is in flight.
+    Busy,
+    /// Throttled: this many whole seconds until the next refresh is allowed.
+    ///
+    /// The count is in the button's own "hint" slot — the same parentheses that
+    /// hold the `R` shortcut when idle — so it reads as "available in", not as
+    /// the footer's *automatic* refresh countdown.
+    Cooling { left: u64 },
+}
+
+impl RefreshState {
+    /// Whether a press would start a refresh (and the button is undimmed).
+    fn is_idle(self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
+    /// The label the button carries in this state.
+    fn label(self) -> String {
+        match self {
+            Self::Idle => REFRESH_LABEL.to_string(),
+            Self::Busy => REFRESH_BUSY.to_string(),
+            Self::Cooling { left } => format!("刷新 ({left}s)"),
+        }
+    }
+}
+
 /// State shared with the click callbacks.
 ///
 /// Callbacks can only capture `'static` values, so they write into these cells
 /// and the app reads them once per frame — the same pattern `demo_app` uses.
+/// The button's decor is `'static` for the same reason, which is why the visible
+/// state lives here too and not on [`BalanceApp`].
 #[derive(Clone)]
 struct Feed {
     /// A refresh was asked for and has not been handed to the host yet.
     requested: Rc<Cell<bool>>,
     /// A request is in flight (blocks a second one).
     loading: Rc<Cell<bool>>,
+    /// What the button currently shows.
+    state: Rc<Cell<RefreshState>>,
 }
 
 impl Feed {
@@ -103,6 +174,7 @@ impl Feed {
         Self {
             requested: Rc::new(Cell::new(false)),
             loading: Rc::new(Cell::new(false)),
+            state: Rc::new(Cell::new(RefreshState::Idle)),
         }
     }
 }
@@ -137,6 +209,13 @@ pub struct BalanceApp {
     /// above its body.
     arrow: bool,
     refresh_button: NodeId,
+    /// The refresh button's own label node.
+    ///
+    /// `draw_ui::Widget::set_text` writes `Label` and raw `Button` widgets only,
+    /// and the themed `Button` is a flex row *wrapping* a label — so the text has
+    /// to be written one level down. Found once at mount ([`label_of`]) instead of
+    /// every frame.
+    refresh_label_node: NodeId,
     status: NodeId,
     error: NodeId,
     countdown: NodeId,
@@ -148,6 +227,16 @@ pub struct BalanceApp {
     slots: Vec<CurrencySlot>,
     /// Last successful reply, kept so the tests (and the host) can read it back.
     last_balance: Option<Balance>,
+    /// Fewest seconds between two refresh starts (see
+    /// [`DEFAULT_MIN_REFRESH_GAP`]); [`Duration::ZERO`] turns the throttle off.
+    min_gap: Duration,
+    /// When the throttle lifts. `None` means "a refresh may start now", which is
+    /// also the state after a failure, so the next press retries immediately.
+    blocked_until: Option<Instant>,
+    /// Test seam: shifts the view's clock, so the cooldown can be driven past
+    /// without sleeping. Stays zero in a real run.
+    #[cfg(test)]
+    clock_shift: Duration,
     viewport: ViewportSize,
 }
 
@@ -211,12 +300,17 @@ impl BalanceApp {
             })
             .collect();
 
+        let refresh_button = refs.refresh.get().expect("refresh button mounted");
+        let refresh_label_node =
+            label_of(&tree, refresh_button).expect("the refresh button carries a label");
+
         let mut app = Self {
             tree,
             theme,
             feed,
             arrow,
-            refresh_button: refs.refresh.get().expect("refresh button mounted"),
+            refresh_button,
+            refresh_label_node,
             status: refs.status.get().expect("status label mounted"),
             error: refs.error.get().expect("error label mounted"),
             countdown: refs.countdown.get().expect("countdown label mounted"),
@@ -228,8 +322,36 @@ impl BalanceApp {
                 .expect("availability label mounted"),
             slots,
             last_balance: None,
+            min_gap: DEFAULT_MIN_REFRESH_GAP,
+            blocked_until: None,
+            #[cfg(test)]
+            clock_shift: Duration::ZERO,
             viewport: ViewportSize::new(Size::new(520.0, 460.0)),
         };
+
+        // The button dims itself while it cannot be pressed. Chrome attached
+        // after mount rather than a builder method because the themed `Button`
+        // resolves its own surface, and because the closure needs the prepared
+        // node's id. `paint_front` runs before the label child is painted, so the
+        // fill is dimmed and the text stays at full contrast.
+        draw_ui::add_decor(
+            &mut app.tree,
+            app.refresh_button,
+            draw_ui::foreground_decor({
+                let state = app.feed.state.clone();
+                move |ctx, rect, _state| {
+                    if state.get().is_idle() {
+                        return;
+                    }
+                    fill_rounded_rect(
+                        ctx,
+                        rect,
+                        radius::MD,
+                        Color::BLACK.with_alpha(DISABLED_WASH_ALPHA),
+                    );
+                }
+            }),
+        );
 
         // Before the first fetch: the availability marks are hidden and only the
         // first currency card is on screen, filled with placeholders.
@@ -290,6 +412,36 @@ impl BalanceApp {
         text(&self.tree, self.error)
     }
 
+    /// The refresh button's current label (`刷新 (R)` / `刷新中…` / `刷新 (7s)`).
+    ///
+    /// The host narrates it when it moves, which is how the throttle is visible
+    /// in a self-check run that takes no screenshots.
+    pub fn refresh_label(&self) -> Option<&str> {
+        text(&self.tree, self.refresh_label_node)
+    }
+
+    /// Seconds left before the next refresh is allowed, `None` when the button is
+    /// ready to be pressed.
+    #[cfg(test)]
+    pub fn cooldown_left(&self) -> Option<u64> {
+        self.blocked_for(self.now())
+    }
+
+    /// Whether a refresh would go out right now.
+    ///
+    /// The host mirrors this onto the status item's `刷新余额` entry, which is the
+    /// only surface that can explain a refusal while the panel is closed.
+    pub fn refresh_ready(&self) -> bool {
+        self.can_refresh(self.now())
+    }
+
+    /// Whether the button is dimmed, i.e. shows [`RefreshState::Busy`] or
+    /// [`RefreshState::Cooling`].
+    #[cfg(test)]
+    pub fn is_throttled(&self) -> bool {
+        !self.feed.state.get().is_idle()
+    }
+
     /// Current countdown-line text (`None` while the line is hidden).
     ///
     /// The host reads it back to narrate the timer in a self-check run.
@@ -333,14 +485,26 @@ impl BalanceApp {
 
     // -- pipeline ----------------------------------------------------------
 
-    /// Advances the frame (no animation yet) and enters the loading state when a
-    /// refresh was requested.
-    pub fn update(&mut self, viewport: ViewportSize, dt: f32) {
+    /// Advances the frame, settles whether the pending refresh may go out, and
+    /// refreshes the button's label.
+    ///
+    /// Returns whether that label moved, so the host can narrate the throttle in
+    /// a self-check run (the same contract as [`BalanceApp::set_countdown`]).
+    pub fn update(&mut self, viewport: ViewportSize, dt: f32) -> bool {
         let _ = dt;
         self.viewport = viewport;
-        if self.feed.requested.get() && !self.feed.loading.get() {
-            self.begin_refresh();
+        let now = self.now();
+
+        // A request that the throttle refuses is dropped here rather than left
+        // for the host: `take_refresh_request` is what starts the worker thread,
+        // so clearing the flag is what keeps a refused click off the network.
+        if self.feed.requested.get() && !self.can_refresh(now) {
+            self.feed.requested.set(false);
         }
+        if self.feed.requested.get() {
+            self.begin_refresh(now);
+        }
+        self.sync_button(now)
     }
 
     /// Resolves layout for `viewport`.
@@ -384,14 +548,16 @@ impl BalanceApp {
         }
     }
 
-    /// Routes an input event: `R` / `F5` request a refresh, everything else goes
+    /// Routes an input event: `R` / `F5` ask for a refresh, everything else goes
     /// through the normal UI input path.
+    ///
+    /// The key only records the intent — [`BalanceApp::update`] decides whether it
+    /// survives the throttle, so the shortcut and the button are gated by exactly
+    /// the same rule.
     pub fn event(&mut self, event: &InputEvent) -> EventResult {
         if let InputEvent::KeyDown { key } = event {
             if matches!(key, Key::F5 | Key::Character('r')) {
-                if !self.feed.loading.get() {
-                    self.feed.requested.set(true);
-                }
+                self.request_refresh();
                 return EventResult::Handled;
             }
         }
@@ -417,22 +583,77 @@ impl BalanceApp {
 
     // -- refresh -----------------------------------------------------------
 
-    /// Marks the view as loading and labels the button accordingly.
-    fn begin_refresh(&mut self) {
+    /// The view's clock.
+    ///
+    /// The throttle has to be judged where requests are decided *and* be testable
+    /// without sleeping, so the one read of the clock lives here, with a
+    /// test-only shift. `std::time` is deliberate: the view already reads the
+    /// wall clock for the "refreshed at" stamp.
+    fn now(&self) -> Instant {
+        let now = Instant::now();
+        #[cfg(test)]
+        let now = now + self.clock_shift;
+        now
+    }
+
+    /// Whether a refresh may start right now: nothing in flight and the throttle
+    /// is not holding.
+    fn can_refresh(&self, now: Instant) -> bool {
+        !self.feed.loading.get() && self.blocked_for(now).is_none()
+    }
+
+    /// Whole seconds left of the throttle, `None` when a refresh is allowed.
+    ///
+    /// Rounded up, like [`clock`], so the button never reads `(0s)` while a
+    /// sliver of the gap is still left.
+    fn blocked_for(&self, now: Instant) -> Option<u64> {
+        let left = self.blocked_until?.checked_duration_since(now)?;
+        let seconds = left.as_secs() + u64::from(left.subsec_millis() > 0);
+        (seconds > 0).then_some(seconds)
+    }
+
+    /// Marks the view as loading and arms the throttle.
+    ///
+    /// The gap starts with the request, not with the reply: it is about how often
+    /// the endpoint is hit, and a round trip is a fraction of the wait anyway.
+    fn begin_refresh(&mut self, now: Instant) {
         self.feed.loading.set(true);
-        draw_components::set_text(&mut self.tree, self.refresh_button, REFRESH_BUSY);
+        self.blocked_until = Some(now + self.min_gap);
         draw_components::set_text(&mut self.tree, self.status, STATUS_BUSY);
         draw_components::set_text(&mut self.tree, self.error, "");
     }
 
-    /// Asks for a refresh from outside the view (the menu bar's timer, or the
-    /// menu item). Mirrors what the button and `R` / `F5` do; nothing is sent
-    /// until the next [`BalanceApp::update`], which is where the request is
-    /// picked up.
-    pub fn request_refresh(&mut self) {
-        if !self.feed.loading.get() {
-            self.feed.requested.set(true);
+    /// Writes the button's state into its label and into the cell its decor
+    /// reads. Returns whether the label moved.
+    fn sync_button(&mut self, now: Instant) -> bool {
+        let state = if self.feed.loading.get() {
+            RefreshState::Busy
+        } else {
+            match self.blocked_for(now) {
+                Some(left) => RefreshState::Cooling { left },
+                None => RefreshState::Idle,
+            }
+        };
+        if self.feed.state.get() == state {
+            return false;
         }
+        self.feed.state.set(state);
+        draw_components::set_text(&mut self.tree, self.refresh_label_node, state.label());
+        true
+    }
+
+    /// Asks for a refresh from outside the view (the menu bar's timer, or the
+    /// menu item). This only records the intent — press, key, menu and timer all
+    /// funnel through [`BalanceApp::update`], which is where the throttle is
+    /// applied — and nothing is sent until [`BalanceApp::take_refresh_request`].
+    pub fn request_refresh(&mut self) {
+        self.feed.requested.set(true);
+    }
+
+    /// Sets the minimum gap between two refresh starts. [`Duration::ZERO`] turns
+    /// the throttle off; the host maps `--min-gap` onto this.
+    pub fn set_min_refresh_gap(&mut self, gap: Duration) {
+        self.min_gap = gap;
     }
 
     /// Shows the time left before the host's next automatic refresh, or hides
@@ -468,15 +689,21 @@ impl BalanceApp {
     pub fn apply_result(&mut self, result: Result<Balance, String>) {
         self.feed.loading.set(false);
         self.feed.requested.set(false);
-        draw_components::set_text(&mut self.tree, self.refresh_button, REFRESH_LABEL);
 
         match result {
             Ok(balance) => self.show_balance(balance),
             Err(message) => {
+                // A failed attempt left nothing fresh on screen, so it does not
+                // hold the throttle: the button is pressable again at once, and
+                // that press is the retry. There is still only one request in
+                // flight at a time, which is what the `loading` gate is for.
+                self.blocked_until = None;
                 draw_components::set_text(&mut self.tree, self.status, STATUS_FAILED);
                 draw_components::set_text(&mut self.tree, self.error, message);
             }
         }
+
+        self.sync_button(self.now());
     }
 
     /// Writes `balance` into the labels and shows exactly the cards it has data
@@ -568,7 +795,6 @@ impl Refs {
 /// The header: page title, endpoint, and the refresh button.
 fn header(theme: Theme, endpoint: &str, refs: &Refs, feed: &Feed) -> Row {
     let requested = feed.requested.clone();
-    let loading = feed.loading.clone();
 
     let title = Column::new()
         .gap(space::XXS)
@@ -583,11 +809,9 @@ fn header(theme: Theme, endpoint: &str, refs: &Refs, feed: &Feed) -> Row {
         );
 
     let button = Button::primary(REFRESH_LABEL, theme)
-        .on_click(move || {
-            if !loading.get() {
-                requested.set(true);
-            }
-        })
+        // A press is an intent, not a command: whether it goes out is decided in
+        // `update`, which owns the clock and therefore the throttle.
+        .on_click(move || requested.set(true))
         .ref_(&refs.refresh);
 
     Row::new()
@@ -691,6 +915,19 @@ fn text(tree: &SceneTree, id: NodeId) -> Option<&str> {
     draw_ui::widget(tree, id).and_then(|widget| widget.text())
 }
 
+/// The first text-bearing child of `control`, i.e. the label a composite
+/// component wraps.
+///
+/// `draw_components::Button` builds a flex row and puts the caption in a child
+/// label, and `Widget::set_text` only writes `Label` and raw `Button` widgets —
+/// so writing the caption means writing to this node, not to the button.
+fn label_of(tree: &SceneTree, control: NodeId) -> Option<NodeId> {
+    tree.children(control)?
+        .iter()
+        .copied()
+        .find(|child| text(tree, *child).is_some())
+}
+
 /// Paints the popover arrow: a square rotated 45° whose tip touches the top of
 /// the window, so the visible part — the half above the body — is a wedge
 /// `2 * ARROW_HEIGHT` wide pointing at the status item.
@@ -768,13 +1005,43 @@ mod tests {
     }
 
     /// A view whose on-open refresh has already been answered, so the tests
-    /// below start from a settled screen.
+    /// below start from a settled screen. The throttle is still armed: this is
+    /// what the panel looks like a second after it opens.
     fn settled(width: f32, height: f32) -> BalanceApp {
         let mut app = laid_out(width, height);
         assert!(app.take_refresh_request(), "the view refreshes on open");
         app.apply_result(Ok(sample()));
         app.layout(viewport(width, height));
         app
+    }
+
+    /// [`settled`], with the throttle run out: the button is ready to be pressed.
+    ///
+    /// Time is shifted rather than slept through — the view reads its clock in one
+    /// place (`BalanceApp::now`), and this is that seam.
+    fn ready(width: f32, height: f32) -> BalanceApp {
+        let mut app = settled(width, height);
+        app.clock_shift = DEFAULT_MIN_REFRESH_GAP;
+        app.update(viewport(width, height), 0.016);
+        app.layout(viewport(width, height));
+        assert_eq!(app.cooldown_left(), None, "past the gap");
+        assert_eq!(app.refresh_label(), Some(REFRESH_LABEL));
+        app
+    }
+
+    /// Whether the draw list washes `rect`, i.e. paints the disabled film over it.
+    fn washed(app: &BalanceApp, rect: Rect) -> bool {
+        let mut ctx = PaintContext::new();
+        app.paint(&mut ctx);
+        let list = ctx.into_draw_list();
+        list.commands().iter().any(|command| {
+            matches!(
+                command,
+                DrawCommand::FillRoundedRect { rect: fill, paint, .. }
+                    if *fill == rect
+                        && paint.color == Color::BLACK.with_alpha(DISABLED_WASH_ALPHA)
+            )
+        })
     }
 
     fn click(app: &mut BalanceApp, position: Vec2) {
@@ -812,7 +1079,7 @@ mod tests {
 
     #[test]
     fn the_refresh_button_requests_a_refresh() {
-        let mut app = settled(520.0, 460.0);
+        let mut app = ready(520.0, 460.0);
         let center = app.button_center().expect("button rect");
 
         click(&mut app, center);
@@ -827,7 +1094,7 @@ mod tests {
 
     #[test]
     fn the_r_key_requests_a_refresh() {
-        let mut app = settled(520.0, 460.0);
+        let mut app = ready(520.0, 460.0);
         app.event(&InputEvent::KeyDown {
             key: Key::Character('r'),
         });
@@ -838,7 +1105,7 @@ mod tests {
 
     #[test]
     fn a_second_request_is_ignored_while_loading() {
-        let mut app = settled(520.0, 460.0);
+        let mut app = ready(520.0, 460.0);
         let center = app.button_center().expect("button rect");
 
         click(&mut app, center);
@@ -851,6 +1118,185 @@ mod tests {
             !app.take_refresh_request(),
             "no parallel request while busy"
         );
+    }
+
+    /// The panel refreshes when it opens, and that request arms the throttle:
+    /// toggling the item again a second later shows the numbers it already has
+    /// instead of hitting the endpoint twice.
+    #[test]
+    fn the_open_refresh_arms_the_throttle() {
+        let app = laid_out(520.0, 460.0);
+        assert!(app.is_loading(), "the first frame starts a refresh");
+        assert_eq!(app.refresh_label(), Some(REFRESH_BUSY));
+        assert_eq!(
+            app.cooldown_left(),
+            Some(DEFAULT_MIN_REFRESH_GAP.as_secs()),
+            "the gap starts with the request"
+        );
+        assert!(app.is_throttled());
+    }
+
+    /// The wait is counted in the button's own hint slot, one second at a time,
+    /// and the button goes back to `刷新 (R)` when it runs out.
+    #[test]
+    fn the_button_counts_the_throttle_down() {
+        let mut app = settled(520.0, 460.0);
+        assert_eq!(app.refresh_label(), Some("刷新 (10s)"));
+
+        app.clock_shift = Duration::from_secs(4);
+        app.update(viewport(520.0, 460.0), 0.016);
+        assert_eq!(app.refresh_label(), Some("刷新 (6s)"));
+
+        app.clock_shift = Duration::from_secs(9);
+        app.update(viewport(520.0, 460.0), 0.016);
+        assert_eq!(
+            app.refresh_label(),
+            Some("刷新 (1s)"),
+            "rounded up, never 0s"
+        );
+
+        app.clock_shift = DEFAULT_MIN_REFRESH_GAP;
+        app.update(viewport(520.0, 460.0), 0.016);
+        assert_eq!(app.refresh_label(), Some(REFRESH_LABEL));
+        assert_eq!(app.cooldown_left(), None);
+        assert!(!app.is_throttled());
+    }
+
+    /// A press the throttle refuses must not reach the host — `take_refresh_request`
+    /// is what spawns the worker thread — and the button keeps saying why.
+    #[test]
+    fn a_click_inside_the_throttle_is_dropped() {
+        let mut app = settled(520.0, 460.0);
+        let center = app.button_center().expect("button rect");
+
+        click(&mut app, center);
+        app.update(viewport(520.0, 460.0), 0.016);
+
+        assert!(!app.is_loading(), "the throttle holds the request back");
+        assert!(!app.take_refresh_request(), "and nothing goes out");
+        assert_eq!(app.refresh_label(), Some("刷新 (10s)"));
+        assert_eq!(
+            app.status_text().map(|text| text.starts_with("更新于 ")),
+            Some(true),
+            "the stamp of the last good refresh is untouched"
+        );
+    }
+
+    #[test]
+    fn the_r_key_inside_the_throttle_is_dropped() {
+        let mut app = settled(520.0, 460.0);
+        app.event(&InputEvent::KeyDown {
+            key: Key::Character('r'),
+        });
+        app.update(viewport(520.0, 460.0), 0.016);
+        assert!(!app.is_loading());
+        assert!(!app.take_refresh_request());
+    }
+
+    #[test]
+    fn a_press_goes_through_once_the_throttle_runs_out() {
+        let mut app = settled(520.0, 460.0);
+        let center = app.button_center().expect("button rect");
+
+        app.clock_shift = DEFAULT_MIN_REFRESH_GAP;
+        click(&mut app, center);
+        app.update(viewport(520.0, 460.0), 0.016);
+
+        assert!(app.is_loading(), "the wait is over, so the press counts");
+        assert!(app.take_refresh_request());
+    }
+
+    /// The host's timer funnels through the same gate: a manual refresh seconds
+    /// before it is due makes the automatic one unnecessary, not queued.
+    #[test]
+    fn a_timer_tick_inside_the_throttle_is_dropped() {
+        let mut app = settled(520.0, 460.0);
+        app.request_refresh();
+        app.update(viewport(520.0, 460.0), 0.016);
+        assert!(!app.is_loading());
+        assert!(!app.take_refresh_request());
+    }
+
+    /// A failed attempt leaves nothing fresh on screen, so it must not hold the
+    /// throttle: the next press is the retry.
+    #[test]
+    fn a_failure_lifts_the_throttle() {
+        let mut app = settled(520.0, 460.0);
+        assert_eq!(app.cooldown_left(), Some(10));
+
+        app.apply_result(Err("HTTP 500: internal error".to_string()));
+
+        assert_eq!(app.cooldown_left(), None);
+        assert_eq!(app.refresh_label(), Some(REFRESH_LABEL));
+        assert!(!app.is_throttled());
+    }
+
+    /// `--min-gap 0` is "no wait", not "no gate": two requests still never run at
+    /// the same time, because the second one is refused while the first is in
+    /// flight. The gap has to be set before the refresh that arms it.
+    #[test]
+    fn a_zero_gap_turns_the_throttle_off() {
+        let mut app = BalanceApp::new(Theme::dark(), TEST_ENDPOINT.to_string());
+        app.set_min_refresh_gap(Duration::ZERO);
+        let viewport = viewport(520.0, 460.0);
+        app.update(viewport, 0.016);
+        assert!(
+            app.take_refresh_request(),
+            "the open refresh still goes out"
+        );
+        app.apply_result(Ok(sample()));
+        app.layout(viewport);
+        assert_eq!(app.cooldown_left(), None, "nothing to wait for");
+
+        let center = app.button_center().expect("button rect");
+        click(&mut app, center);
+        app.update(viewport, 0.016);
+        assert!(app.is_loading(), "the press goes straight out");
+        assert!(app.take_refresh_request());
+        assert_eq!(app.refresh_label(), Some(REFRESH_BUSY));
+    }
+
+    /// The wash is what makes "cannot press" visible: without it the button keeps
+    /// its full accent while the throttle silently ignores the click.
+    #[test]
+    fn the_button_is_washed_while_it_cannot_be_pressed() {
+        let mut app = settled(520.0, 460.0);
+        let rect = app.button_rect().expect("button rect");
+        assert!(app.is_throttled());
+        assert!(washed(&app, rect), "the cooling button is dimmed");
+
+        // And undimmed again once the wait is over.
+        app.clock_shift = DEFAULT_MIN_REFRESH_GAP;
+        app.update(viewport(520.0, 460.0), 0.016);
+        app.layout(viewport(520.0, 460.0));
+        let rect = app.button_rect().expect("button rect");
+        assert!(!app.is_throttled());
+        assert!(!washed(&app, rect), "a ready button is left alone");
+    }
+
+    /// The wash is chrome, not a backdrop: it covers the button and nothing else,
+    /// and it is drawn before the label child, so the text keeps its contrast.
+    #[test]
+    fn the_wash_covers_the_button_and_not_the_page() {
+        let app = laid_out(520.0, 460.0);
+        let button = app.button_rect().expect("button rect");
+        assert!(washed(&app, button));
+
+        let mut ctx = PaintContext::new();
+        app.paint(&mut ctx);
+        let list = ctx.into_draw_list();
+        let washes = list
+            .commands()
+            .iter()
+            .filter(|command| {
+                matches!(
+                    command,
+                    DrawCommand::FillRoundedRect { paint, .. }
+                        if paint.color == Color::BLACK.with_alpha(DISABLED_WASH_ALPHA)
+                )
+            })
+            .count();
+        assert_eq!(washes, 1, "one film over one button");
     }
 
     #[test]
