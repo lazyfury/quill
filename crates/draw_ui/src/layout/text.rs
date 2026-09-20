@@ -603,31 +603,43 @@ mod tests {
     }
 
     #[test]
-    fn break_all_breaks_inside_words() {
-        // "hello" is 5 × 0.55×10 = 27.5 wide; at max_width 20 only 3 chars fit
-        // per line, so break-all must split the word instead of emitting it whole.
-        let m = ApproxTextMeasurer;
-        let opts = TextOptions::default().word_break(WordBreak::BreakAll);
-        let lines = layout_text(&m, "hello", 10.0, 20.0, opts);
-        assert!(lines.len() > 1, "break-all should split 'hello', got {lines:?}");
-        assert!(lines.iter().all(|l| m.measure_line(l, 10.0) <= 20.0 + 1e-3));
+    fn break_all_makes_every_char_a_break_unit() {
+        // The distinctive property of break-all is not "long words split"
+        // (default `Word` already hard-breaks an overlong word), but that an
+        // *ordinary* word can break mid-word. `tokens` shows the exact unit
+        // granularity: every character becomes its own break opportunity.
+        let word_units: Vec<String> =
+            tokens("hello", WordBreak::Word).into_iter().map(|(t, _)| t).collect();
+        let break_units: Vec<String> =
+            tokens("hello", WordBreak::BreakAll).into_iter().map(|(t, _)| t).collect();
+        assert_eq!(word_units, vec!["hello".to_string()]);
+        assert_eq!(
+            break_units,
+            vec!["h", "e", "l", "l", "o"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
-    fn break_all_fills_more_than_word_mode() {
-        // At a width that fits two words in `Word` mode, break-all packs more
-        // characters per line, so it needs no more lines than word mode.
+    fn break_all_fills_a_line_beyond_word_boundaries() {
+        // Contrast the two modes on identical input at a width where `Word`
+        // wraps only at spaces but `BreakAll` keeps packing past them. Spaces
+        // remain break opportunities (and text content) in both modes.
         let m = ApproxTextMeasurer;
-        let word_lines =
-            layout_text(&m, "ab cd ef", 10.0, 30.0, TextOptions::default());
-        let break_all_lines = layout_text(
+        // "ab cd" = 11 + 3.3 + 11 = 25.3 wide. At 25 `Word` wraps after "ab";
+        // break-all fills "ab c" (19.8) before wrapping to "d".
+        let word_lines = layout_text(&m, "ab cd", 10.0, 25.0, TextOptions::default());
+        let break_lines = layout_text(
             &m,
-            "ab cd ef",
+            "ab cd",
             10.0,
-            30.0,
+            25.0,
             TextOptions::default().word_break(WordBreak::BreakAll),
         );
-        assert!(break_all_lines.len() <= word_lines.len());
+        assert_eq!(word_lines, vec!["ab".to_string(), "cd".to_string()]);
+        assert_eq!(break_lines, vec!["ab c".to_string(), "d".to_string()]);
     }
 
     #[test]
