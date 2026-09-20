@@ -15,6 +15,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use ab_glyph::{point, Font, FontRef, Glyph, GlyphId, PxScale, ScaleFont};
 use rustybuzz::{Direction, Face, UnicodeBuffer};
@@ -30,12 +31,19 @@ pub const ATLAS_HEIGHT: u32 = 1024;
 const PADDING: u32 = 1;
 
 /// A shaped glyph in font units (before scaling by `font_size / upem`).
+#[derive(Clone, Copy)]
 struct ShapedGlyph {
     glyph_id: u16,
     x_advance: f32,
     x_offset: f32,
     y_offset: f32,
 }
+
+/// Shaping cache capacity (entries). Scrolling a hex dump produces a stream of
+/// one-shot row texts; past the cap the cache clears and starts over.
+const SHAPE_CACHE_CAP: usize = 4096;
+/// Per-character advance cache capacity (entries).
+const ADVANCE_CACHE_CAP: usize = 8192;
 
 /// A font loaded from disk with an on-demand glyph atlas.
 pub struct SystemFont {
@@ -45,6 +53,12 @@ pub struct SystemFont {
     face: Face<'static>,
     atlas: RefCell<Atlas>,
     cache: RefCell<HashMap<(u32, u32), GlyphSlot>>,
+    /// Shaped runs keyed by the text itself: shaping output is in font units,
+    /// so it does not depend on the pixel size and one entry serves all sizes.
+    shape_cache: RefCell<HashMap<Box<str>, Rc<[ShapedGlyph]>>>,
+    /// Per-character advances keyed by `(char, px bits)` — layout measures
+    /// every character of every candidate wrap line on resize frames.
+    advance_cache: RefCell<HashMap<(u32, u32), f32>>,
 }
 
 impl SystemFont {
@@ -73,6 +87,8 @@ impl SystemFont {
             face,
             atlas: RefCell::new(Atlas::new()),
             cache: RefCell::new(HashMap::new()),
+            shape_cache: RefCell::new(HashMap::new()),
+            advance_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -82,8 +98,19 @@ impl SystemFont {
 
     /// Advance in device pixels (callers convert to logical).
     pub fn advance_px(&self, ch: char, px: f32) -> f32 {
+        let key = (ch as u32, px.to_bits());
+        let cached = self.advance_cache.borrow().get(&key).copied();
+        if let Some(advance) = cached {
+            return advance;
+        }
         let scaled = self.font.as_scaled(px_scale(px));
-        scaled.h_advance(self.font.glyph_id(ch))
+        let advance = scaled.h_advance(self.font.glyph_id(ch));
+        let mut cache = self.advance_cache.borrow_mut();
+        if cache.len() >= ADVANCE_CACHE_CAP {
+            cache.clear();
+        }
+        cache.insert(key, advance);
+        advance
     }
 
     /// Shaped advance of `text` in device pixels.
@@ -117,7 +144,7 @@ impl SystemFont {
     pub fn shape_px(&self, text: &str, px: f32) -> Vec<GlyphSlot> {
         let scale = self.unit_scale(px);
         self.shape(text)
-            .into_iter()
+            .iter()
             .map(|glyph| {
                 let mut slot = self.glyph_slot(glyph.glyph_id, px);
                 slot.advance = glyph.x_advance * scale;
@@ -146,7 +173,28 @@ impl SystemFont {
     }
 
     /// Shapes every bidi run of `text`, in visual order, in font units.
-    fn shape(&self, text: &str) -> Vec<ShapedGlyph> {
+    ///
+    /// Results are memoized by the text itself (font units are size-independent
+    /// and this string is exactly what layout and paint ask for every frame);
+    /// a drag/resize frame would otherwise re-run full HarfBuzz shaping for
+    /// every text on screen, which is the difference between a smooth drag and
+    /// a stuttering one in debug builds.
+    fn shape(&self, text: &str) -> Rc<[ShapedGlyph]> {
+        let cached = self.shape_cache.borrow().get(text).cloned();
+        if let Some(cached) = cached {
+            return cached;
+        }
+        let shaped: Rc<[ShapedGlyph]> = self.shape_uncached(text).into();
+        let mut cache = self.shape_cache.borrow_mut();
+        if cache.len() >= SHAPE_CACHE_CAP {
+            cache.clear();
+        }
+        cache.insert(text.into(), shaped.clone());
+        shaped
+    }
+
+    /// Shapes every bidi run of `text`, in visual order, in font units.
+    fn shape_uncached(&self, text: &str) -> Vec<ShapedGlyph> {
         let mut out = Vec::new();
         for (range, rtl) in bidi_runs(text) {
             let run = &text[range];
@@ -395,6 +443,90 @@ impl Atlas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 临时基准：一次 shape 的成本（拖动帧里每条文本都要走）。
+    ///
+    /// 默认忽略：时序断言在 CI 上不稳定；`--ignored` 手动跑，用来对比缓存
+    /// 前后的单次成本（debug 下尤其明显，shape 一次从 ~300µs 降到 ~1µs）。
+    #[test]
+    #[ignore]
+    fn probe_shape_cost() {
+        let Some(font) = SystemFont::load() else {
+            eprintln!("no font, skip");
+            return;
+        };
+        let samples = [
+            "up ↑↓ · Enter 打开 · Backspace 上级 · R 重扫",
+            "00001A30  5a 5a 5a 5a 5a 5a 5a 5a  5a 5a 5a 5a 5a 5a 5a 5a",
+            "entry_00042.log",
+        ];
+        // 先把冷启动成本付掉，再测热路径 —— 拖动帧里的就是热路径。
+        for sample in samples {
+            let _ = font.shape(sample);
+        }
+        for sample in samples {
+            let start = std::time::Instant::now();
+            let n = 200;
+            for _ in 0..n {
+                let _ = font.shape(sample);
+            }
+            let per = start.elapsed() / n;
+            eprintln!(
+                "shape({:>2} chars): {:>10.1?} / call",
+                sample.chars().count(),
+                per
+            );
+        }
+    }
+
+    /// 缓存命中要给出和直接整形一致的结果 —— 缓存不能改变输出。
+    #[test]
+    fn the_shape_cache_returns_the_same_glyphs() {
+        let Some(font) = SystemFont::load() else {
+            eprintln!("no font, skip");
+            return;
+        };
+        let text = "预览 00001A30  5a 5a · 双向 mixed אבג";
+        let expected: Vec<(u16, f32)> = font
+            .shape_uncached(text)
+            .iter()
+            .map(|g| (g.glyph_id, g.x_advance))
+            .collect();
+        assert!(!expected.is_empty());
+        let _ = font.shape(text); // 首次写入缓存
+        let cached: Vec<(u16, f32)> = font
+            .shape(text)
+            .iter()
+            .map(|g| (g.glyph_id, g.x_advance))
+            .collect();
+        assert_eq!(cached, expected);
+    }
+
+    /// 同一段文本在缓存前后的 slot 完全一致（不只 id/advance，offset 也是）。
+    #[test]
+    fn shape_px_is_identical_before_and_after_caching() {
+        let Some(font) = SystemFont::load() else {
+            eprintln!("no font, skip");
+            return;
+        };
+        let text = "entry_00042.log";
+        let expected = font.shape_px(text, 16.0);
+        let again = font.shape_px(text, 16.0);
+        assert_eq!(expected, again);
+    }
+
+    /// 缓存过载时整体清空，而不是无界增长。
+    #[test]
+    fn the_shape_cache_clears_past_its_cap() {
+        let Some(font) = SystemFont::load() else {
+            eprintln!("no font, skip");
+            return;
+        };
+        for index in 0..(SHAPE_CACHE_CAP + 64) {
+            let _ = font.shape(&format!("row-{index:06}"));
+        }
+        assert!(font.shape_cache.borrow().len() <= SHAPE_CACHE_CAP);
+    }
 
     #[test]
     fn bidi_runs_reorder_rtl_around_latin() {
