@@ -11,3 +11,5 @@ bench-baselines/
 
 # Local assistant scratch space.
 .workbuddy
+
+.DS_Store
