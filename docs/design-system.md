@@ -287,6 +287,19 @@ backward-compatible addition and record it here.
   with `wrap: false` keep reporting the true unbreakable width. Behavior
   changes only in the pathological case; no `Widget`/`ControlData` shape
   changed.
+- **`TextOptions::word_break` / `WordBreak`** (Stage 25.x): text wrapping
+  previously had a single fixed strategy — words (whitespace-delimited Latin
+  runs) break as units, CJK wide characters break individually, and an overlong
+  unit hard-breaks per character. That behavior is now configurable via
+  `TextOptions.word_break: WordBreak` (`Word` = the prior behavior, `BreakAll` =
+  every character is a break opportunity, `KeepAll` = only whitespace breaks;
+  CJK joins the surrounding word). `wrap_text_with_break` and the `tokens`
+  splitter take the mode; `longest_unit_width_with` takes it so min-content
+  sizing tracks the same break granularity. `Text` and `Label` gain a
+  `word_break` builder. Additive and backward compatible: `WordBreak::Word` is
+  the `Default`, so every existing `TextOptions` literal/`default()` call keeps
+  the old output.
+
 
 ## Deferred
 

@@ -3,7 +3,7 @@
 use crate::base::{Component, Spec};
 use draw_core::Color;
 use draw_theme::{TextSize, Theme, Tone};
-use draw_ui::{TextOptions, Widget};
+use draw_ui::{TextOptions, Widget, WordBreak};
 
 /// A single block of text with a semantic size and color.
 ///
@@ -87,6 +87,12 @@ impl Text {
     /// Enables or disables soft wrapping.
     pub fn wrap(mut self, wrap: bool) -> Self {
         self.options.wrap = wrap;
+        self
+    }
+
+    /// Sets how the text breaks across lines (word / character / keep-all).
+    pub fn word_break(mut self, word_break: WordBreak) -> Self {
+        self.options = self.options.word_break(word_break);
         self
     }
 

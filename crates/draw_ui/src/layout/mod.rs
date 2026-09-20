@@ -16,7 +16,8 @@ pub mod text;
 pub use text::{
     char_advance, is_wide, layout_text, line_height, longest_unit_width, longest_unit_width_with,
     measure, measure_line, measure_line_with, measure_with, wrap_text, wrap_text_with,
-    ApproxTextMeasurer, FixedWidthTextMeasurer, TextMeasurer, TextOptions,
+    wrap_text_with_break, ApproxTextMeasurer, FixedWidthTextMeasurer, TextMeasurer, TextOptions,
+    WordBreak,
 };
 
 use draw_core::{Edges, Size};

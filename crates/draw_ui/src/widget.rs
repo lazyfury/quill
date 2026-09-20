@@ -119,7 +119,8 @@ impl Widget {
             } => {
                 let line_h = measurer.line_height(*font_size);
                 let natural = measure_with(measurer, text, *font_size);
-                let mut min_width = layout::longest_unit_width_with(measurer, text, *font_size);
+                let mut min_width =
+                    layout::longest_unit_width_with(measurer, text, *font_size, options.word_break);
                 // A wrapping label hard-breaks an overlong word when it paints
                 // (see `layout::text::hard_break`), so its minimum must never
                 // exceed the width the parent offered. Without this cap a giant
@@ -149,8 +150,12 @@ impl Widget {
             Self::Button(button) => {
                 let line_h = measurer.line_height(button.font_size);
                 let natural = measure_with(measurer, &button.text, button.font_size);
-                let mut text_min =
-                    layout::longest_unit_width_with(measurer, &button.text, button.font_size);
+                let mut text_min = layout::longest_unit_width_with(
+                    measurer,
+                    &button.text,
+                    button.font_size,
+                    button.options.word_break,
+                );
                 // Same cap as the label: a wrapping button can hard-break an
                 // overlong token, so it must not report a minimum wider than
                 // the space its parent offered.

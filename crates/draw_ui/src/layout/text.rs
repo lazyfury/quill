@@ -103,11 +103,33 @@ impl TextMeasurer for FixedWidthTextMeasurer {
     }
 }
 
+/// How a run of text is broken across lines.
+///
+/// This mirrors CSS `word-break` / `overflow-wrap` semantics, applied only
+/// while soft wrapping is enabled (`TextOptions::wrap == true`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WordBreak {
+    /// Break between words (whitespace) and between CJK wide characters.
+    /// An overlong single word is still hard-broken character-by-character so
+    /// it never overflows. This is the default.
+    #[default]
+    Word,
+    /// Break anywhere, including inside words: every character is a break
+    /// opportunity (CSS `word-break: break-all`).
+    BreakAll,
+    /// Only break at whitespace (and hard `\n`); CJK wide characters are
+    /// grouped into a word instead of being breakable on every side
+    /// (CSS `word-break: keep-all`).
+    KeepAll,
+}
+
 /// Per-label wrapping / overflow behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextOptions {
     /// Soft-wrap to the available width.
     pub wrap: bool,
+    /// Where a line may break while soft wrapping.
+    pub word_break: WordBreak,
     /// Maximum number of lines (`None` = unlimited).
     pub max_lines: Option<usize>,
     /// Append `…` to the last line when `max_lines` clips it.
@@ -118,6 +140,7 @@ impl Default for TextOptions {
     fn default() -> Self {
         Self {
             wrap: true,
+            word_break: WordBreak::Word,
             max_lines: None,
             ellipsis: false,
         }
@@ -128,6 +151,7 @@ impl TextOptions {
     pub const fn new() -> Self {
         Self {
             wrap: true,
+            word_break: WordBreak::Word,
             max_lines: None,
             ellipsis: false,
         }
@@ -137,6 +161,7 @@ impl TextOptions {
     pub const fn no_wrap() -> Self {
         Self {
             wrap: false,
+            word_break: WordBreak::Word,
             max_lines: None,
             ellipsis: false,
         }
@@ -144,6 +169,11 @@ impl TextOptions {
 
     pub const fn wrap(mut self, wrap: bool) -> Self {
         self.wrap = wrap;
+        self
+    }
+
+    pub const fn word_break(mut self, word_break: WordBreak) -> Self {
+        self.word_break = word_break;
         self
     }
 
@@ -214,17 +244,22 @@ pub fn measure_with(measurer: &dyn TextMeasurer, text: &str, font_size: f32) -> 
 
 /// Width of the widest unbreakable unit in `text` (default measurer).
 pub fn longest_unit_width(text: &str, font_size: f32) -> f32 {
-    longest_unit_width_with(&ApproxTextMeasurer, text, font_size)
+    longest_unit_width_with(&ApproxTextMeasurer, text, font_size, WordBreak::Word)
 }
 
 /// Width of the widest unbreakable unit in `text`.
 ///
 /// This is the narrowest a label can become without hard-breaking a word or
-/// wide character.
-pub fn longest_unit_width_with(measurer: &dyn TextMeasurer, text: &str, font_size: f32) -> f32 {
+/// wide character, given [`WordBreak`].
+pub fn longest_unit_width_with(
+    measurer: &dyn TextMeasurer,
+    text: &str,
+    font_size: f32,
+    word_break: WordBreak,
+) -> f32 {
     let mut max = 0.0f32;
     for line in text.split('\n') {
-        for (token, _) in tokens(line) {
+        for (token, _) in tokens(line, word_break) {
             max = max.max(measurer.measure_line(&token, font_size));
         }
     }
@@ -246,9 +281,24 @@ pub fn wrap_text_with(
     font_size: f32,
     max_width: f32,
 ) -> Vec<String> {
+    wrap_text_with_break(measurer, text, font_size, max_width, WordBreak::Word)
+}
+
+/// Greedy soft wrapping of `text` to `max_width` logical pixels, honoring
+/// [`WordBreak`].
+///
+/// Always returns at least one line. A non-positive `max_width` disables soft
+/// wrapping (explicit `\n` still applies).
+pub fn wrap_text_with_break(
+    measurer: &dyn TextMeasurer,
+    text: &str,
+    font_size: f32,
+    max_width: f32,
+    word_break: WordBreak,
+) -> Vec<String> {
     let mut out = Vec::new();
     for hard in text.split('\n') {
-        wrap_hard_line(measurer, hard, font_size, max_width, &mut out);
+        wrap_hard_line(measurer, hard, font_size, max_width, word_break, &mut out);
     }
     if out.is_empty() {
         out.push(String::new());
@@ -268,7 +318,7 @@ pub fn layout_text(
     options: TextOptions,
 ) -> Vec<String> {
     let mut lines = if options.wrap {
-        wrap_text_with(measurer, text, font_size, max_width)
+        wrap_text_with_break(measurer, text, font_size, max_width, options.word_break)
     } else {
         text.split('\n').map(str::to_string).collect()
     };
@@ -320,13 +370,14 @@ fn wrap_hard_line(
     line: &str,
     font_size: f32,
     max_width: f32,
+    word_break: WordBreak,
     out: &mut Vec<String>,
 ) {
     if max_width <= 0.0 {
         out.push(line.to_string());
         return;
     }
-    let units = tokens(line);
+    let units = tokens(line, word_break);
     if units.is_empty() {
         out.push(String::new());
         return;
@@ -406,7 +457,12 @@ fn hard_break(
 /// consecutive spaces is not preserved (acceptable for UI text in the MVP).
 /// `space_before` is `true` when whitespace separated this unit from the
 /// previous one, so wrapping never inserts a space between CJK characters.
-fn tokens(line: &str) -> Vec<(String, bool)> {
+///
+/// The break granularity depends on [`WordBreak`]:
+/// - [`WordBreak::Word`]: non-wide runs become a word, wide chars break singly.
+/// - [`WordBreak::BreakAll`]: every character is its own unit.
+/// - [`WordBreak::KeepAll`]: wide chars join the surrounding word.
+fn tokens(line: &str, word_break: WordBreak) -> Vec<(String, bool)> {
     let mut tokens = Vec::new();
     let mut word = String::new();
     let mut word_space = false;
@@ -418,7 +474,14 @@ fn tokens(line: &str) -> Vec<(String, bool)> {
                 word_space = false;
             }
             pending_space = true;
-        } else if is_wide(ch) {
+        } else if word_break == WordBreak::BreakAll {
+            if !word.is_empty() {
+                tokens.push((std::mem::take(&mut word), word_space));
+                word_space = false;
+            }
+            tokens.push((ch.to_string(), pending_space));
+            pending_space = false;
+        } else if word_break != WordBreak::KeepAll && is_wide(ch) {
             if !word.is_empty() {
                 tokens.push((std::mem::take(&mut word), word_space));
                 word_space = false;
@@ -537,6 +600,70 @@ mod tests {
         let m = ApproxTextMeasurer;
         let lines = layout_text(&m, "hello world\nagain", 10.0, 20.0, TextOptions::no_wrap());
         assert_eq!(lines, vec!["hello world".to_string(), "again".to_string()]);
+    }
+
+    #[test]
+    fn break_all_breaks_inside_words() {
+        // "hello" is 5 × 0.55×10 = 27.5 wide; at max_width 20 only 3 chars fit
+        // per line, so break-all must split the word instead of emitting it whole.
+        let m = ApproxTextMeasurer;
+        let opts = TextOptions::default().word_break(WordBreak::BreakAll);
+        let lines = layout_text(&m, "hello", 10.0, 20.0, opts);
+        assert!(lines.len() > 1, "break-all should split 'hello', got {lines:?}");
+        assert!(lines.iter().all(|l| m.measure_line(l, 10.0) <= 20.0 + 1e-3));
+    }
+
+    #[test]
+    fn break_all_fills_more_than_word_mode() {
+        // At a width that fits two words in `Word` mode, break-all packs more
+        // characters per line, so it needs no more lines than word mode.
+        let m = ApproxTextMeasurer;
+        let word_lines =
+            layout_text(&m, "ab cd ef", 10.0, 30.0, TextOptions::default());
+        let break_all_lines = layout_text(
+            &m,
+            "ab cd ef",
+            10.0,
+            30.0,
+            TextOptions::default().word_break(WordBreak::BreakAll),
+        );
+        assert!(break_all_lines.len() <= word_lines.len());
+    }
+
+    #[test]
+    fn keep_all_groups_wide_chars_into_a_word() {
+        // `tokens` exposes the exact break-unit granularity per mode. A mixed
+        // run proves keep-all joins CJK into the surrounding word instead of
+        // splitting every wide char.
+        let word_units: Vec<String> =
+            tokens("ab你好cd", WordBreak::Word).into_iter().map(|(t, _)| t).collect();
+        let keep_units: Vec<String> =
+            tokens("ab你好cd", WordBreak::KeepAll).into_iter().map(|(t, _)| t).collect();
+        // Default: "ab", each CJK char, "cd".
+        assert_eq!(
+            word_units,
+            vec!["ab", "你", "好", "cd"].into_iter().map(String::from).collect::<Vec<_>>()
+        );
+        // Keep-all: one uninterrupted word.
+        assert_eq!(keep_units, vec!["ab你好cd".to_string()]);
+    }
+
+    #[test]
+    fn keep_all_still_hard_breaks_an_overlong_word() {
+        // A CJK run wider than the whole line cannot fit on one line; keep-all
+        // must still hard-break it (per character) rather than overflow.
+        let m = ApproxTextMeasurer;
+        let keep_lines = layout_text(
+            &m,
+            "你好世界",
+            10.0,
+            15.0,
+            TextOptions::default().word_break(WordBreak::KeepAll),
+        );
+        assert!(keep_lines.len() > 1);
+        assert!(keep_lines
+            .iter()
+            .all(|l| m.measure_line(l, 10.0) <= 15.0 + 1e-3));
     }
 
     #[test]

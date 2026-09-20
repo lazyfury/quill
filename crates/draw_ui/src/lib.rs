@@ -51,7 +51,7 @@ pub use input::{
 pub use layout::{
     Align, AlignContent, ApproxTextMeasurer, ContentSize, FixedWidthTextMeasurer, FlexDirection,
     FlexStyle, GridPlacement, GridStyle, Justify, LayoutStyle, SizeBasis, TextMeasurer,
-    TextOptions, Track,
+    TextOptions, Track, WordBreak,
 };
 pub use paint::{fill_rounded_rect, fill_rounded_rect_corners, inset, surface, SurfaceStyle};
 pub use widget::{estimate_text_size, BoxLayout, ButtonData, ButtonState, Widget};

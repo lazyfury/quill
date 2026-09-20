@@ -520,6 +520,11 @@ impl Label {
         self
     }
 
+    pub fn word_break(mut self, word_break: draw_ui::WordBreak) -> Self {
+        self.options = self.options.word_break(word_break);
+        self
+    }
+
     pub fn max_lines(mut self, max_lines: usize) -> Self {
         self.options = self.options.max_lines(max_lines);
         self
