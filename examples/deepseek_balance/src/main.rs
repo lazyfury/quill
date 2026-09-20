@@ -22,7 +22,8 @@
 //! ./examples/deepseek_balance/package-macos.sh --open
 //! ```
 //!
-//! 环境变量可覆盖默认值：`DEEPSEEK_API_KEY`、`DEEPSEEK_BALANCE_URL`。
+//! 环境变量：`DEEPSEEK_API_KEY`（未配置时界面提示，刷新时重新读取）、
+//! `DEEPSEEK_BALANCE_URL`。
 
 mod api;
 mod badge;
@@ -57,7 +58,8 @@ deepseek_balance — 查询 DeepSeek 账户余额
   -h, --help           显示本帮助
 
 环境变量:
-  DEEPSEEK_API_KEY       覆盖默认的临时 key
+  DEEPSEEK_API_KEY       API key（不设默认值；未配置时提示，刷新时重新读取，
+                         包括向登录 shell 询问，配置后无需重启）
   DEEPSEEK_BALANCE_URL   覆盖默认的 https://api.deepseek.com/user/balance
 
 用法（macOS 菜单栏）:
@@ -172,7 +174,8 @@ fn parse(args: &[String]) -> Result<Command, String> {
 
 /// The terminal front end: one query, printed as plain text.
 fn run_cli() {
-    match api::fetch(&api::endpoint(), &api::api_key()) {
+    let result = api::resolve_api_key().and_then(|api_key| api::fetch(&api::endpoint(), &api_key));
+    match result {
         Ok(balance) => {
             println!("DeepSeek 余额查询结果");
             println!("更新于 {}", api::timestamp());

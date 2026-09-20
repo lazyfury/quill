@@ -6,10 +6,12 @@
 
 use serde::Deserialize;
 
-/// Temporary key used when `DEEPSEEK_API_KEY` is not set.
-const DEFAULT_API_KEY: &str = "sk-1b0e98ffb7544540ba26854859af2042";
 /// Balance endpoint used when `DEEPSEEK_BALANCE_URL` is not set.
 const DEFAULT_BALANCE_URL: &str = "https://api.deepseek.com/user/balance";
+
+/// The error [`resolve_api_key`] reports when no key is configured anywhere.
+pub const MISSING_KEY_MESSAGE: &str =
+    "未配置 DEEPSEEK_API_KEY 环境变量（写入 ~/.zshrc 后点刷新即可，无需重启）";
 
 /// A balance reply: availability plus one entry per currency.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -62,9 +64,39 @@ pub fn endpoint() -> String {
     std::env::var("DEEPSEEK_BALANCE_URL").unwrap_or_else(|_| DEFAULT_BALANCE_URL.to_string())
 }
 
-/// API key, overridable with `DEEPSEEK_API_KEY`.
-pub fn api_key() -> String {
-    std::env::var("DEEPSEEK_API_KEY").unwrap_or_else(|_| DEFAULT_API_KEY.to_string())
+/// API key from `DEEPSEEK_API_KEY`, `None` when it is unset or blank.
+pub fn api_key() -> Option<String> {
+    non_blank(std::env::var("DEEPSEEK_API_KEY").ok())
+}
+
+/// Re-reads the key from the user's login shell, `None` when it yields nothing.
+///
+/// Two reasons this exists: a packaged `.app` (Finder / `open`) never inherits
+/// shell environment variables, and a running process cannot see changes made
+/// to its environment after it started. Asking `$SHELL -lc` for the variable is
+/// the only way "set the var, then hit refresh" can pick it up without a
+/// restart. Unix only; elsewhere the process env is all there is.
+pub fn api_key_from_shell() -> Option<String> {
+    let shell = std::env::var("SHELL").ok()?;
+    let output = std::process::Command::new(shell)
+        .args(["-lc", "printf %s \"$DEEPSEEK_API_KEY\""])
+        .output()
+        .ok()?;
+    non_blank(Some(String::from_utf8_lossy(&output.stdout).into_owned()))
+}
+
+/// The key to fetch with: process env first, then the login shell — so a
+/// refresh after configuring the variable works without restarting. Without a
+/// key anywhere this is the "未配置" error the UI shows verbatim.
+pub fn resolve_api_key() -> Result<String, String> {
+    api_key()
+        .or_else(api_key_from_shell)
+        .ok_or_else(|| MISSING_KEY_MESSAGE.to_string())
+}
+
+/// Drops `None` and values that are empty or whitespace only.
+fn non_blank(value: Option<String>) -> Option<String> {
+    value.filter(|key| !key.trim().is_empty())
 }
 
 /// Queries the balance endpoint. Blocking; call it off the UI thread.
@@ -196,5 +228,18 @@ mod tests {
             balance_infos: Vec::new(),
         };
         assert_eq!(balance.headline(), "无余额信息");
+    }
+
+    #[test]
+    fn blank_keys_count_as_unconfigured() {
+        assert_eq!(non_blank(None), None);
+        assert_eq!(non_blank(Some(String::new())), None);
+        assert_eq!(non_blank(Some("   ".to_string())), None);
+        assert_eq!(non_blank(Some("sk-test".to_string())), Some("sk-test".into()));
+    }
+
+    #[test]
+    fn the_missing_key_message_names_the_variable() {
+        assert!(MISSING_KEY_MESSAGE.contains("DEEPSEEK_API_KEY"));
     }
 }

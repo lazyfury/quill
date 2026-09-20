@@ -398,8 +398,6 @@ struct App {
     last_frame: Instant,
     /// Wakes the event loop when a worker thread has a result.
     proxy: EventLoopProxy<UserEvent>,
-    endpoint: String,
-    api_key: String,
     /// Frames left before exiting (`--frames`), `None` for a normal session.
     frames_left: Option<u32>,
     /// Exit once the first reply has been applied (`--until-result`).
@@ -479,8 +477,6 @@ impl App {
             },
             last_frame: Instant::now(),
             proxy,
-            endpoint: api::endpoint(),
-            api_key: api::api_key(),
             frames_left: options.frames,
             exit_on_result: options.until_result,
             mode,
@@ -1317,13 +1313,22 @@ impl App {
     }
 
     /// Queries the endpoint on a worker thread and posts the result back.
+    ///
+    /// Both the endpoint and the API key are re-read per request, so a variable
+    /// configured after launch (e.g. written to `~/.zshrc`) is picked up by the
+    /// next refresh instead of requiring a restart. An unconfigured key never
+    /// touches the network: the view gets the "未配置" error instead.
     fn spawn_fetch(&self) {
         let proxy = self.proxy.clone();
-        let endpoint = self.endpoint.clone();
-        let api_key = self.api_key.clone();
+        let endpoint = api::endpoint();
         self.trace(&format!("发起请求 {endpoint}"));
         std::thread::spawn(move || {
-            let result = api::fetch(&endpoint, &api_key);
+            // Resolving here keeps the login-shell probe (a subprocess) off the
+            // UI thread.
+            let result = match api::resolve_api_key() {
+                Ok(api_key) => api::fetch(&endpoint, &api_key),
+                Err(message) => Err(message),
+            };
             // A closed loop (window gone) just drops the result.
             let _ = proxy.send_event(UserEvent::Balance(result));
         });

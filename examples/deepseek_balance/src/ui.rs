@@ -94,7 +94,7 @@ const STATUS_IDLE: &str = "尚未刷新；点“刷新”或按 R";
 const STATUS_BUSY: &str = "刷新中…";
 const STATUS_FAILED: &str = "刷新失败";
 /// Footer hint: the two environment overrides.
-const FOOTER_HINT: &str = "DEEPSEEK_API_KEY / DEEPSEEK_BALANCE_URL 可覆盖默认值";
+const FOOTER_HINT: &str = "未配置 DEEPSEEK_API_KEY 时会提示；每次刷新重新读取环境变量";
 /// Prefix of the countdown line, e.g. `自动刷新 04:32` (see
 /// [`BalanceApp::set_countdown`]).
 const COUNTDOWN_PREFIX: &str = "自动刷新";
