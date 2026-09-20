@@ -19,9 +19,11 @@
 //! 环境变量可覆盖默认值：`DEEPSEEK_API_KEY`、`DEEPSEEK_BALANCE_URL`。
 
 mod api;
+mod badge;
 mod host;
 #[cfg(target_os = "macos")]
 mod menubar;
+mod selfcheck;
 mod ui;
 
 use host::Options;
@@ -35,7 +37,11 @@ deepseek_balance — 查询 DeepSeek 账户余额
 
 选项:
       --window         用普通窗口而不是菜单栏（非 macOS 上只能这样）
+      --badge          额外开一个无边框小窗（贴桌面右下角，多窗口测试）
       --cli            只在终端打印结果，不打开窗口
+      --selfcheck      无头自检：同一套 UI 绘制进 RecordingBackend，
+                       用 draw_profile 体检 + 断言关键内容，失败退出码 1
+      --dump           同 --selfcheck，并打印完整 UI 树与每条绘制命令
       --light          使用浅色主题（默认深色）
       --pixel-font     使用内置点阵字体（默认系统字体；点阵字体不含中文）
       --every <秒>     自动刷新间隔，0 表示不自动刷新（菜单栏默认 300 秒）
@@ -65,6 +71,9 @@ enum Command {
     Run(Options),
     /// 打印文本结果。
     Cli,
+    /// 无头自检：绘制进 RecordingBackend 并检查，不联网、不开窗。
+    /// `dump` 额外打印完整 UI 树与全部绘制命令。
+    SelfCheck { dump: bool },
     /// 打印帮助。
     Help,
 }
@@ -74,6 +83,7 @@ fn main() {
     match parse(&args) {
         Ok(Command::Help) => print!("{HELP}"),
         Ok(Command::Cli) => run_cli(),
+        Ok(Command::SelfCheck { dump }) => std::process::exit(selfcheck::run(dump)),
         Ok(Command::Run(options)) => host::run(options),
         Err(message) => {
             eprintln!("error: {message}\n\n{HELP}");
@@ -92,6 +102,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
         window: false,
         every: None,
         min_gap: None,
+        badge: false,
     };
     let mut cli = false;
 
@@ -101,7 +112,10 @@ fn parse(args: &[String]) -> Result<Command, String> {
         index += 1;
         match arg {
             "--cli" => cli = true,
+            "--selfcheck" => return Ok(Command::SelfCheck { dump: false }),
+            "--dump" => return Ok(Command::SelfCheck { dump: true }),
             "--window" => options.window = true,
+            "--badge" => options.badge = true,
             "--light" => options.light = true,
             "--pixel-font" => options.pixel_font = true,
             "--until-result" => options.until_result = true,
@@ -201,6 +215,22 @@ mod tests {
     }
 
     #[test]
+    fn selfcheck_flag_selects_the_headless_check() {
+        assert!(matches!(
+            parse(&args(&["--selfcheck"])),
+            Ok(Command::SelfCheck { dump: false })
+        ));
+    }
+
+    #[test]
+    fn dump_flag_selects_the_headless_check_with_a_full_dump() {
+        assert!(matches!(
+            parse(&args(&["--dump"])),
+            Ok(Command::SelfCheck { dump: true })
+        ));
+    }
+
+    #[test]
     fn flags_are_collected() {
         match parse(&args(&[
             "--light",
@@ -223,6 +253,18 @@ mod tests {
                 assert_eq!(options.every, Some(30));
                 assert_eq!(options.min_gap, Some(2));
             }
+            _ => panic!("expected a window run"),
+        }
+    }
+
+    #[test]
+    fn badge_flag_is_opt_in() {
+        match parse(&args(&[])) {
+            Ok(Command::Run(options)) => assert!(!options.badge, "no badge unless asked"),
+            _ => panic!("expected a window run"),
+        }
+        match parse(&args(&["--badge"])) {
+            Ok(Command::Run(options)) => assert!(options.badge),
             _ => panic!("expected a window run"),
         }
     }

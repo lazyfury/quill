@@ -52,6 +52,7 @@ use winit::monitor::MonitorHandle;
 use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::api::{self, Balance};
+use crate::badge;
 use crate::ui::{BalanceApp, ARROW_HEIGHT};
 
 #[cfg(target_os = "macos")]
@@ -153,6 +154,10 @@ pub struct Options {
     /// ([`DEFAULT_REFRESH_SECS`] in menu-bar mode, no timer in window mode) and
     /// `Some(0)` turns the timer off.
     pub every: Option<u64>,
+    /// Open the second window (the borderless badge in the desktop's
+    /// bottom-right corner) alongside the mode's own surface. The multi-window
+    /// test: one event loop, two windows, two surfaces, two backends.
+    pub badge: bool,
     /// Fewest seconds between two refresh starts (`--min-gap`). `None` keeps the
     /// view's own default; `Some(0)` turns the throttle off, which is what a
     /// scripted run that wants every request to go out asks for.
@@ -397,8 +402,25 @@ struct App {
     self_check: bool,
     /// Frames presented so far, used to report the first one once.
     frames_drawn: u32,
+    /// The second window (`--badge`), created at startup next to whatever the
+    /// mode itself opens. Its own surface and backend; input events for it are
+    /// routed by `WindowId` and ignored otherwise.
+    badge: Option<Badge>,
+    /// Badge frames presented so far, so the first one can report itself.
+    badge_frames: u32,
+    badge_enabled: bool,
     #[cfg(target_os = "macos")]
     menu: MenuBarState,
+}
+
+/// The borderless badge window of the multi-window test, with everything it
+/// needs to paint: its own surface, backend and surface configuration, exactly
+/// like the main window's set but never shared with it.
+struct Badge {
+    window: Arc<Window>,
+    surface: wgpu::Surface<'static>,
+    backend: WgpuBackend,
+    config: wgpu::SurfaceConfiguration,
 }
 
 impl App {
@@ -451,6 +473,9 @@ impl App {
             mode,
             self_check: options.frames.is_some() || options.until_result,
             frames_drawn: 0,
+            badge: None,
+            badge_frames: 0,
+            badge_enabled: options.badge,
             #[cfg(target_os = "macos")]
             menu: MenuBarState {
                 interval,
@@ -553,7 +578,7 @@ impl App {
             .unwrap_or(capabilities.formats[0]);
 
         let size = window.inner_size();
-        let alpha_mode = surface_alpha_mode(&capabilities.alpha_modes, mode);
+        let alpha_mode = surface_alpha_mode(&capabilities.alpha_modes, mode == Mode::MenuBar);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -568,7 +593,10 @@ impl App {
 
         self.scale_factor = window.scale_factor();
         backend.set_scale_factor(self.scale_factor as f32);
-        backend.set_clear_color(clear_color(mode, self.view.theme().palette.background));
+        backend.set_clear_color(clear_color(
+            mode == Mode::MenuBar,
+            self.view.theme().palette.background,
+        ));
 
         // Measure text with the backend's real font (system font, so CJK works).
         let font_config = FontConfig {
@@ -623,6 +651,208 @@ impl App {
         config.width = width;
         config.height = height;
         surface.configure(backend.device(), config);
+    }
+
+    // -- the badge window (multi-window test) ------------------------------
+
+    /// Creates the second window: a borderless, transparent card that sits in
+    /// the desktop's bottom-right corner, with its own surface and backend.
+    ///
+    /// It shares nothing with the main window's set — that is the point of the
+    /// test. Events reach it through the `WindowId` dispatch in
+    /// [`App::window_event`]; the fetch worker and the view stay untouched.
+    fn init_badge(&mut self, event_loop: &ActiveEventLoop) {
+        if self.badge.is_some() {
+            return;
+        }
+        let attributes = Window::default_attributes()
+            .with_title("DeepSeek 徽章")
+            .with_decorations(false)
+            .with_transparent(true)
+            .with_resizable(false)
+            .with_inner_size(LogicalSize::new(badge::BADGE_WIDTH, badge::BADGE_HEIGHT));
+
+        let window = Arc::new(
+            event_loop
+                .create_window(attributes)
+                .expect("create badge window"),
+        );
+        let surface = self
+            .instance
+            .create_surface(window.clone())
+            .expect("create badge surface");
+
+        let mut backend = WgpuBackend::from_instance(
+            &self.instance,
+            Some(&surface),
+            wgpu::PowerPreference::HighPerformance,
+        )
+        .expect("create badge backend");
+
+        let capabilities = surface.get_capabilities(backend.adapter());
+        let format = capabilities
+            .formats
+            .iter()
+            .copied()
+            .find(|format| !format.is_srgb())
+            .unwrap_or(capabilities.formats[0]);
+
+        let size = window.inner_size();
+        let alpha_mode = surface_alpha_mode(&capabilities.alpha_modes, true);
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: 2,
+            alpha_mode,
+            view_formats: Vec::new(),
+        };
+        surface.configure(backend.device(), &config);
+
+        backend.set_scale_factor(window.scale_factor() as f32);
+        backend.set_clear_color(clear_color(true, self.view.theme().palette.background));
+        let font_config = FontConfig {
+            mode: self.font_mode,
+            device_pixel_rasterization: true,
+        };
+        if let Err(error) = backend.set_font_config(font_config) {
+            eprintln!("badge font setup failed, using fallback: {error}");
+        }
+
+        // Bottom-right corner of the primary monitor, inset by the margin.
+        // Monitor geometry is physical pixels with a top-left origin — the
+        // same space `set_outer_position` takes.
+        let monitor = event_loop
+            .primary_monitor()
+            .or_else(|| event_loop.available_monitors().next());
+        if let Some(monitor) = monitor {
+            let margin = (badge::SCREEN_MARGIN * monitor.scale_factor() as f32).round() as i32;
+            let at = monitor.position();
+            let bounds = monitor.size();
+            let position = PhysicalPosition::new(
+                at.x + bounds.width as i32 - size.width as i32 - margin,
+                at.y + bounds.height as i32 - size.height as i32 - margin,
+            );
+            window.set_outer_position(position);
+            self.trace(&format!(
+                "徽章窗口 {w}×{h} @ ({x}, {y})，显示器 {mp:?} {ms:?}",
+                w = size.width,
+                h = size.height,
+                x = position.x,
+                y = position.y,
+                mp = at,
+                ms = bounds
+            ));
+        }
+
+        window.request_redraw();
+        self.badge = Some(Badge {
+            window,
+            surface,
+            backend,
+            config,
+        });
+    }
+
+    /// Handles an event for the badge window (already matched by `WindowId`).
+    /// Static content, so only the four cases below matter.
+    fn on_badge_event(&mut self, event: WindowEvent) {
+        match event {
+            WindowEvent::RedrawRequested => self.render_badge(),
+            WindowEvent::Resized(size) => self.resize_badge(size.width, size.height),
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Some(badge) = self.badge.as_mut() {
+                    badge.backend.set_scale_factor(scale_factor as f32);
+                    badge.window.request_redraw();
+                }
+            }
+            // Closing the badge closes only the badge; the app keeps running.
+            WindowEvent::CloseRequested => {
+                if let Some(badge) = self.badge.as_ref() {
+                    badge.window.set_visible(false);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Reconfigures the badge's surface after a resize, then repaints.
+    fn resize_badge(&mut self, width: u32, height: u32) {
+        let Some(badge) = self.badge.as_mut() else {
+            return;
+        };
+        if width == 0 || height == 0 {
+            return;
+        }
+        badge.config.width = width;
+        badge.config.height = height;
+        badge
+            .surface
+            .configure(badge.backend.device(), &badge.config);
+        badge.window.request_redraw();
+    }
+
+    /// Runs one badge frame: paint, submit, present. Static content, so the
+    /// frame is identical every time — the loop is still event-driven and the
+    /// badge only redraws when asked.
+    fn render_badge(&mut self) {
+        let palette = self.view.theme().palette;
+        let Some(badge) = self.badge.as_mut() else {
+            return;
+        };
+        let (width, height, format) =
+            (badge.config.width, badge.config.height, badge.config.format);
+        let scale = badge.window.scale_factor() as f32;
+        let logical = Size::new(width as f32 / scale, height as f32 / scale);
+        let viewport = ViewportSize::new(logical);
+
+        let mut ctx = PaintContext::new();
+        badge::paint(&mut ctx, logical.width, logical.height, &palette);
+        let list = ctx.into_draw_list();
+        let commands = list.len();
+
+        let mut reconfigured = false;
+        let surface_texture = loop {
+            match badge.surface.get_current_texture() {
+                Ok(texture) => break texture,
+                Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) if !reconfigured => {
+                    badge
+                        .surface
+                        .configure(badge.backend.device(), &badge.config);
+                    reconfigured = true;
+                }
+                Err(wgpu::SurfaceError::Timeout) => return,
+                Err(error) => {
+                    eprintln!("badge surface error: {error}");
+                    return;
+                }
+            }
+        };
+        let view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        if badge
+            .backend
+            .begin_frame_with_view(view, width, height, format, viewport)
+            .is_ok()
+        {
+            let _ = badge.backend.submit(&list);
+            let _ = badge.backend.end_frame();
+        }
+        surface_texture.present();
+
+        // Report the first badge frame the same way the main window does: the
+        // surface really got a draw list, through its own pipeline.
+        self.badge_frames += 1;
+        if self.badge_frames == 1 {
+            self.trace(&format!(
+                "徽章首帧 {w}×{h} 逻辑像素，{commands} 条绘制命令（独立 surface）",
+                w = logical.width,
+                h = logical.height,
+            ));
+        }
     }
 
     // -- the panel ---------------------------------------------------------
@@ -1174,6 +1404,12 @@ impl ApplicationHandler<UserEvent> for App {
             Mode::MenuBar => self.start_menu_bar(event_loop),
             _ => self.init_window(event_loop, Mode::Window),
         }
+        // The second window comes up next to whatever the mode opened; its
+        // events are routed by `WindowId`, so nothing else has to know it
+        // exists.
+        if self.badge_enabled {
+            self.init_badge(event_loop);
+        }
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -1211,9 +1447,17 @@ impl ApplicationHandler<UserEvent> for App {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
+        // The badge window is a self-contained surface: its events never touch
+        // the main window's view, the worker or the menu bar.
+        if self.badge.as_ref().map(|badge| badge.window.id()) == Some(window_id) {
+            self.on_badge_event(event);
+            return;
+        }
+        let _ = window_id;
+
         // A redraw *is* the render itself: run it, then honour `--frames`.
         if matches!(event, WindowEvent::RedrawRequested) {
             if !self.panel_open() {
@@ -1414,13 +1658,13 @@ fn panel_anchor(
 /// The ordinary window keeps the first (opaque) entry.
 fn surface_alpha_mode(
     available: &[wgpu::CompositeAlphaMode],
-    mode: Mode,
+    transparent: bool,
 ) -> wgpu::CompositeAlphaMode {
     let opaque = available
         .first()
         .copied()
         .unwrap_or(wgpu::CompositeAlphaMode::Opaque);
-    if mode != Mode::MenuBar {
+    if !transparent {
         return opaque;
     }
     available
@@ -1432,15 +1676,16 @@ fn surface_alpha_mode(
 
 /// The colour the backend clears to, which is the panel's own backdrop token.
 ///
-/// Opaque in a normal window; in the panel it keeps the colour but drops to
-/// zero alpha, so everything outside the view's rounded fill — the four
-/// corners — is genuinely transparent. Matching the view's token means the
+/// Opaque in a normal window; in a transparent window it keeps the colour but
+/// drops to zero alpha, so everything outside the view's rounded fill — the
+/// four corners — is genuinely transparent. Matching the view's token means the
 /// rounded fill and the clear colour around it are the same colour, which is
 /// what keeps the ordinary window looking exactly as it did.
-fn clear_color(mode: Mode, background: draw_core::Color) -> draw_core::Color {
-    match mode {
-        Mode::MenuBar => draw_core::Color::new(background.r, background.g, background.b, 0.0),
-        Mode::Window => background,
+fn clear_color(transparent: bool, background: draw_core::Color) -> draw_core::Color {
+    if transparent {
+        draw_core::Color::new(background.r, background.g, background.b, 0.0)
+    } else {
+        background
     }
 }
 
@@ -1830,31 +2075,29 @@ mod tests {
         use wgpu::CompositeAlphaMode::{Opaque, PostMultiplied};
 
         assert_eq!(
-            surface_alpha_mode(&[Opaque, PostMultiplied], Mode::MenuBar),
+            surface_alpha_mode(&[Opaque, PostMultiplied], true),
             PostMultiplied
         );
-        assert_eq!(
-            surface_alpha_mode(&[Opaque, PostMultiplied], Mode::Window),
-            Opaque
-        );
+        assert_eq!(surface_alpha_mode(&[Opaque, PostMultiplied], false), Opaque);
         // A surface offering nothing else still has to be configured with
         // something, even if the corners then cannot be see-through.
-        assert_eq!(surface_alpha_mode(&[Opaque], Mode::MenuBar), Opaque);
-        assert_eq!(surface_alpha_mode(&[], Mode::MenuBar), Opaque);
+        assert_eq!(surface_alpha_mode(&[Opaque], true), Opaque);
+        assert_eq!(surface_alpha_mode(&[], true), Opaque);
     }
 
     /// The clear colour shares the view's backdrop token so the rounded fill
-    /// and the pixels around it are the same colour — and only the panel drops
-    /// the alpha, which is what lets the corners see through to the desktop.
+    /// and the pixels around it are the same colour — and only a transparent
+    /// window (the panel, the badge) drops the alpha, which is what lets the
+    /// corners see through to the desktop.
     #[test]
-    fn only_the_panel_clears_to_a_transparent_backdrop() {
+    fn only_a_transparent_window_clears_to_a_transparent_backdrop() {
         let background = draw_core::Color::new(0.039, 0.039, 0.039, 1.0);
 
-        let panel = clear_color(Mode::MenuBar, background);
+        let panel = clear_color(true, background);
         assert_eq!((panel.r, panel.g, panel.b), (0.039, 0.039, 0.039));
         assert_eq!(panel.a, 0.0, "the corners must be see-through");
 
-        let window = clear_color(Mode::Window, background);
+        let window = clear_color(false, background);
         assert_eq!(window, background, "an ordinary window stays opaque");
     }
 }

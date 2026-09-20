@@ -564,10 +564,15 @@ impl BalanceApp {
         draw_ui::route_input(&mut self.tree, event)
     }
 
-    /// Controls in the view.
-    #[cfg(test)]
+    /// Controls in the view. The self-check feeds this into the frame
+    /// counters, so it is a plain read-only accessor, not test-only.
     pub fn control_count(&self) -> usize {
         draw_ui::control_count(&self.tree)
+    }
+
+    /// Read-only view of the scene tree, for the self-check's dump.
+    pub fn tree(&self) -> &draw_scene::SceneTree {
+        &self.tree
     }
 
     /// Cursor the host should show for the current pointer position.
@@ -799,7 +804,7 @@ fn header(theme: Theme, endpoint: &str, refs: &Refs, feed: &Feed) -> Row {
     let title = Column::new()
         .gap(space::XXS)
         .grow(1.0)
-        .child(Text::title(TITLE, theme))
+        .child(Text::title(TITLE, theme).max_lines(1).ellipsis(true))
         .child(
             Text::caption(endpoint, theme)
                 .tone(Tone::Subtle)
