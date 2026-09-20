@@ -29,9 +29,11 @@ use crate::api::Balance;
 
 /// 徽章窗口的逻辑尺寸。
 pub const BADGE_WIDTH: f32 = 180.0;
-/// 高度按内容给足：上下内边距 32 + 标题行 27.5 + 行距 2 + 余额行 21.2 ≈ 83，
-/// 再留几 pt 余量，等真实系统字体的行高落在同一量级（窗口无边框，超出即被裁掉）。
-pub const BADGE_HEIGHT: f32 = 86.0;
+/// 贴桌面用的**紧凑**高度：内容（内边距 32 + 标题 27.5 + 行距 2 + 余额 21.2 ≈ 83）
+/// 其实比它高，底部的内边距因此被吃掉 —— 但两行文字本身仍在窗内，不会被裁。
+/// 「不被裁」由 `the_text_stays_inside_the_window` 守着；想要内边距完整，把高度
+/// 提到 83 以上即可（窗口无边框，超出即被裁掉，没有滚动可言）。
+pub const BADGE_HEIGHT: f32 = 72.0;
 
 /// 内容距窗口边缘的内边距。
 pub const CONTENT_PADDING: f32 = space::LG;
@@ -258,29 +260,49 @@ mod tests {
         assert_eq!(lines[0].3, TextAlign::Left);
     }
 
-    /// The content has to fit the fixed window: the badge is borderless, so
-    /// anything that overflows is simply cut off. Guards the sizes above against
-    /// a theme or type-scale change.
+    /// The window is borderless and deliberately tight, so the one thing that
+    /// must hold is that nothing is cut off: every line's laid-out box ends
+    /// inside the surface. The *bottom* padding is what gives way — the content
+    /// is taller than `BADGE_HEIGHT - 2 * CONTENT_PADDING` — so this asserts the
+    /// top inset and the window edges, not symmetric padding. Guards the sizes
+    /// above against a type-scale change.
     #[test]
-    fn the_content_fits_the_window() {
-        let commands = frame(Theme::dark());
-        let baselines: Vec<f32> = commands
-            .iter()
-            .filter_map(|command| match command {
-                DrawCommand::DrawText { position, .. } => Some(position.y),
-                _ => None,
-            })
-            .collect();
-        let first = baselines.first().copied().expect("two lines were painted");
-        let last = baselines.last().copied().expect("two lines were painted");
+    fn the_text_stays_inside_the_window() {
+        let mut app = BadgeApp::new(Theme::dark());
+        app.layout(ViewportSize::new(Size::new(BADGE_WIDTH, BADGE_HEIGHT)));
+        let tree = app.tree();
+
+        let mut boxes = Vec::new();
+        for id in tree.iter_visible() {
+            if matches!(
+                draw_ui::widget(tree, id),
+                Some(draw_ui::Widget::Label { .. })
+            ) {
+                boxes.push(
+                    draw_ui::control(tree, id)
+                        .expect("a label has a control")
+                        .rect,
+                );
+            }
+        }
+        assert_eq!(boxes.len(), 2, "one box per line");
+
+        let first = boxes[0];
         assert!(
-            first > CONTENT_PADDING,
-            "the first baseline {first} must clear the top padding"
+            first.top() >= CONTENT_PADDING,
+            "the title must clear the top padding: {first:?}"
         );
-        assert!(
-            last < BADGE_HEIGHT - CONTENT_PADDING,
-            "the last baseline {last} must clear the bottom padding"
-        );
+        assert!(first.top() < boxes[1].top(), "the title sits above");
+        for rect in boxes {
+            assert!(
+                rect.top() >= 0.0 && rect.bottom() <= BADGE_HEIGHT,
+                "a line is cut off by the {BADGE_HEIGHT}pt window: {rect:?}"
+            );
+            assert!(
+                rect.left() >= 0.0 && rect.right() <= BADGE_WIDTH,
+                "a line runs past the {BADGE_WIDTH}pt width: {rect:?}"
+            );
+        }
     }
 
     /// The balance line answers to its ref: a new result is one `set_text` away,
