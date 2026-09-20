@@ -16,6 +16,12 @@
 //! cargo run --manifest-path examples/deepseek_balance/Cargo.toml -- --cli   # 文本
 //! ```
 //!
+//! 打包成 macOS 应用（`dist/DeepSeek Balance.app`，由 `package-macos.sh` 组装）：
+//!
+//! ```bash
+//! ./examples/deepseek_balance/package-macos.sh --open
+//! ```
+//!
 //! 环境变量可覆盖默认值：`DEEPSEEK_API_KEY`、`DEEPSEEK_BALANCE_URL`。
 
 mod api;
