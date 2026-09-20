@@ -1,0 +1,37 @@
+[package]
+name = "deepseek_balance"
+version = "0.1.0"
+edition = "2021"
+# `winit` / `wgpu` (pulled in by `draw_backend_wgpu`) need newer Rust than the
+# workspace default, exactly like `examples/wgpu_demo`.
+rust-version = "1.76"
+publish = false
+
+[[bin]]
+name = "deepseek_balance"
+path = "src/main.rs"
+
+[dependencies]
+ureq = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The window UI is built with the workspace's own layers (see AGENTS.md).
+draw_core = { path = "../../crates/draw_core" }
+draw_render = { path = "../../crates/draw_render" }
+draw_scene = { path = "../../crates/draw_scene" }
+draw_theme = { path = "../../crates/draw_theme" }
+draw_ui = { path = "../../crates/draw_ui" }
+draw_components = { path = "../../crates/draw_components" }
+draw_backend_wgpu = { path = "../../crates/draw_backend_wgpu" }
+winit = "0.30"
+
+# `winit` has no tray / status-bar API (its scope is windows + the event loop),
+# so the menu-bar icon comes from `tray-icon`, which wraps `NSStatusBar` /
+# `NSStatusItem` on macOS. It also re-exports `muda` for the dropdown menu.
+[target.'cfg(target_os = "macos")'.dependencies]
+tray-icon = "0.24"
+
+# 独立的小工具：不加入主 workspace，避免影响 cargo check --workspace 关卡。
+# 它只以 path 依赖引用工作区的 crate，工作区本身看不到这个包。
+[workspace]

@@ -56,6 +56,8 @@ Three independent renderers consume the same `DrawList`:
 | `examples/demo_app` | Shared three-column, macOS-style notes app (backend-neutral `DemoApp`) |
 | `examples/web_demo` | `demo_app` on the Canvas 2D backend (`draw_wasm`) |
 | `examples/wgpu_demo` | `demo_app` on a native `wgpu` surface + component/perf debug overlays |
+| `examples/multi_tree` | Headless: repeated `into_tree()` calls yield independent trees (no shared ids/state) |
+| `examples/deepseek_balance` | Standalone macOS menu-bar tool: DeepSeek balance panel built from `draw_theme`/`draw_components` on a transparent `wgpu` surface |
 
 ## Build & test
 

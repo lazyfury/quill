@@ -63,8 +63,14 @@ draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui, dra
 demo_app      -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
                  draw_theme   (no backend)
 web_demo      -> draw_core, draw_scene, demo_app, draw_wasm
+multi_tree    -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
+                 draw_theme, draw_backend_recording  (headless, no window host)
 wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, demo_app,
                  draw_backend_wgpu, draw_profile, draw_debug_ui, winit
+deepseek_balance -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
+                 draw_components, draw_backend_wgpu, winit, ureq
+                 (standalone tool: own workspace, NOT a workspace member,
+                  so it stays out of `cargo check --workspace`)
 ```
 
 Planned (Stage 25, see `docs/godot-migration.md`):
@@ -84,8 +90,12 @@ scene. This does not weaken backend replaceability.
 
 Browser APIs only in `draw_backend_canvas`, `draw_wasm`, and the WASM example
 (`examples/web_demo`).
-`winit` only in `examples/wgpu_demo`. `wgpu` only in `draw_backend_wgpu` (plus its
-tests/bench) and `examples/wgpu_demo`. Font parsing (`ab_glyph`), text shaping
+`winit` only in the window hosts: `examples/wgpu_demo` and the standalone,
+non-member `examples/deepseek_balance` tool (its UI is built from
+`draw_theme` / `draw_components` / `draw_ui`; the network call runs on a worker
+thread and comes back through a winit `EventLoopProxy`). `wgpu` only in
+`draw_backend_wgpu` (plus its tests/bench) and those window hosts. Font parsing
+(`ab_glyph`), text shaping
 (`rustybuzz`, `unicode-bidi`) and system-font discovery live only in
 `draw_backend_wgpu`; the core stays text-free.
 
