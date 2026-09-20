@@ -89,20 +89,31 @@ pub fn fetch(endpoint: &str, api_key: &str) -> Result<Balance, String> {
     }
 }
 
-/// `HH:MM:SS UTC` timestamp for the "refreshed at" line.
+/// Shanghai keeps UTC+8 all year (no DST since 1991), so a fixed offset is exact
+/// and the tool needs no timezone database.
+pub const SHANGHAI_OFFSET_SECONDS: i64 = 8 * 3_600;
+
+/// `HH:MM:SS UTC+8` wall-clock stamp for the "refreshed at" line.
 ///
-/// Pure `std`: the tool has no date crate, and a wall-clock stamp is all the UI
-/// needs.
+/// Pure `std`: the tool has no date crate, and a fixed offset is enough (see
+/// [`SHANGHAI_OFFSET_SECONDS`]).
 pub fn timestamp() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
-        .unwrap_or(0);
-    let seconds_of_day = seconds % 86_400;
+    timestamp_at(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs() as i64)
+            .unwrap_or(0),
+    )
+}
+
+/// [`timestamp`] for a given epoch-second value, so the day boundaries stay
+/// testable without a clock.
+pub fn timestamp_at(epoch_seconds: i64) -> String {
+    let seconds_of_day = (epoch_seconds + SHANGHAI_OFFSET_SECONDS).rem_euclid(86_400);
     format!(
-        "{:02}:{:02}:{:02} UTC",
-        seconds_of_day / 3600,
-        (seconds_of_day % 3600) / 60,
+        "{:02}:{:02}:{:02} UTC+8",
+        seconds_of_day / 3_600,
+        (seconds_of_day % 3_600) / 60,
         seconds_of_day % 60
     )
 }
@@ -144,8 +155,25 @@ mod tests {
     #[test]
     fn timestamp_is_a_clock_stamp() {
         let stamp = timestamp();
-        assert_eq!(stamp.len(), "00:00:00 UTC".len(), "{stamp}");
-        assert!(stamp.ends_with(" UTC"), "{stamp}");
+        assert_eq!(stamp.len(), "00:00:00 UTC+8".len(), "{stamp}");
+        assert!(stamp.ends_with(" UTC+8"), "{stamp}");
+    }
+
+    #[test]
+    fn the_stamp_is_eight_hours_ahead_of_utc() {
+        // Epoch 0 is 1970-01-01T00:00:00Z -> 08:00:00 in Shanghai.
+        assert_eq!(timestamp_at(0), "08:00:00 UTC+8");
+        assert_eq!(timestamp_at(3_600), "09:00:00 UTC+8");
+    }
+
+    #[test]
+    fn the_stamp_wraps_at_shanghai_midnight() {
+        // 16:00:00 UTC is exactly midnight in Shanghai.
+        assert_eq!(timestamp_at(16 * 3_600), "00:00:00 UTC+8");
+        // 23:59:59 UTC has already rolled over to the next Shanghai day.
+        assert_eq!(timestamp_at(86_400 - 1), "07:59:59 UTC+8");
+        // Pre-epoch values stay inside the day instead of going negative.
+        assert_eq!(timestamp_at(-3_600), "07:00:00 UTC+8");
     }
 
     #[test]

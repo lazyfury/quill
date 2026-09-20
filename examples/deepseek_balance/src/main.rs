@@ -143,6 +143,7 @@ fn run_cli() {
     match api::fetch(&api::endpoint(), &api::api_key()) {
         Ok(balance) => {
             println!("DeepSeek 余额查询结果");
+            println!("更新于 {}", api::timestamp());
             println!("is_available: {}", balance.is_available);
             for info in &balance.balance_infos {
                 println!("currency: {}", info.currency);

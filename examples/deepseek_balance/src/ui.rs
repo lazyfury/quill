@@ -778,7 +778,10 @@ mod tests {
         assert_eq!(app.card_visible(1), Some(true));
         assert_eq!(app.error_text(), Some(""));
         assert!(!app.is_loading());
-        assert!(app.status_text().expect("status").starts_with("更新于 "));
+        let status = app.status_text().expect("status");
+        assert!(status.starts_with("更新于 "), "{status}");
+        // The stamp is wall-clock Shanghai time, not UTC.
+        assert!(status.contains(" UTC+8 · "), "{status}");
         assert_eq!(app.last_balance(), Some(&sample()));
     }
 
