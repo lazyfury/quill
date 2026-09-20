@@ -129,9 +129,44 @@ pub fn fetch(endpoint: &str, api_key: &str) -> Result<Balance, String> {
         }
         Err(ureq::Error::Status(code, response)) => {
             let body = response.into_string().unwrap_or_default();
-            Err(format!("HTTP {code}: {}", body.trim()))
+            Err(format!("HTTP {code}: {}", error_detail(&body)))
         }
         Err(error) => Err(format!("请求失败: {error}")),
+    }
+}
+
+/// Longest error detail shown verbatim; longer bodies are cut with `…` so one
+/// pathological reply cannot flood the error line (and, before the layout cap,
+/// stretch the panel to the width of the widest unbreakable token).
+const MAX_ERROR_DETAIL_CHARS: usize = 160;
+
+/// One line of error detail from a response body.
+///
+/// An API failure (wrong key, no quota) comes back as a JSON object whose
+/// `error.message` is the human-readable reason; showing the body verbatim
+/// puts a dense JSON line on screen. Anything else is shown trimmed. Either
+/// way the result is capped to [`MAX_ERROR_DETAIL_CHARS`].
+fn error_detail(body: &str) -> String {
+    let detail = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")?
+                .get("message")?
+                .as_str()
+                .map(str::trim)
+                .filter(|message| !message.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| body.trim().to_string());
+    truncate_chars(&detail, MAX_ERROR_DETAIL_CHARS)
+}
+
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        format!("{}…", text.chars().take(max).collect::<String>())
     }
 }
 
@@ -259,5 +294,37 @@ mod tests {
     #[test]
     fn the_missing_key_message_names_the_variable() {
         assert!(MISSING_KEY_MESSAGE.contains("DEEPSEEK_API_KEY"));
+    }
+
+    /// A wrong key returns `{"error":{"message":...}}`; the user sees the
+    /// reason, not the JSON envelope.
+    #[test]
+    fn an_api_error_body_shows_its_message_not_the_json() {
+        let body = r#"{"error":{"message":"Authentication Fails (no such user)","type":"authentication_error","code":"invalid_request_error"}}"#;
+        assert_eq!(error_detail(body), "Authentication Fails (no such user)");
+    }
+
+    #[test]
+    fn a_non_json_error_body_shows_itself_trimmed() {
+        assert_eq!(error_detail("  gateway timeout  "), "gateway timeout");
+    }
+
+    /// JSON without an `error.message` (or with a blank one) falls back to the
+    /// body instead of showing nothing.
+    #[test]
+    fn json_without_an_error_message_falls_back_to_the_body() {
+        assert_eq!(error_detail(r#"{"ok":false}"#), r#"{"ok":false}"#);
+        assert_eq!(
+            error_detail(r#"{"error":{"message":"   "}}"#),
+            r#"{"error":{"message":"   "}}"#
+        );
+    }
+
+    #[test]
+    fn an_overlong_detail_is_truncated() {
+        let body = "x".repeat(500);
+        let detail = error_detail(&body);
+        assert_eq!(detail.chars().count(), MAX_ERROR_DETAIL_CHARS + 1);
+        assert!(detail.ends_with('…'), "{detail}");
     }
 }

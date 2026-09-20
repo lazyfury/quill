@@ -273,6 +273,20 @@ backward-compatible addition and record it here.
   (`draw_components::set_on_scroll` / `Component::on_scroll`, the wheel counterpart of
   `on_click`/`on_drag`), returning `Handled` only when something took it.
   Additive: no `Widget` variant added, existing `ControlData` fields unchanged.
+- **Wrapping text min-width capped by the offered width** (driven by
+  `examples/deepseek_balance`): `Widget::Label`/`Widget::Button` reported their
+  min-content width as the widest *unbreakable unit* (`longest_unit_width`).
+  The paint pass already hard-breaks an overlong word (`layout::text`), but the
+  measure pass did not know that, so one giant token — the one-line JSON body
+  of an API error reply, a long URL — reported a min wider than the viewport.
+  Flex cannot shrink below a child's min, so the whole column stretched and
+  siblings (the header row's refresh button) were pushed off the surface;
+  `content_size` reported the same inflated min and a fit-to-content window
+  grew with it. A wrapping label now caps its min (and thus preferred) width at
+  the width the parent offered, matching what paint can actually do; labels
+  with `wrap: false` keep reporting the true unbreakable width. Behavior
+  changes only in the pathological case; no `Widget`/`ControlData` shape
+  changed.
 
 ## Deferred
 

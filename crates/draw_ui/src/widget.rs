@@ -119,10 +119,17 @@ impl Widget {
             } => {
                 let line_h = measurer.line_height(*font_size);
                 let natural = measure_with(measurer, text, *font_size);
-                let min = Size::new(
-                    layout::longest_unit_width_with(measurer, text, *font_size),
-                    line_h,
-                );
+                let mut min_width = layout::longest_unit_width_with(measurer, text, *font_size);
+                // A wrapping label hard-breaks an overlong word when it paints
+                // (see `layout::text::hard_break`), so its minimum must never
+                // exceed the width the parent offered. Without this cap a giant
+                // unbreakable token — one line of JSON from an error reply, a
+                // long URL — pushes the whole flex chain wider than the
+                // viewport and shoves siblings off the surface.
+                if options.wrap && available.width > 0.0 {
+                    min_width = min_width.min(available.width);
+                }
+                let min = Size::new(min_width, line_h);
 
                 let preferred = if options.wrap
                     && available.width > 0.0
@@ -142,8 +149,14 @@ impl Widget {
             Self::Button(button) => {
                 let line_h = measurer.line_height(button.font_size);
                 let natural = measure_with(measurer, &button.text, button.font_size);
-                let text_min =
+                let mut text_min =
                     layout::longest_unit_width_with(measurer, &button.text, button.font_size);
+                // Same cap as the label: a wrapping button can hard-break an
+                // overlong token, so it must not report a minimum wider than
+                // the space its parent offered.
+                if button.options.wrap && available.width > 0.0 {
+                    text_min = text_min.min((available.width - 32.0).max(0.0));
+                }
                 let min = Size::new(text_min + 32.0, line_h.max(36.0) + 12.0);
 
                 let preferred = if button.options.wrap
@@ -259,6 +272,46 @@ mod tests {
         let capped = label.measure(Size::new(80.0, 1000.0)).preferred;
         let full = label.measure(Size::ZERO).preferred;
         assert!((capped.height - full.height).abs() < 1e-3);
+    }
+
+    /// One line of JSON (or any giant unbreakable ASCII token) must not report
+    /// a minimum wider than the space offered: the paint pass hard-breaks such
+    /// a word, so the layout may shrink the label to fit and the flex chain
+    /// must not stretch to the token's width.
+    #[test]
+    fn an_unbreakable_token_does_not_widen_the_minimum() {
+        let token = "x".repeat(2_000);
+        let widget = label(&token, 14.0);
+        let available = Size::new(268.0, 600.0);
+        let measured = widget.measure(available);
+        assert!(
+            measured.min.width <= available.width + 1e-3,
+            "min {} exceeds the offered width",
+            measured.min.width
+        );
+        assert!(
+            measured.preferred.width <= available.width + 1e-3,
+            "preferred {} exceeds the offered width",
+            measured.preferred.width
+        );
+
+        // Without wrap the natural width is still the truth: nothing can break
+        // the token, so the min keeps reporting it (the caller clips).
+        let mut no_wrap = label(&token, 14.0);
+        if let Widget::Label { options, .. } = &mut no_wrap {
+            *options = TextOptions::no_wrap();
+        }
+        assert!(no_wrap.measure(available).min.width > available.width);
+    }
+
+    #[test]
+    fn a_wrapping_button_with_a_long_token_stays_within_the_offer() {
+        let mut button = ButtonData::new("x".repeat(2_000));
+        button.options = TextOptions::default();
+        let available = Size::new(268.0, 600.0);
+        let measured = Widget::Button(button).measure(available);
+        assert!(measured.min.width <= available.width + 1e-3);
+        assert!(measured.preferred.width <= available.width + 1e-3);
     }
 
     #[test]

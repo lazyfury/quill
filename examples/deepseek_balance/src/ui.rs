@@ -290,6 +290,8 @@ impl BalanceApp {
                 Text::small("", theme)
                     .color(theme.palette.error)
                     .max_lines(2)
+                    .wrap(true)
+                    .ellipsis(true)
                     .ref_(&refs.error),
             )
             .child(Divider::horizontal(theme).ref_(&refs.divider))
