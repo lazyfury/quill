@@ -159,6 +159,47 @@ impl Ui {
 
     // -- measure -----------------------------------------------------------
 
+    /// The size the UI's content wants, given the space a parent can offer.
+    ///
+    /// [`Ui::layout`] pins every root to the viewport — a view always fills the
+    /// surface it was handed — so the resolved rectangles never say how much
+    /// room the content *wanted*. This runs the measure pass over the roots and
+    /// reports it, which is what a host needs before it can size a window to
+    /// its content (`Window::request_inner_size`).
+    ///
+    /// The result includes each root's own padding, and it measures against the
+    /// tree's current [`TextMeasurer`], i.e. the same one that will paint the
+    /// frame — a window sized from a different font than it draws with would
+    /// clip. Measurement caches by `(node, available)`, and [`Ui::layout`]
+    /// clears that cache, so asking here cannot disturb a later frame.
+    pub fn content_size(&self, tree: &SceneTree, available: Size) -> ContentSize {
+        let Some(state) = root_state(tree) else {
+            return ContentSize::ZERO;
+        };
+        let roots: Vec<NodeId> = tree
+            .iter()
+            .filter(|id| {
+                control_of(tree, *id).is_some()
+                    && control_visible(tree, *id)
+                    && tree
+                        .parent(*id)
+                        .map_or(true, |parent| control_of(tree, parent).is_none())
+            })
+            .collect();
+        let mut cache = state.layout.borrow_mut();
+        let mut result = ContentSize::ZERO;
+        for root in roots {
+            let measured = self.measure_node(tree, &mut cache, root, available);
+            // Roots sit side by side, so what the UI wants is the union of what
+            // they want.
+            result = ContentSize {
+                min: result.min.max(measured.min),
+                preferred: result.preferred.max(measured.preferred),
+            };
+        }
+        result
+    }
+
     /// Intrinsic size of a control given the space its parent can offer.
     fn measure_node(
         &self,
@@ -988,6 +1029,7 @@ mod tests {
     use crate::control::Control;
     use crate::widget::Widget;
     use draw_core::{Color, Edges};
+    use std::rc::Rc;
 
     fn add(tree: &mut SceneTree, parent: NodeId, data: ControlData, widget: Widget) -> NodeId {
         let id = tree.add_control(parent, "test");
@@ -1000,6 +1042,65 @@ mod tests {
             color,
             border: None,
         }
+    }
+
+    /// `layout` pins the root to the viewport — a view always fills the window
+    /// it was handed — so nothing in the resolved rectangles says how much room
+    /// the content *wanted*. `content_size` answers exactly that, out of the
+    /// same measure pass, which is what lets a host size a window to its
+    /// content (`Window::request_inner_size`).
+    #[test]
+    fn content_size_reports_what_the_content_wants_not_the_viewport() {
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        // Measuring reads the tree's UI state and its text measurer, both of
+        // which a `draw_ui`-built view already has. A bare `SceneTree` has to
+        // be told — exactly what a host does when it installs its font, and it
+        // does so *before* the first layout.
+        crate::set_text_measurer(&mut tree, Rc::new(crate::ApproxTextMeasurer::default()));
+        // The shape `draw_components` views are built in: the root is arranged
+        // against the viewport and the column below it is the content.
+        let root = add(
+            &mut tree,
+            tree_root,
+            ControlData::fill_parent(),
+            Widget::Flex(FlexStyle::column()),
+        );
+        let style = FlexStyle {
+            padding: Edges::new(10.0, 20.0, 10.0, 20.0),
+            gap: 5.0,
+            ..FlexStyle::column()
+        };
+        let content = add(
+            &mut tree,
+            root,
+            ControlData::fill_parent(),
+            Widget::Flex(style),
+        );
+        for basis in [40.0, 60.0] {
+            let mut data = ControlData::default();
+            data.layout.basis = SizeBasis::Px(basis);
+            add(&mut tree, content, data, panel(Color::RED));
+        }
+
+        // Two blocks of 40 and 60, one gap between them, and the content
+        // column's own 20+20 of padding: that column wants 145. The root adds
+        // its own default 16+16 on top — padding the content cannot see and a
+        // host could not recover from the resolved rectangles.
+        let wanted = crate::content_size(&tree, Size::new(300.0, 1_000.0));
+        assert_eq!(wanted.preferred.height, 177.0, "145 of content, 32 of root");
+        assert_eq!(wanted.min.height, 77.0, "the padding and gap cannot shrink");
+        assert_eq!(wanted.preferred.width, 52.0, "nothing but padding is wide");
+
+        // The layout itself is unaffected: 145 points of content in an 800-tall
+        // viewport is still an 800-tall root, which is the whole reason a host
+        // cannot read the content's size off the tree.
+        let viewport = ViewportSize::new(Size::new(300.0, 800.0));
+        crate::layout(&mut tree, viewport);
+        assert_eq!(
+            crate::control(&tree, root).unwrap().rect,
+            viewport.logical_rect()
+        );
     }
 
     #[test]

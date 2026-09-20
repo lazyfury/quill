@@ -244,6 +244,18 @@ backward-compatible addition and record it here.
   `ResizeHandle::target` changed from an eager `NodeId` to a deferred `NodeRef`, so
   a divider can reference its sibling pane before mount (order-independent); only
   the demo called `.target`.
+- **`draw_ui::content_size`** (driven by `examples/deepseek_balance`):
+  `Ui::layout` pins every UI root to the viewport, so a view always fills the
+  surface it is handed and no resolved rectangle says how much room the content
+  *wanted*. A host that sizes its window to its content — the menu-bar panel in
+  `examples/deepseek_balance`, via `Window::request_inner_size` — needs exactly
+  that, and it has to come from the same `TextMeasurer` that will paint the frame
+  (sizing against one font and drawing with another is how text gets clipped).
+  `content_size(tree, available)` exposes the measure pass on its own: no
+  painting, no backend, no window, and the result includes each root's own
+  padding. Additive — no `Widget`/`ControlData` shape changed; the measurement
+  it caches is cleared by the next `layout`. It reads the tree's UI state, so it
+  is for trees built through `draw_ui` (a built view already has that state).
 
 ## Deferred
 

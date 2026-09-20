@@ -58,7 +58,7 @@ pub use widget::{estimate_text_size, BoxLayout, ButtonData, ButtonState, Widget}
 
 use std::rc::Rc;
 
-use draw_core::{NodeId, ViewportSize};
+use draw_core::{NodeId, Size, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
 
@@ -146,6 +146,26 @@ pub fn control_count(tree: &SceneTree) -> usize {
 /// Resolves every control's absolute rectangle against `viewport`.
 pub fn layout(tree: &mut SceneTree, viewport: ViewportSize) {
     Ui.layout(tree, viewport)
+}
+
+/// The size the UI's content wants, given the space a parent can offer.
+///
+/// [`layout`] pins every UI root to the viewport, so a view always fills the
+/// surface it was handed and nothing in the resolved rectangles says how much
+/// room the content *wanted*. A host that sizes its window to its content — a
+/// menu-bar panel, a popover — needs exactly that number, and it has to come
+/// from the same [`TextMeasurer`] that will paint the frame.
+///
+/// Measurement is the first of layout's two passes and is pure: no painting,
+/// no backend, no window. The result includes each root's own padding, so
+/// offering `Size::new(width, f32::INFINITY)` reads as "how tall do you need to
+/// be at this width". The measurement is cached per (node, available) pair, and
+/// [`layout`] clears that cache, so asking does not disturb a later frame.
+///
+/// **Note** this is a non-breaking addition to `draw_ui` made for the host in
+/// `examples/deepseek_balance`; see `docs/design-system.md`.
+pub fn content_size(tree: &SceneTree, available: Size) -> ContentSize {
+    Ui.content_size(tree, available)
 }
 
 /// Emits control visuals into `ctx` in draw order.
