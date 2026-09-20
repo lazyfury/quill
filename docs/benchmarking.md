@@ -114,7 +114,8 @@ are meaningful across machines.
 
 `draw_bench_suite` owns the scenarios; `draw_bench` owns the measurement. Every
 fixture is deterministic and every scenario runs at `100 / 1_000 / 10_000`
-entities to expose scaling curves.
+entities to expose scaling curves — the list scenarios are the exception, at
+`1_000 / 10_000 / 100_000` rows (see below).
 
 | Benchmark | Measures |
 |---|---|
@@ -125,15 +126,66 @@ entities to expose scaling curves.
 | `ui/hit_test/{n}` | worst-case reverse hit test (point over the bottom-most control) |
 | `ui/paint/{n}` | `Ui::paint` into a fresh `DrawList` |
 | `pipeline/ui_frame/{n}` | end-to-end CPU frame: layout → paint → submit → end |
+| `list/scroll_full/{n}` | one scrolling frame of a list with **every** row mounted (the naive shape) |
+| `list/scroll_virtual/{n}` | the same frame through `draw_components::List` (the viewport's rows, recycled) |
 
 ```bash
 cargo bench -p draw_bench_suite
 cargo bench -p draw_bench_suite --bench pipeline -- --filter ui/
+cargo bench -p draw_bench_suite --bench pipeline -- --filter list/
 ```
 
 The suite submits through `draw_bench_suite::SinkBackend`, a consuming
 `RenderBackend` that counts commands and retains nothing, so a long loop does not
 grow memory the way `RecordingBackend` (which clones commands) would.
+
+### The list comparison
+
+The two list scenarios are one experiment run at `1_000 / 10_000 / 100_000`
+rows: the same rows (two text cells, same padding and gap), the same columns, the
+same viewport, the same scrolling step. The only difference is whether every row
+is mounted or only the viewport's. Both shapes scroll through a *reflecting*
+offset — a monotonic scroll parks at the bottom, and since the harness calls the
+routine tens of thousands of times per benchmark, a one-way scroll would spend
+most of its samples on a stopped list (and *when* it parks depends on the row
+count, which would compare a moving list against a static one; a static frame
+also skips its whole subtree through partial relayout, so it is cheap for reasons
+unrelated to the shape).
+
+After the timing table the bench target prints what a frame is billed in, at
+every size (Apple Silicon laptop, `bench` profile):
+
+```text
+list frame shape (what one frame is billed in)
+     rows   full.ctrl  full.cmds   virt.ctrl  virt.cmds   pool  visible     cmds
+     1000       3.00K      2.00K       107.0       72.0     35       34    27.8x
+    10000      30.00K     20.00K       107.0       72.0     35       34   277.8x
+   100000     300.00K    200.00K       107.0       72.0     35       34  2777.8x
+
+list scroll frame (median per frame)
+     rows        full     virtual   speedup
+     1000      1.75ms     71.19µs     24.5x
+    10000     22.50ms     71.31µs    315.5x
+   100000    264.86ms     71.58µs   3700.4x
+```
+
+Two things to read out of it:
+
+- **The virtual frame is flat**: ~71.2 / 71.3 / 71.6 µs and 72 commands whether
+  the folder holds a thousand entries or a hundred thousand. That is the whole
+  point of the component — the cost follows the viewport (`ceil(800/24) + 1 = 35`
+  rows), not the data.
+- **The naive frame is O(rows)**: 1.75 ms → 22.50 ms → 264.86 ms, slightly worse
+  than linear (a 10× row count costs ~12×, cache effects included). At 100 K rows
+  it is 3.8 frames per second *before* touching a GPU, and the clip does not
+  save it: a scissored command is still laid out and still submitted.
+
+A frame that scrolls the virtual list but is otherwise idle costs 5.8 µs
+(`pool_size` unchanged, no rows re-bound) — the ~71 µs is the price of re-binding
+all 35 rows on a 2.5-row step. Re-keying the pool so that only the rows entering
+and leaving are re-bound is the next ~12× if it ever matters;
+`docs/plan.md` tracks it.
+
 
 ---
 

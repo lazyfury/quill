@@ -42,6 +42,7 @@ pub struct Spec {
     pub foreground: Option<Box<dyn Fn(&mut PaintContext, Rect, InteractState)>>,
     pub on_click: Option<Box<dyn FnMut()>>,
     pub on_drag: Option<Box<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>>,
+    pub on_scroll: Option<Box<dyn FnMut(Vec2)>>,
     pub cursor_provider: Option<Box<dyn Fn() -> Cursor>>,
     pub children: Vec<ChildFn>,
 }
@@ -54,6 +55,7 @@ impl Default for Spec {
             foreground: None,
             on_click: None,
             on_drag: None,
+            on_scroll: None,
             cursor_provider: None,
             children: Vec::new(),
         }
@@ -215,6 +217,22 @@ pub trait Component: Sized {
         self
     }
 
+    /// Runs `callback` when a wheel event lands on this node or one of its
+    /// descendants, with the scroll delta in logical pixels.
+    ///
+    /// The nearest ancestor with a scroll callback owns the event, so a list
+    /// can scroll itself and everything else stays unhandled.
+    fn on_scroll(mut self, callback: impl FnMut(Vec2) + 'static) -> Self {
+        self.spec().on_scroll = Some(Box::new(callback));
+        self
+    }
+
+    /// Clips this component's subtree to its own rectangle.
+    fn clip(mut self, clip: bool) -> Self {
+        self.spec().data.clip = clip;
+        self
+    }
+
     /// A cursor resolved from the component's own state each frame while
     /// hovered (overrides [`Component::cursor`] when non-default).
     fn dynamic_cursor(mut self, cursor: impl Fn() -> Cursor + 'static) -> Self {
@@ -313,6 +331,9 @@ pub fn apply_spec(tree: &mut SceneTree, id: NodeId, spec: Spec) {
     if let Some(callback) = spec.on_drag {
         set_on_drag(tree, id, callback);
     }
+    if let Some(callback) = spec.on_scroll {
+        set_on_scroll(tree, id, callback);
+    }
     if let Some(provider) = spec.cursor_provider {
         set_cursor_provider(tree, id, provider);
     }
@@ -348,6 +369,20 @@ where
     match tree.data_mut::<Control>(id) {
         Some(control) => {
             control.drag_callback = Some(Rc::new(RefCell::new(callback)));
+            true
+        }
+        None => false,
+    }
+}
+
+/// Registers a wheel callback on `id`, so it (and its subtree) owns scrolling.
+pub fn set_on_scroll<F>(tree: &mut SceneTree, id: NodeId, callback: F) -> bool
+where
+    F: FnMut(Vec2) + 'static,
+{
+    match tree.data_mut::<Control>(id) {
+        Some(control) => {
+            control.scroll_callback = Some(Rc::new(RefCell::new(callback)));
             true
         }
         None => false,

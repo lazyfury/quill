@@ -170,6 +170,24 @@ impl Ui {
         }
     }
 
+    /// Turns subtree clipping on or off for `id`.
+    ///
+    /// The clip itself is resolved by the next [`Ui::layout`] (every control's
+    /// `clip_rect` is a function of the resolved rectangles), so this only has
+    /// to invalidate layout.
+    pub fn set_clip(&mut self, tree: &mut SceneTree, id: NodeId, clip: bool) {
+        let changed = match control_mut(tree, id) {
+            Some(control) if control.data.clip != clip => {
+                control.data.clip = clip;
+                true
+            }
+            _ => false,
+        };
+        if changed {
+            self.mark_dirty(tree, id);
+        }
+    }
+
     /// Decorators attached to `id`, in paint order.
     pub fn decor<'a>(&self, tree: &'a SceneTree, id: NodeId) -> &'a [DecorRef] {
         control_of(tree, id)

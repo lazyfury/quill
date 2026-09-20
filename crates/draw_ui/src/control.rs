@@ -44,6 +44,21 @@ pub struct ControlData {
     pub cursor: Cursor,
     /// How this control participates in its parent container's layout.
     pub layout: LayoutStyle,
+    /// Whether this control clips its subtree to its own rectangle.
+    ///
+    /// Opt-in, and the only reason `draw_ui` ever emits
+    /// [`DrawCommand::ClipRect`](draw_render::DrawCommand::ClipRect): a
+    /// scrolling list needs its rows cut at the viewport edge, and a label
+    /// whose text overflows its control should stop at the control's bounds.
+    pub clip: bool,
+    /// The clip this control is actually drawn under, inherited from the
+    /// nearest clipping ancestors and intersected with their rectangles.
+    ///
+    /// Resolved by [`layout`](crate::layout) — it is a function of the final
+    /// rectangles, never set by hand. `None` means "nothing clips this
+    /// control"; `Some(rect)` with [`Rect::is_empty`] means the control is
+    /// clipped away entirely and is skipped when painting and hit-testing.
+    pub clip_rect: Option<Rect>,
 }
 
 impl Default for ControlData {
@@ -56,6 +71,8 @@ impl Default for ControlData {
             mouse_filter: MouseFilter::Stop,
             cursor: Cursor::Default,
             layout: LayoutStyle::default(),
+            clip: false,
+            clip_rect: None,
         }
     }
 }
@@ -115,6 +132,29 @@ pub type DragCallback = Rc<RefCell<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>>;
 /// instead of a fixed value.
 pub type CursorProvider = Rc<dyn Fn() -> Cursor>;
 
+/// A callback invoked when a wheel event lands on a control or one of its
+/// descendants, with the scroll delta in logical pixels (`y > 0` scrolls down).
+///
+/// The nearest ancestor carrying one owns the event: a list scrolls its own
+/// rows and stops there, and a wheel over anything else stays `Ignored`.
+pub type ScrollCallback = Rc<RefCell<dyn FnMut(Vec2)>>;
+
+/// Resolves the clip rectangle a control draws its subtree under.
+///
+/// A non-clipping control simply passes `inherited` through; a clipping one
+/// intersects the inherited clip with its own rectangle. A disjoint
+/// intersection collapses to [`Rect::ZERO`] rather than `None`, so "clipped
+/// away entirely" stays distinguishable from "nothing clips me".
+pub(crate) fn resolve_clip(rect: Rect, clip: bool, inherited: Option<Rect>) -> Option<Rect> {
+    if !clip {
+        return inherited;
+    }
+    Some(match inherited {
+        Some(outer) => outer.intersection(rect).unwrap_or(Rect::ZERO),
+        None => rect,
+    })
+}
+
 /// Per-node UI runtime stored in a `SceneTree` node's extension slot.
 ///
 /// This is the control-side counterpart of [`ControlData`]: everything a
@@ -127,6 +167,8 @@ pub struct Control {
     pub callback: Option<ClickCallback>,
     /// Pointer-drag callback (pointer capture while held).
     pub drag_callback: Option<DragCallback>,
+    /// Wheel callback: this control (or its subtree) owns mouse-wheel scrolling.
+    pub scroll_callback: Option<ScrollCallback>,
     /// Dynamic cursor, resolved each frame while hovered; overrides
     /// [`ControlData::cursor`] when it returns a non-default value.
     pub cursor_provider: Option<CursorProvider>,
@@ -143,6 +185,7 @@ impl Control {
             widget,
             callback: None,
             drag_callback: None,
+            scroll_callback: None,
             cursor_provider: None,
             decorations: Vec::new(),
             layout_dirty: true,

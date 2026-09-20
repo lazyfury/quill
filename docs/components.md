@@ -265,6 +265,84 @@ anything with a click/drag callback. The cursor *value* is backend-neutral; only
 the final application is platform code: hosts map it onto winit `CursorIcon`
 or the CSS `cursor` property (`draw_wasm::App::cursor`).
 
+## Scroll & virtualized lists
+
+Two pieces make scrolling possible in the core, and `List` builds on both.
+
+**Clipping** is opt-in and lives on `ControlData.clip`: a control that clips
+hands its own rectangle to its whole subtree (`draw_ui::set_clip`,
+`Component::clip(true)`). Nested clips intersect, and a subtree whose
+intersection is empty is skipped entirely — nothing painted, nothing
+hit-testable. `Ui::layout` resolves the rectangle in the same pre-order pass
+that writes the rectangles back, so it is a pure function of the geometry and
+needs no dirty propagation of its own; paint emits one `save` + `clip_rect` per
+clipped region and pops it with `restore`. A tree where nothing clips emits no
+clip commands and pays nothing.
+
+**Wheel routing**: `handle_input` hit-tests `InputEvent::Wheel { position,
+delta }` and hands it to the nearest ancestor with a scroll callback
+(`draw_components::set_on_scroll`, or `Component::on_scroll` — the wheel counterpart of
+`on_click`/`on_drag`). It returns `Handled` only when a callback took it, so an
+unclaimed wheel still reaches the host.
+
+The *core* routes the wheel; a host still has to produce it. Neither `wgpu_demo`
+(winit `WindowEvent::MouseWheel`) nor the Canvas runner (DOM `wheel`) translates
+its platform event into `InputEvent::Wheel` yet, so a list inside those demos
+does not scroll until that translation is added — `handle_input` is the contract,
+the pump is the host's job.
+
+`draw_components::List` mounts only the rows its viewport can show and recycles
+them as it scrolls, so the node count, the layout work and the emitted commands
+follow the viewport rather than the data:
+
+```rust
+use std::cell::Cell;
+use std::rc::Rc;
+use draw_components::{List, ListColumn};
+
+let entries = /* your data */;
+let count = Rc::new(Cell::new(entries.len()));
+let list = List::new(theme, 28.0, move |index| vec![
+    entries[index].name.clone(),
+    entries[index].size.clone(),
+])
+.columns(vec![ListColumn::flexible(), ListColumn::fixed(96.0)])
+.count(count.clone())
+.on_activate(|index| println!("open {index}"));
+
+let state = list.state();                    // take the handle before mounting
+tree.add_child(pane, list.grow(1.0));
+
+// Once per frame, after layout:
+draw_ui::layout(&mut tree, viewport);
+if state.sync(&mut tree) {                   // mounts/moves/re-binds the pool
+    draw_ui::layout(&mut tree, viewport);    // a changed pool wants new rects
+}
+```
+
+- `List::new(theme, row_height, source)` — `source` is a `RowSource`
+  (`Rc<dyn Fn(usize) -> Vec<String>>`) called only for rows about to be shown,
+  so the data never has to exist as widgets.
+- `.columns(..)` — one `ListColumn` per cell: `flexible()` takes the leftover
+  width, `fixed(w)` is fixed (and muted by default).
+- `.count(Rc<Cell<usize>>)` — read on every sync, so a re-scan just sets the
+  cell. `.invalidate()` re-reads the rows when the contents changed under the
+  same count.
+- `.selected(Rc<Cell<Option<usize>>>)` / `.on_activate(fn(usize))` — clicking a
+  row selects it (the selection follows the *data* index, not the pool slot) and
+  calls back.
+- `ListState` — `sync`, `rows`, `visible_range`, `pool_size`, `offset`,
+  `scroll_by(delta)`, `scroll_to(index)` (smallest scroll that brings `index`
+  into view), `invalidate`, `selected`.
+- The container clips and stops the wheel (`MouseFilter::Stop`), so the partial
+  rows at its edges are cut off instead of bleeding over the pane above.
+
+The pool is `ceil(viewport_height / row_height) + 1` rows: what fits, plus the
+buffer that makes the next scroll step a pure offset change. Row count therefore
+costs nothing per frame — `docs/benchmarking.md` has the measured shape
+(107 controls and 72 commands per frame at 1 K, 10 K and 100 K rows, against a
+naive list's 300 K controls and 200 K commands at 100 K).
+
 ## Switch views (Router)
 
 `draw_components::Router` shows exactly one of several child views in a

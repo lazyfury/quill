@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::*;
 use crate::control::{
-    control_mut, control_of, control_visible, root_state, root_state_mut, LayoutCache,
+    control_mut, control_of, control_visible, resolve_clip, root_state, root_state_mut, LayoutCache,
 };
 use crate::layout::{
     Align, AlignContent, ContentSize, FlexStyle, GridPlacement, GridStyle, Justify, LayoutStyle,
@@ -77,14 +77,37 @@ impl Ui {
             .iter()
             .filter(|id| control_of(tree, *id).is_some() && !control_visible(tree, *id))
             .collect();
+
+        // Clipping is opt-in and rare, so it costs nothing until something asks
+        // for it: one scan to find out whether any control clips, and only then
+        // the per-node clip inherited from the nearest clipping ancestor.
+        //
+        // `tree.iter()` is pre-order, so by the time a control is reached its
+        // ancestors already carry this pass's final rectangle *and* clip — which
+        // makes the inherited clip a single upward hop rather than a chain walk,
+        // and keeps `clip_rect` a pure function of the resolved rectangles
+        // instead of another thing `mark_dirty` has to propagate.
+        let clipping = tree
+            .iter()
+            .any(|id| control_of(tree, id).is_some_and(|control| control.data.clip));
         for id in tree.iter().collect::<Vec<_>>() {
+            let inherited = if clipping {
+                inherited_clip(tree, id)
+            } else {
+                None
+            };
             let Some(control) = control_mut(tree, id) else {
                 continue;
             };
             if hidden.contains(&id) {
                 control.data.rect = Rect::ZERO;
-            } else if let Some(rect) = rects.get(&id) {
-                control.data.rect = *rect;
+                control.data.clip_rect = None;
+            } else {
+                if let Some(rect) = rects.get(&id) {
+                    control.data.rect = *rect;
+                }
+                let rect = control.data.rect;
+                control.data.clip_rect = resolve_clip(rect, control.data.clip, inherited);
             }
             control.layout_dirty = false;
         }
@@ -631,6 +654,22 @@ impl Ui {
     }
 }
 
+/// The clip rectangle a node inherits from the nearest control above it.
+///
+/// Non-control nodes (the tree root, a `CanvasLayer`) carry no clip state, so
+/// the walk steps past them; the first control it finds was already resolved by
+/// the same pre-order pass.
+fn inherited_clip(tree: &SceneTree, id: NodeId) -> Option<Rect> {
+    let mut current = tree.parent(id);
+    while let Some(node) = current {
+        if let Some(control) = control_of(tree, node) {
+            return control.data.clip_rect;
+        }
+        current = tree.parent(node);
+    }
+    None
+}
+
 /// A child during flex arrangement.
 struct FlexItem {
     id: NodeId,
@@ -1042,6 +1081,209 @@ mod tests {
             color,
             border: None,
         }
+    }
+
+    /// Anchored child at an absolute-ish rectangle (anchors at the parent's
+    /// origin, offsets in pixels) — the model the list positions its rows with.
+    fn slab(tree: &mut SceneTree, parent: NodeId, min: Vec2, max: Vec2) -> NodeId {
+        add(
+            tree,
+            parent,
+            ControlData {
+                anchors: Edges::ZERO,
+                offsets: Edges::new(min.x, min.y, max.x, max.y),
+                ..ControlData::default()
+            },
+            panel(Color::RED),
+        )
+    }
+
+    #[test]
+    fn a_clipping_control_hands_its_rect_to_its_subtree_only() {
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        let root = add(
+            &mut tree,
+            tree_root,
+            ControlData::fill_parent(),
+            panel(Color::TRANSPARENT),
+        );
+        let clipper = add(
+            &mut tree,
+            root,
+            ControlData {
+                anchors: Edges::ZERO,
+                offsets: Edges::new(10.0, 10.0, 110.0, 60.0),
+                clip: true,
+                ..ControlData::default()
+            },
+            panel(Color::TRANSPARENT),
+        );
+        // Overflows its clipping parent on both axes.
+        let inside = slab(
+            &mut tree,
+            clipper,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(300.0, 300.0),
+        );
+        let outside = slab(
+            &mut tree,
+            root,
+            Vec2::new(150.0, 0.0),
+            Vec2::new(200.0, 40.0),
+        );
+
+        crate::layout(&mut tree, ViewportSize::new(Size::new(200.0, 100.0)));
+        let clipped = Rect::from_min_size(Vec2::new(10.0, 10.0), Size::new(100.0, 50.0));
+
+        assert_eq!(crate::control(&tree, clipper).unwrap().rect, clipped);
+        assert_eq!(
+            crate::control(&tree, clipper).unwrap().clip_rect,
+            Some(clipped)
+        );
+        assert_eq!(
+            crate::control(&tree, inside).unwrap().clip_rect,
+            Some(clipped),
+            "the subtree inherits the clip"
+        );
+        assert_eq!(
+            crate::control(&tree, outside).unwrap().clip_rect,
+            None,
+            "a sibling is not clipped by its uncle"
+        );
+        assert_eq!(
+            crate::control(&tree, root).unwrap().clip_rect,
+            None,
+            "and the tree above knows nothing about it"
+        );
+    }
+
+    #[test]
+    fn nested_clips_intersect_and_a_disjoint_one_collapses() {
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        let root = add(
+            &mut tree,
+            tree_root,
+            ControlData::fill_parent(),
+            panel(Color::TRANSPARENT),
+        );
+        let outer = add(
+            &mut tree,
+            root,
+            ControlData {
+                anchors: Edges::ZERO,
+                offsets: Edges::new(0.0, 0.0, 100.0, 100.0),
+                clip: true,
+                ..ControlData::default()
+            },
+            panel(Color::TRANSPARENT),
+        );
+        let inner = add(
+            &mut tree,
+            outer,
+            ControlData {
+                anchors: Edges::ZERO,
+                offsets: Edges::new(20.0, 20.0, 60.0, 60.0),
+                clip: true,
+                ..ControlData::default()
+            },
+            panel(Color::TRANSPARENT),
+        );
+        let deep = slab(&mut tree, inner, Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0));
+        let beside = slab(
+            &mut tree,
+            outer,
+            Vec2::new(80.0, 0.0),
+            Vec2::new(90.0, 10.0),
+        );
+        let away = slab(
+            &mut tree,
+            outer,
+            Vec2::new(500.0, 500.0),
+            Vec2::new(600.0, 600.0),
+        );
+        // Nothing of this one's subtree can ever be seen.
+        let far_clipper = add(
+            &mut tree,
+            outer,
+            ControlData {
+                anchors: Edges::ZERO,
+                offsets: Edges::new(500.0, 500.0, 600.0, 600.0),
+                clip: true,
+                ..ControlData::default()
+            },
+            panel(Color::TRANSPARENT),
+        );
+
+        crate::layout(&mut tree, ViewportSize::new(Size::new(400.0, 400.0)));
+
+        assert_eq!(
+            crate::control(&tree, deep).unwrap().clip_rect,
+            Some(Rect::from_min_size(
+                Vec2::new(20.0, 20.0),
+                Size::new(40.0, 40.0)
+            )),
+            "the inner clip wins where the two overlap"
+        );
+        assert_eq!(
+            crate::control(&tree, beside).unwrap().clip_rect,
+            Some(Rect::from_min_size(Vec2::ZERO, Size::new(100.0, 100.0))),
+            "what is inside the outer clip keeps the outer clip"
+        );
+        assert_eq!(
+            crate::control(&tree, away).unwrap().clip_rect,
+            Some(Rect::from_min_size(Vec2::ZERO, Size::new(100.0, 100.0))),
+            "a control sitting outside the clip is still *under* it — the backend \
+             scissors it away and hit-testing rejects it, but nothing about the \
+             control itself changed"
+        );
+        assert!(
+            crate::control(&tree, far_clipper)
+                .unwrap()
+                .clip_rect
+                .unwrap()
+                .is_empty(),
+            "a clipper whose own rectangle misses the inherited clip is clipped \
+             away entirely, and paints nothing"
+        );
+    }
+
+    #[test]
+    fn turning_the_clip_off_gives_the_subtree_back_its_rectangle() {
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        let root = add(
+            &mut tree,
+            tree_root,
+            ControlData::fill_parent(),
+            panel(Color::TRANSPARENT),
+        );
+        let clipper = add(
+            &mut tree,
+            root,
+            ControlData {
+                anchors: Edges::ZERO,
+                offsets: Edges::new(0.0, 0.0, 50.0, 50.0),
+                clip: true,
+                ..ControlData::default()
+            },
+            panel(Color::TRANSPARENT),
+        );
+        let child = slab(
+            &mut tree,
+            clipper,
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 10.0),
+        );
+        let viewport = ViewportSize::new(Size::new(200.0, 200.0));
+        crate::layout(&mut tree, viewport);
+        assert!(crate::control(&tree, child).unwrap().clip_rect.is_some());
+
+        crate::set_clip(&mut tree, clipper, false);
+        crate::layout(&mut tree, viewport);
+        assert_eq!(crate::control(&tree, child).unwrap().clip_rect, None);
+        assert_eq!(crate::control(&tree, clipper).unwrap().clip_rect, None);
     }
 
     /// `layout` pins the root to the viewport — a view always fills the window

@@ -59,6 +59,17 @@ fn hit_node(tree: &SceneTree, id: NodeId, position: Vec2) -> Option<NodeId> {
         }
     }
     let control = tree.data::<Control>(id)?;
+    // A control clipped away by an ancestor (`clip_rect` is inherited, so it is
+    // already intersected with every clipping ancestor) is not clickable, even
+    // where its own rectangle covers the pointer. Without this a half-scrolled
+    // row would still take clicks below the list viewport.
+    if control
+        .data
+        .clip_rect
+        .is_some_and(|clip| !clip.contains(position))
+    {
+        return None;
+    }
     if control.data.mouse_filter != MouseFilter::Ignore && control.data.rect.contains(position) {
         Some(id)
     } else {
@@ -166,6 +177,25 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
             crate::gui_state_mut(tree).pressed = None;
             EventResult::Handled
         }
+        InputEvent::Wheel { position, delta } => {
+            // Scrolling is owned, not global: the nearest ancestor of the
+            // control under the pointer that registered a scroll callback gets
+            // the delta (a list scrolls itself), and anything else stays
+            // `Ignored` so the event can fall through to `_unhandled_input`.
+            let Some(owner) =
+                hit_test(tree, *position).and_then(|id| nearest_with_scroll(tree, id))
+            else {
+                return EventResult::Ignored;
+            };
+            let Some(callback) = tree
+                .data::<Control>(owner)
+                .and_then(|control| control.scroll_callback.clone())
+            else {
+                return EventResult::Ignored;
+            };
+            (callback.borrow_mut())(*delta);
+            EventResult::Handled
+        }
         InputEvent::KeyDown { key } if matches!(*key, Key::Enter | Key::Space) => {
             let focused = crate::gui_state_of(tree).and_then(|state| state.focused);
             match focused {
@@ -220,6 +250,21 @@ fn activate(tree: &mut SceneTree, id: NodeId) {
     if let Some(callback) = callback {
         (callback.borrow_mut())();
     }
+}
+
+/// Nearest ancestor (including `id`) that owns a scroll callback.
+fn nearest_with_scroll(tree: &SceneTree, id: NodeId) -> Option<NodeId> {
+    let mut current = Some(id);
+    while let Some(node) = current {
+        if tree
+            .data::<Control>(node)
+            .is_some_and(|control| control.scroll_callback.is_some())
+        {
+            return Some(node);
+        }
+        current = tree.parent(node);
+    }
+    None
 }
 
 /// Nearest ancestor (including `id`) that owns a drag callback.
@@ -327,4 +372,169 @@ pub fn is_interactive(tree: &SceneTree, id: NodeId) -> bool {
         current = tree.parent(node);
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::control::ControlData;
+    use crate::layout::TextOptions;
+    use crate::widget::Widget;
+    use draw_core::{Color, Edges, Size, ViewportSize};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    fn panel() -> Widget {
+        Widget::Panel {
+            color: Color::RED,
+            border: None,
+        }
+    }
+
+    fn label(text: &str) -> Widget {
+        Widget::Label {
+            text: text.to_string(),
+            font_size: 12.0,
+            color: Color::WHITE,
+            options: TextOptions::default(),
+        }
+    }
+
+    fn add(tree: &mut SceneTree, parent: NodeId, data: ControlData, widget: Widget) -> NodeId {
+        let id = tree.add_control(parent, "test");
+        tree.set_data(id, Control::new(data, widget));
+        id
+    }
+
+    /// Anchored child at a pixel rectangle, as the list positions its rows.
+    fn slab(
+        tree: &mut SceneTree,
+        parent: NodeId,
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+        widget: Widget,
+    ) -> NodeId {
+        add(
+            tree,
+            parent,
+            ControlData {
+                anchors: Edges::ZERO,
+                offsets: Edges::new(left, top, right, bottom),
+                ..ControlData::default()
+            },
+            widget,
+        )
+    }
+
+    /// Point membership is not enough: a control can cover the pointer and
+    /// still be cut away by an ancestor's clip.
+    #[test]
+    fn hit_testing_respects_the_clip() {
+        let mut tree = SceneTree::new();
+        let root = tree.root();
+        let container = add(&mut tree, root, ControlData::fill_parent(), panel());
+        let clipper = add(
+            &mut tree,
+            container,
+            ControlData {
+                anchors: Edges::ZERO,
+                offsets: Edges::new(0.0, 0.0, 100.0, 100.0),
+                clip: true,
+                ..ControlData::default()
+            },
+            panel(),
+        );
+        let overhang = slab(&mut tree, clipper, 0.0, 0.0, 300.0, 20.0, label("overhang"));
+
+        crate::layout(&mut tree, ViewportSize::new(Size::new(400.0, 400.0)));
+
+        assert_eq!(
+            hit_test(&tree, Vec2::new(50.0, 10.0)),
+            Some(overhang),
+            "inside the clip the overhanging control is the target"
+        );
+        assert_eq!(
+            hit_test(&tree, Vec2::new(150.0, 10.0)),
+            Some(container),
+            "outside the clip the overhanging control is not there at all — the \
+             pointer falls through to what is behind it"
+        );
+    }
+
+    /// The wheel is owned, not global: the nearest ancestor with a scroll
+    /// callback takes it, and a tree without one stays unhandled.
+    #[test]
+    fn the_wheel_goes_to_the_nearest_scroll_owner() {
+        let mut tree = SceneTree::new();
+        let root = tree.root();
+        // A control whose parent is not a control is pinned to the viewport by
+        // layout, so the scrollable panes live under a full-size one.
+        let container = add(&mut tree, root, ControlData::fill_parent(), panel());
+        let outer = slab(&mut tree, container, 0.0, 0.0, 200.0, 200.0, panel());
+        let inner = slab(&mut tree, outer, 0.0, 0.0, 100.0, 50.0, panel());
+        slab(&mut tree, inner, 0.0, 0.0, 100.0, 20.0, label("row"));
+        crate::layout(&mut tree, ViewportSize::new(Size::new(400.0, 400.0)));
+
+        let outer_scrolls = Rc::new(Cell::new(0.0));
+        let inner_scrolls = Rc::new(Cell::new(0.0));
+        for (id, total) in [
+            (outer, outer_scrolls.clone()),
+            (inner, inner_scrolls.clone()),
+        ] {
+            tree.data_mut::<Control>(id).unwrap().scroll_callback =
+                Some(Rc::new(RefCell::new(move |delta: Vec2| {
+                    total.set(total.get() + delta.y)
+                })));
+        }
+
+        let handled = handle_input(
+            &mut tree,
+            &InputEvent::Wheel {
+                position: Vec2::new(50.0, 10.0),
+                delta: Vec2::new(0.0, 12.0),
+            },
+        );
+        assert_eq!(handled, EventResult::Handled);
+        assert_eq!(inner_scrolls.get(), 12.0, "the innermost owner wins");
+        assert_eq!(outer_scrolls.get(), 0.0, "and the outer one is not asked");
+
+        // Somewhere else entirely: nobody claims it, so the event can still
+        // reach `_unhandled_input`.
+        let handled = handle_input(
+            &mut tree,
+            &InputEvent::Wheel {
+                position: Vec2::new(300.0, 300.0),
+                delta: Vec2::new(0.0, 12.0),
+            },
+        );
+        assert_eq!(handled, EventResult::Ignored);
+        assert_eq!(inner_scrolls.get(), 12.0);
+    }
+
+    #[test]
+    fn a_wheel_over_a_control_without_a_owner_is_ignored() {
+        let mut tree = SceneTree::new();
+        let root = tree.root();
+        let container = add(&mut tree, root, ControlData::fill_parent(), panel());
+        add(
+            &mut tree,
+            container,
+            ControlData::fill_parent(),
+            label("nothing to scroll"),
+        );
+        crate::layout(&mut tree, ViewportSize::new(Size::new(400.0, 400.0)));
+
+        assert_eq!(
+            handle_input(
+                &mut tree,
+                &InputEvent::Wheel {
+                    position: Vec2::new(10.0, 10.0),
+                    delta: Vec2::new(0.0, 12.0),
+                },
+            ),
+            EventResult::Ignored
+        );
+    }
 }

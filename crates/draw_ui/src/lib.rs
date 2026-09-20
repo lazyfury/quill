@@ -38,7 +38,7 @@ mod widget;
 
 pub use control::{
     ClickCallback, Control, ControlData, CursorProvider, DragCallback, DragPhase, GuiState,
-    MouseFilter,
+    MouseFilter, ScrollCallback,
 };
 pub use debug::DebugDrawOptions;
 pub use decor::{
@@ -101,6 +101,20 @@ pub fn mark_dirty(tree: &mut SceneTree, id: NodeId) {
 /// own content.
 pub fn add_decor(tree: &mut SceneTree, id: NodeId, decor: DecorRef) {
     Ui.add_decor(tree, id, decor)
+}
+
+/// Clips `id` (and everything below it) to its own rectangle.
+///
+/// Opt-in, and the only source of `DrawCommand::ClipRect` in the UI: `paint`
+/// pushes the resolved clip once per clipped region and pops it again. The clip
+/// is resolved from the layout rectangles, so a control whose intersection with
+/// its clipping ancestors is empty is skipped entirely — painted nowhere, and
+/// not hit-testable either.
+///
+/// **Non-breaking addition to `draw_ui`** (`ControlData` gained `clip` /
+/// `clip_rect`); recorded in `docs/design-system.md`.
+pub fn set_clip(tree: &mut SceneTree, id: NodeId, clip: bool) {
+    Ui.set_clip(tree, id, clip)
 }
 
 /// Decorators attached to `id`, in paint order.

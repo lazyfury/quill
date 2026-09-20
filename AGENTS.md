@@ -206,6 +206,18 @@ thread and comes back through a winit `EventLoopProxy`). `wgpu` only in
       `Component::dynamic_cursor` (per-control provider) +
       `draw_ui::hovered_cursor`; hosts map it (winit `CursorIcon`, canvas CSS
       `cursor`). `demo_app`'s sidebar and list gutters are both draggable.
+      **Stage 25.14 (clip + wheel + `List`):** `ControlData.clip` (opt-in, the
+      only source of `DrawCommand::ClipRect`; resolved per layout pass into
+      `ControlData.clip_rect`, intersected with the nearest clipping ancestor) +
+      `Ui::paint` emitting one save/clip/restore per clipped region +
+      clip-aware hit testing; `InputEvent::Wheel` routing in
+      `draw_ui::handle_input` to the nearest `Control::scroll_callback`
+      (`draw_components::set_on_scroll` / `Component::on_scroll`); and
+      `draw_components::{List, ListState, ListColumn, RowSource}` — a
+      virtualized list whose frame cost is flat in the row count (107 controls /
+      72 commands per frame at 1 K, 10 K and 100 K rows; `docs/benchmarking.md`).
+      Additive to the frozen core: no `Widget` variant, existing `ControlData`
+      fields unchanged. Recorded in `docs/design-system.md`.
 
 ## Per-stage gate (must run)
 

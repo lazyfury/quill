@@ -142,6 +142,7 @@ placeholders) and detail pane (toolbar, hero scene, body, actions).
 | `EmptyState` | icon placeholder, title, description. |
 | `Checkbox` | compact control with shared state and `on_change`. |
 | `Switch` | compact on/off control. |
+| `List` | virtualized rows: mounts the viewport's rows (+1 buffer) and recycles them; `ListState` (`sync`/`scroll_by`/`scroll_to`/`invalidate`), wheel + click, container clip. |
 
 `draw_components` containers take children, so a screen is one expression:
 
@@ -256,6 +257,22 @@ backward-compatible addition and record it here.
   padding. Additive — no `Widget`/`ControlData` shape changed; the measurement
   it caches is cleared by the next `layout`. It reads the tree's UI state, so it
   is for trees built through `draw_ui` (a built view already has that state).
+- **Clipping + wheel routing + `ScrollCallback`** (Stage 25.14, the `List`
+  component): `DrawCommand::ClipRect` existed in the IR and in all three
+  backends but `draw_ui` never emitted it, so nothing could be clipped and no
+  scrolling control was possible. `ControlData.clip` (opt-in) is now the only
+  source of a clip: layout resolves it in the same pre-order pass that writes
+  the rectangles back (`ControlData.clip_rect`, intersected with the nearest
+  clipping ancestor's, `Rect::ZERO` when the intersection is empty), paint
+  pushes one `save` + `clip_rect` per clipped region and pops it with `restore`,
+  and hit testing refuses points outside `clip_rect`. Everything is gated on a
+  single `tree.iter().any(clip)` scan, so a tree that clips nothing pays
+  nothing and emits no clip commands. `InputEvent::Wheel { position, delta }`
+  was a variant nothing consumed: `handle_input` now hit-tests it and routes it
+  to the nearest ancestor with a `Control::scroll_callback`
+  (`draw_components::set_on_scroll` / `Component::on_scroll`, the wheel counterpart of
+  `on_click`/`on_drag`), returning `Handled` only when something took it.
+  Additive: no `Widget` variant added, existing `ControlData` fields unchanged.
 
 ## Deferred
 
@@ -263,5 +280,6 @@ Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /
 `StrokeRoundedRect`) with per-corner radii (`CornerRadii`, so one shape can mix
 square and rounded corners), implemented by the canvas, wgpu and recording
 backends, so surfaces no longer compose circles + rects by hand. Inputs, selects,
-tabs, tables and lists are staged next; see `docs/plan.md` for the full roadmap.
-The overlay layer covers confirm dialogs, popovers, tooltips and toasts.
+tabs and tables are staged next; see `docs/plan.md` for the full roadmap.
+The overlay layer covers confirm dialogs, popovers, tooltips and toasts, and
+`List` covers scrolling rows (`docs/components.md`).

@@ -53,12 +53,13 @@ mod overlay;
 mod router;
 
 pub use base::{
-    apply_spec, control_mut, set_cursor_provider, set_on_click, set_on_drag, set_text,
-    update_control, ChildFn, Column, Component, Flex, Grid, HBox, Label, Panel, Row, Spec, VBox,
+    apply_spec, control_mut, set_cursor_provider, set_on_click, set_on_drag, set_on_scroll,
+    set_text, update_control, ChildFn, Column, Component, Flex, Grid, HBox, Label, Panel, Row,
+    Spec, VBox,
 };
 pub use components::{
-    Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, ResizeHandle,
-    Switch, Terminal, Text,
+    Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, List, ListColumn,
+    ListState, ResizeHandle, RowSource, Switch, Terminal, Text,
 };
 pub use node_ref::{NodeRef, Ref};
 pub use overlay::{OverlayId, Overlays, Placement};

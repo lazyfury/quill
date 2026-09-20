@@ -42,12 +42,13 @@ audited by `draw_profile`'s inspector, or it is not "done".
 | `Input` / `TextArea` | next | placeholder, caret, selection, focus ring; needs core text editing or a component-owned editor |
 | `Select` / `Dropdown` | next | menu surface + selected state |
 | `Tooltip` | done | `Overlays::tips`, anchored and hover-tracked |
-| `List` / `Table` | next | header row, column alignment, hover, selection |
+| `List` | done | virtualized: mounts the viewport's rows (+1 buffer) and recycles them; rows come from a `RowSource`; wheel + click + selection; `docs/components.md` |
+| `Table` | next | header row, column alignment over the `List` pool (sorting, multi-column, row actions) |
 | `Toolbar` | next | grouped icon buttons + separators |
 | `Modal` / `Toast` | done | `Overlays::confirm` (scrim) / `Overlays::message` (transient) |
 | `Popover` | done | `Overlays::popover`, anchored with edge flipping |
 | `Progress`, `Spinner`, `Skeleton` | later | uses `Arc`/rounded primitives |
-| `ScrollView` | later | needs a clip + offset model |
+| `ScrollView` | next | the clip + offset model now exists (`ControlData.clip`, `set_on_scroll`); wrap it in a component with a draggable scrollbar |
 
 ## Theme
 
@@ -80,6 +81,11 @@ themed library. Remaining polish, in priority order:
 5. **Runtime mutation helpers** — keep `update_control` / `set_text` /
    `set_on_click` for hosts that animate one node; construction stays
    component-only.
+6. **Ring-indexed list pool** — `List` re-binds every row in the pool on a scroll
+   step (stepping 2.5 rows re-binds all 35: 73 µs/frame measured against 5.8 µs
+   for a frame that does not move). Keying slots by `index % pool_size` would
+   re-bind only the rows entering and leaving, which is worth ~12x on the scroll
+   path. Deferred: the current cost is 0.4% of a 60 Hz budget.
 
 ## UI runtime — `Ui` boundary & lifecycle (folded into Stage 25)
 
@@ -133,6 +139,18 @@ priority order and add native tests.
   `cargo bench --workspace --no-run`.
 
 ## Done
+
+- `List` + the core increments it needed: `ControlData.clip` (the first and only
+  source of `DrawCommand::ClipRect`, resolved in the layout pass, emitted as one
+  save/clip/restore per clipped region, respected by hit testing),
+  `InputEvent::Wheel` routing to the nearest ancestor with a scroll callback
+  (`draw_components::set_on_scroll` / `Component::on_scroll`), and
+  `draw_components::List` + `ListState` — a virtualized list that mounts
+  `ceil(viewport/row) + 1` rows and recycles them, so its frame cost is flat in
+  the row count. Measured: 107 controls and 72 commands per scrolling frame at
+  1 K, 10 K and 100 K rows (73 µs) against a naive mounted-everything list's
+  3 000 / 30 000 / 300 000 controls (1.75 ms → 261 ms). See
+  `docs/components.md` and `docs/benchmarking.md`.
 
 - `Router` view switching: `draw_components::Router` shows exactly one child
   view at a time by toggling scene visibility from a shared route cell. Layout,
