@@ -48,6 +48,7 @@ pub const CRATE: &str = "draw_components";
 /// primitives. See the [crate docs](crate) for the themed layer.
 pub mod base;
 mod components;
+pub mod node_ref;
 mod overlay;
 mod router;
 
@@ -59,6 +60,7 @@ pub use components::{
     Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, ResizeHandle,
     Switch, Terminal, Text,
 };
+pub use node_ref::{NodeRef, Ref};
 pub use overlay::{OverlayId, Overlays, Placement};
 pub use router::Router;
 

@@ -76,55 +76,49 @@ impl Component for Checkbox {
         self.spec.data.min_size = Size::new(0.0, control::ROW_SM);
 
         let paint_state = state.clone();
-        self.spec.children.push(Box::new(move |tree, parent| {
-            tree.add_child(
-                parent,
-                Flex::new()
-                    .padding(Edges::ZERO)
-                    .anchors(Edges::ZERO)
-                    .offsets(Edges::ZERO)
-                    .min_size(16.0, 16.0)
-                    .foreground(move |ctx, rect, st| {
-                        let checked = paint_state.get();
-                        let fill = if checked {
-                            theme.palette.accent
-                        } else {
-                            theme.palette.background
-                        };
-                        let border = if checked || st.hovered {
-                            theme.palette.accent
-                        } else {
-                            theme.palette.border
-                        };
-                        draw_ui::surface(
+        self.spec.child(
+            Flex::new()
+                .padding(Edges::ZERO)
+                .anchors(Edges::ZERO)
+                .offsets(Edges::ZERO)
+                .min_size(16.0, 16.0)
+                .foreground(move |ctx, rect, st| {
+                    let checked = paint_state.get();
+                    let fill = if checked {
+                        theme.palette.accent
+                    } else {
+                        theme.palette.background
+                    };
+                    let border = if checked || st.hovered {
+                        theme.palette.accent
+                    } else {
+                        theme.palette.border
+                    };
+                    draw_ui::surface(
+                        ctx,
+                        rect,
+                        &SurfaceStyle::new(fill).border(border).radius(radius::SM),
+                    );
+                    if checked {
+                        draw_ui::fill_rounded_rect(
                             ctx,
-                            rect,
-                            &SurfaceStyle::new(fill).border(border).radius(radius::SM),
+                            draw_ui::inset(rect, 4.0),
+                            1.5,
+                            theme.palette.on_accent,
                         );
-                        if checked {
-                            draw_ui::fill_rounded_rect(
-                                ctx,
-                                draw_ui::inset(rect, 4.0),
-                                1.5,
-                                theme.palette.on_accent,
-                            );
-                        }
-                    }),
-            );
-        }));
+                    }
+                }),
+        );
 
         let label = self.label.clone();
         let body = TextSize::Body.px();
         let foreground = theme.palette.foreground;
-        self.spec.children.push(Box::new(move |tree, parent| {
-            tree.add_child(
-                parent,
-                Label::new(label)
-                    .font_size(body)
-                    .color(foreground)
-                    .text_options(TextOptions::no_wrap()),
-            );
-        }));
+        self.spec.child(
+            Label::new(label)
+                .font_size(body)
+                .color(foreground)
+                .text_options(TextOptions::no_wrap()),
+        );
 
         let click_state = state;
         let mut on_change = self.on_change.take();
@@ -207,68 +201,62 @@ impl Component for Switch {
         self.spec.data.min_size = Size::new(0.0, control::ROW_SM);
 
         let paint_state = state.clone();
-        self.spec.children.push(Box::new(move |tree, parent| {
-            tree.add_child(
-                parent,
-                Flex::new()
-                    .padding(Edges::ZERO)
-                    .anchors(Edges::ZERO)
-                    .offsets(Edges::ZERO)
-                    .min_size(34.0, 18.0)
-                    .foreground(move |ctx, rect, st| {
-                        let on = paint_state.get();
-                        let track_color = if on {
-                            theme.palette.accent
-                        } else if st.hovered {
-                            theme.palette.surface_hover
-                        } else {
-                            theme.palette.surface_raised
-                        };
-                        let border = if on {
-                            theme.palette.accent
-                        } else {
-                            theme.palette.border
-                        };
-                        draw_ui::surface(
-                            ctx,
-                            rect,
-                            &SurfaceStyle::new(track_color)
-                                .border(border)
-                                .radius(radius::FULL),
-                        );
+        self.spec.child(
+            Flex::new()
+                .padding(Edges::ZERO)
+                .anchors(Edges::ZERO)
+                .offsets(Edges::ZERO)
+                .min_size(34.0, 18.0)
+                .foreground(move |ctx, rect, st| {
+                    let on = paint_state.get();
+                    let track_color = if on {
+                        theme.palette.accent
+                    } else if st.hovered {
+                        theme.palette.surface_hover
+                    } else {
+                        theme.palette.surface_raised
+                    };
+                    let border = if on {
+                        theme.palette.accent
+                    } else {
+                        theme.palette.border
+                    };
+                    draw_ui::surface(
+                        ctx,
+                        rect,
+                        &SurfaceStyle::new(track_color)
+                            .border(border)
+                            .radius(radius::FULL),
+                    );
 
-                        let r = 6.5;
-                        let inset = 1.5;
-                        let cx = if on {
-                            rect.right() - r - inset
+                    let r = 6.5;
+                    let inset = 1.5;
+                    let cx = if on {
+                        rect.right() - r - inset
+                    } else {
+                        rect.left() + r + inset
+                    };
+                    ctx.fill_circle(
+                        Vec2::new(cx, rect.center().y),
+                        r,
+                        if on {
+                            theme.palette.on_accent
                         } else {
-                            rect.left() + r + inset
-                        };
-                        ctx.fill_circle(
-                            Vec2::new(cx, rect.center().y),
-                            r,
-                            if on {
-                                theme.palette.on_accent
-                            } else {
-                                theme.palette.muted
-                            },
-                        );
-                    }),
-            );
-        }));
+                            theme.palette.muted
+                        },
+                    );
+                }),
+        );
 
         if let Some(label) = self.label.clone() {
             let body = TextSize::Body.px();
             let foreground = theme.palette.foreground;
-            self.spec.children.push(Box::new(move |tree, parent| {
-                tree.add_child(
-                    parent,
-                    Label::new(label)
-                        .font_size(body)
-                        .color(foreground)
-                        .text_options(TextOptions::no_wrap()),
-                );
-            }));
+            self.spec.child(
+                Label::new(label)
+                    .font_size(body)
+                    .color(foreground)
+                    .text_options(TextOptions::no_wrap()),
+            );
         }
 
         let click_state = state;

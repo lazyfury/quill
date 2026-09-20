@@ -285,9 +285,8 @@ impl Component for Badge {
         });
         let text = self.text.clone();
         let theme = self.theme;
-        self.spec.children.push(Box::new(move |tree, parent| {
-            tree.add_child(parent, Text::caption(text, theme).color(text_color));
-        }));
+        self.spec
+            .child(Text::caption(text, theme).color(text_color));
     }
 }
 
@@ -346,36 +345,28 @@ impl Component for CodeBlock {
             .radius(radius::LG);
         self.spec.background = Some(Box::new(move |_| style));
 
-        let filename = self.filename.clone();
-        let language = self.language.clone();
-        let code = self.code.clone();
-        self.spec.children.push(Box::new(move |tree, parent| {
-            if filename.is_some() || language.is_some() {
-                let header = tree.add_child(
-                    parent,
-                    Flex::row()
-                        .align(Align::Center)
-                        .gap(space::SM)
-                        .anchors(Edges::ZERO)
-                        .offsets(Edges::ZERO),
-                );
-                if let Some(filename) = filename {
-                    tree.add_child(header, Text::small(filename, theme).tone(Tone::Muted));
-                }
-                if let Some(language) = language {
-                    tree.add_child(header, Text::caption(language, theme).tone(Tone::Subtle));
-                }
+        if self.filename.is_some() || self.language.is_some() {
+            let mut header = Flex::row()
+                .align(Align::Center)
+                .gap(space::SM)
+                .anchors(Edges::ZERO)
+                .offsets(Edges::ZERO);
+            if let Some(filename) = self.filename.clone() {
+                header = header.child(Text::small(filename, theme).tone(Tone::Muted));
             }
-            tree.add_child(
-                parent,
-                Label::new(code)
-                    .font_size(TextSize::Small.px())
-                    .color(theme.palette.foreground)
-                    .text_options(TextOptions::no_wrap())
-                    .anchors(Edges::ZERO)
-                    .offsets(Edges::ZERO),
-            );
-        }));
+            if let Some(language) = self.language.clone() {
+                header = header.child(Text::caption(language, theme).tone(Tone::Subtle));
+            }
+            self.spec.child(header);
+        }
+        self.spec.child(
+            Label::new(self.code.clone())
+                .font_size(TextSize::Small.px())
+                .color(theme.palette.foreground)
+                .text_options(TextOptions::no_wrap())
+                .anchors(Edges::ZERO)
+                .offsets(Edges::ZERO),
+        );
     }
 }
 
@@ -443,59 +434,52 @@ impl Component for Terminal {
             .radius(radius::LG);
         self.spec.background = Some(Box::new(move |_| style));
 
-        let command = self.command.clone();
-        let output = self.output.join("\n");
-        self.spec.children.push(Box::new(move |tree, parent| {
-            let dots = [
-                theme.palette.error,
-                theme.palette.warning,
-                theme.palette.success,
-            ];
-            let header = tree.add_child(
-                parent,
-                Flex::row()
-                    .gap(space::XS)
-                    .padding(Edges::ZERO)
+        let dots = [
+            theme.palette.error,
+            theme.palette.warning,
+            theme.palette.success,
+        ];
+        self.spec.child(
+            Flex::row()
+                .gap(space::XS)
+                .padding(Edges::ZERO)
+                .anchors(Edges::ZERO)
+                .offsets(Edges::ZERO)
+                .min_size(0.0, 8.0)
+                .foreground(move |ctx: &mut PaintContext, rect, _| {
+                    let r = 3.5;
+                    let step = r * 2.0 + space::XXS;
+                    let y = rect.top() + r;
+                    for (index, color) in dots.into_iter().enumerate() {
+                        ctx.fill_circle(
+                            Vec2::new(rect.left() + r + index as f32 * step, y),
+                            r,
+                            color,
+                        );
+                    }
+                }),
+        );
+        if let Some(command) = self.command.clone() {
+            self.spec.child(
+                Label::new(format!("$ {command}"))
+                    .font_size(TextSize::Small.px())
+                    .color(theme.palette.foreground)
+                    .text_options(TextOptions::no_wrap())
                     .anchors(Edges::ZERO)
-                    .offsets(Edges::ZERO)
-                    .min_size(0.0, 8.0)
-                    .foreground(move |ctx: &mut PaintContext, rect, _| {
-                        let r = 3.5;
-                        let step = r * 2.0 + space::XXS;
-                        let y = rect.top() + r;
-                        for (index, color) in dots.into_iter().enumerate() {
-                            ctx.fill_circle(
-                                Vec2::new(rect.left() + r + index as f32 * step, y),
-                                r,
-                                color,
-                            );
-                        }
-                    }),
+                    .offsets(Edges::ZERO),
             );
-            let _ = header;
-            if let Some(command) = command {
-                tree.add_child(
-                    parent,
-                    Label::new(format!("$ {command}"))
-                        .font_size(TextSize::Small.px())
-                        .color(theme.palette.foreground)
-                        .text_options(TextOptions::no_wrap())
-                        .anchors(Edges::ZERO)
-                        .offsets(Edges::ZERO),
-                );
-            }
-            if !output.is_empty() {
-                tree.add_child(
-                    parent,
-                    Label::new(output.clone())
-                        .font_size(TextSize::Small.px())
-                        .color(theme.palette.muted)
-                        .text_options(TextOptions::no_wrap())
-                        .anchors(Edges::ZERO)
-                        .offsets(Edges::ZERO),
-                );
-            }
-        }));
+        }
+        let output = self.output.join("\n");
+        if !output.is_empty() {
+            self.spec.child(
+                Label::new(output)
+                    .font_size(TextSize::Small.px())
+                    .color(theme.palette.muted)
+                    .text_options(TextOptions::no_wrap())
+                    .anchors(Edges::ZERO)
+                    .offsets(Edges::ZERO),
+            );
+        }
     }
 }
 
@@ -543,32 +527,27 @@ impl Component for EmptyState {
 
     fn prepare(&mut self) {
         let theme = self.theme;
-        let title = self.title.clone();
-        let description = self.description.clone();
-        self.spec.children.push(Box::new(move |tree, parent| {
-            let icon = tree.add_child(
-                parent,
-                Flex::new()
-                    .padding(Edges::ZERO)
-                    .anchors(Edges::ZERO)
-                    .offsets(Edges::ZERO)
-                    .min_size(32.0, 32.0)
-                    .foreground(move |ctx, rect, _| {
-                        draw_ui::surface(
-                            ctx,
-                            rect,
-                            &SurfaceStyle::new(theme.palette.background)
-                                .border(theme.palette.border)
-                                .radius(radius::MD),
-                        );
-                    }),
-            );
-            let _ = icon;
-            tree.add_child(parent, Text::subheading(title, theme));
-            if let Some(description) = description {
-                tree.add_child(parent, Text::small(description, theme).tone(Tone::Muted));
-            }
-        }));
+        self.spec.child(
+            Flex::new()
+                .padding(Edges::ZERO)
+                .anchors(Edges::ZERO)
+                .offsets(Edges::ZERO)
+                .min_size(32.0, 32.0)
+                .foreground(move |ctx, rect, _| {
+                    draw_ui::surface(
+                        ctx,
+                        rect,
+                        &SurfaceStyle::new(theme.palette.background)
+                            .border(theme.palette.border)
+                            .radius(radius::MD),
+                    );
+                }),
+        );
+        self.spec.child(Text::subheading(self.title.clone(), theme));
+        if let Some(description) = self.description.clone() {
+            self.spec
+                .child(Text::small(description, theme).tone(Tone::Muted));
+        }
     }
 }
 

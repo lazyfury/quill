@@ -27,6 +27,8 @@ use draw_ui::{
     InteractState, MouseFilter, SurfaceStyle, Widget,
 };
 
+use crate::node_ref::{NodeRef, Ref};
+
 /// A child builder stored on a [`Spec`].
 pub type ChildFn = Box<dyn FnOnce(&mut SceneTree, NodeId)>;
 
@@ -64,6 +66,27 @@ impl Spec {
         Self {
             data: ControlData::default(),
             ..Self::default()
+        }
+    }
+
+    /// Records `child` to be built under this spec's node at mount time.
+    ///
+    /// This is the `prepare(&mut self)`-friendly counterpart to
+    /// [`Component::child`], which requires `self` by value.
+    pub fn child<C: Component + 'static>(&mut self, child: C) {
+        self.children.push(Box::new(move |tree, parent| {
+            child.build(tree, parent);
+        }));
+    }
+
+    /// Records several children (equivalent to repeated [`Spec::child`]).
+    pub fn children<I, C>(&mut self, children: I)
+    where
+        I: IntoIterator<Item = C>,
+        C: Component + 'static,
+    {
+        for child in children {
+            self.child(child);
         }
     }
 }
@@ -127,6 +150,26 @@ pub trait Component: Sized {
             self = self.child(child);
         }
         self
+    }
+
+    /// Wraps `self` so its mounted `NodeId` is written to `slot`.
+    ///
+    /// This is the component equivalent of Godot holding a `Node*` from `new()`
+    /// / React's `ref` callback: the slot exists before mount and is read after.
+    /// It works identically through
+    /// [`SceneTree::add_child`](draw_scene::SceneTree::add_child) and
+    /// [`Component::child`], because both mount paths run [`build`]
+    /// ([`Component::build`]).
+    fn ref_(self, slot: &NodeRef) -> Ref<Self> {
+        Ref::new(self, {
+            let slot = slot.clone();
+            move |id| slot.fill(id)
+        })
+    }
+
+    /// Like [`ref_`](Component::ref_), but reports the mounted id to a callback.
+    fn with_ref(self, on_mount: impl FnOnce(NodeId) + 'static) -> Ref<Self> {
+        Ref::new(self, on_mount)
     }
 
     /// Paints a rounded surface behind the node.

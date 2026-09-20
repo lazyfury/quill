@@ -4,7 +4,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::base::{update_control, Component, Spec};
-use draw_core::{Color, Cursor, Edges, NodeId, Size, Vec2};
+use crate::NodeRef;
+use draw_core::{Color, Cursor, Edges, Size, Vec2};
 use draw_theme::Theme;
 use draw_ui::{DragPhase, MouseFilter, SizeBasis, Widget};
 
@@ -15,20 +16,22 @@ use draw_ui::{DragPhase, MouseFilter, SizeBasis, Widget};
 /// target pane's flex basis through the shared width cell, and the flex
 /// container re-adapts the remaining panes.
 ///
+/// The target is a [`NodeRef`] so siblings can reference each other before
+/// mount:
+///
 /// ```ignore
-/// let width = Rc::new(Cell::new(220.0));
-/// let sidebar = tree.add_child(split, Sidebar::new(...).basis(SizeBasis::Px(width.get())));
-/// tree.add_child(split, ResizeHandle::vertical(theme)
-///     .target(sidebar)
-///     .width(width)
-///     .min(140.0));
+/// let sidebar = NodeRef::new();
+/// let tree = Flex::row()
+///     .child(Sidebar::new(...).ref_(&sidebar))
+///     .child(ResizeHandle::vertical(theme).target(sidebar).width(width).min(140.0))
+///     .into_tree();
 /// ```
 pub struct ResizeHandle {
     spec: Spec,
     theme: Theme,
     vertical: bool,
     size: f32,
-    target: Option<NodeId>,
+    target: Option<NodeRef>,
     width: Option<Rc<Cell<f32>>>,
     min: f32,
     max: f32,
@@ -66,7 +69,7 @@ impl ResizeHandle {
     }
 
     /// The pane whose main-axis size this handle drives.
-    pub fn target(mut self, target: NodeId) -> Self {
+    pub fn target(mut self, target: NodeRef) -> Self {
         self.target = Some(target);
         self
     }
@@ -163,7 +166,7 @@ impl Component for ResizeHandle {
             }
         }));
 
-        let (Some(target), Some(width)) = (self.target, self.width.clone()) else {
+        let (Some(target), Some(width)) = (self.target.clone(), self.width.clone()) else {
             return;
         };
         let (min, max) = (self.min, self.max);
@@ -176,9 +179,11 @@ impl Component for ResizeHandle {
                 let next = (current + step).clamp(min, max);
                 if (next - current).abs() > f32::EPSILON {
                     width.set(next);
-                    update_control(tree, target, |data| {
-                        data.layout.basis = SizeBasis::Px(next);
-                    });
+                    if let Some(target) = target.get() {
+                        update_control(tree, target, |data| {
+                            data.layout.basis = SizeBasis::Px(next);
+                        });
+                    }
                 }
             }
         }));

@@ -147,15 +147,12 @@ impl Component for Button {
         };
         let text = self.text.clone();
         let font_size = self.font_size;
-        self.spec.children.push(Box::new(move |tree, parent| {
-            tree.add_child(
-                parent,
-                Label::new(text)
-                    .font_size(font_size)
-                    .color(color)
-                    .text_options(TextOptions::no_wrap()),
-            );
-        }));
+        self.spec.child(
+            Label::new(text)
+                .font_size(font_size)
+                .color(color)
+                .text_options(TextOptions::no_wrap()),
+        );
         self.spec.on_click = self.on_click.take();
     }
 }

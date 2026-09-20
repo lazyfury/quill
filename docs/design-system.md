@@ -153,7 +153,7 @@ tree.add_child(tree.root(), Card::new(theme).gap(12.0)
 
 Every `Component` supports the same modifiers as a method: `grow`, `min_size`,
 `anchors`/`offsets`, `background`/`surface`/`dynamic_background`, `foreground`,
-`on_click`, `mouse_filter` and `child`.
+`on_click`, `mouse_filter`, `child`, `ref_` and `with_ref`.
 
 Extend the library by implementing `draw_components::Component` (see
 `docs/components.md` for the full `spec`/`widget` walkthrough).
@@ -226,6 +226,24 @@ backward-compatible addition and record it here.
   `draw_ui`. `Theme` stays pure data (mode + palette + scale accessors), and
   `draw_components` (renamed from `draw_kit`) now contains only component
   builders.
+- **`draw_components::NodeRef` / `Ref<C>` + `Component::ref_` / `with_ref`**
+  (Stage 25.x): a component is a pure spec with no identity until mount, so the
+  declarative chain exposes node ids through callback refs. `NodeRef` is a clone
+  slot filled at mount; `Component::ref_(&slot)` and `Component::with_ref(cb)`
+  wrap a component in `Ref<C>`, which implements both `Component` and
+  `draw_scene::SceneChild`, so the slot is filled identically whether mounted via
+  `SceneTree::add_child(parent, c.ref_(&slot))` or `parent.child(c.ref_(&slot))`.
+  This is the Godot `Node*`-from-`new()` / React `ref` equivalent; it is additive
+  and does not change `Widget`/`ControlData`/`Spec` shapes.
+- **`SceneTree::from_component` / `SceneChild::into_tree`** (Stage 25.x):
+  `draw_scene` gained a top-level constructor — `SceneTree::from_component(root)`
+  mounts a `SceneChild` under the root of a fresh tree, and `SceneChild::into_tree()`
+  is the chainable sugar. `SceneTree::add_child` stays as the low-level primitive.
+  `SceneChild` is now explicitly `Sized` (it already took `self` by value). A whole
+  scene can therefore compose declaratively with `Component::child` and mount once.
+  `ResizeHandle::target` changed from an eager `NodeId` to a deferred `NodeRef`, so
+  a divider can reference its sibling pane before mount (order-independent); only
+  the demo called `.target`.
 
 ## Deferred
 

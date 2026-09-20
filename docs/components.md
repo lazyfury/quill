@@ -1,8 +1,8 @@
 # Components
 
 UI is built from **components** on one `draw_scene::SceneTree`. A component is a
-value that builds exactly one primary control node; attach it with
-`SceneTree::add_child` and nest with `.child()`.
+value that builds exactly one primary control node; mount a whole scene with
+`.into_tree()` (or `SceneTree::add_child`) and nest with `.child()`.
 
 All UI runtime state lives on the tree (control data, widget, decorators, click
 callback, GUI state, layout cache, text measurer). `draw_ui` is a set of free
@@ -19,41 +19,33 @@ root adds the themed library (`Text`, `Card`, `Button`, `Checkbox`, `Switch`,
 
 ## Create & compose components
 
-Attach primitives with `add_child`; compose a subtree with `.child(..)`:
+Compose declaratively with `.child(..)` / `.children([..])`, then mount the
+whole scene once with `.into_tree()`:
 
 ```rust
 use draw_components::base::Button;
-use draw_components::{Component, Flex, Label, Panel, VBox};
+use draw_components::{Column, Label, Panel, Row};
 use draw_scene::SceneTree;
 
-let mut tree = SceneTree::new();
-
-let root = tree.add_child(tree.root(), Flex::column().gap(8.0));
-let panel = tree.add_child(root, Panel::new());
-let vbox = tree.add_child(panel, VBox::new().separation(12.0));
-let label = tree.add_child(vbox, Label::new("Hello"));
-
-let button = tree.add_child(
-    vbox,
-    Button::new("Click me").on_click(|| { /* mutate app state */ }),
-);
-
-// Equivalent, but the whole subtree is one value:
-tree.add_child(
-    root,
-    Panel::new()
-        .child(Label::new("Settings"))
-        .child(Button::new("Save")),
-);
+let tree = Column::new()
+    .gap(8.0)
+    .child(Row::new().child(Label::new("Hello")))
+    .child(
+        Panel::new()
+            .child(Label::new("Settings"))
+            .child(Button::new("Save").on_click(|| { /* mutate app state */ })),
+    )
+    .into_tree();
 
 draw_ui::layout(&mut tree, viewport);
 draw_ui::paint(&tree, &mut ctx);
 ```
 
-`add_child` returns the created `NodeId`. Every node-mutating setter is a
-`Component` method (`grow`, `min_size`, `anchors`, `offsets`, `order`,
-`background`, `surface`, `foreground`, `on_click`, `mouse_filter`, `child`), so
-they chain after any component.
+`tree.add_child(parent, child)` returns the new `NodeId` and stays for runtime
+additions. Every node-mutating setter is a `Component` method (`grow`,
+`min_size`, `anchors`, `offsets`, `order`, `background`, `surface`,
+`foreground`, `on_click`, `mouse_filter`, `child`, `children`, `ref_`,
+`with_ref`), so they chain after any component.
 
 ## Layout
 
@@ -322,8 +314,8 @@ let list = ctx.into_draw_list();
 
 ## Extend with a custom component
 
-Implement `draw_components::Component` for your own builder and attach it with
-`add_child`:
+Implement `draw_components::Component` for your own builder and mount it with
+`.into_tree()` / `add_child`:
 
 ```rust
 use draw_components::{Component, Flex, Spec};
@@ -365,6 +357,65 @@ spec (layout, background/foreground, click callback, `.child()` list). Override
 `build` for fully custom composites.
 
 Keep behavior driven only by core state so components stay headless-testable.
+
+## Component authoring style
+
+`examples/demo_app` and the library follow one convention: a component is a pure
+spec, its `NodeId` exists only after mount, and the tree is touched only at
+mount time.
+
+- **Compose** with `.child(..)` / `.children([..])` — deferred, no tree. Build
+  leaf components as named locals first, then compose the root once at the end:
+
+  ```rust
+  let header = Row::new().child(app_icon(20.0, theme)).child(Text::subheading("Quill", theme));
+  let rows = NOTES.iter().enumerate().map(|(i, note)| {
+      let slots = handles.list_rows.clone();
+      note_row_view(theme, note, i, &state.selected).with_ref(move |id| slots.borrow_mut().push(id))
+  });
+
+  let inner = Column::new().gap(space::XS).child(header).children(rows);
+  ```
+
+- **Composite components** come in two shapes:
+  - root is an existing primitive → wrap it as `inner`, delegate
+    `spec`/`widget`/`prepare`, and only override `name()`;
+  - custom mount logic → own `spec: Spec`, hand-write `widget()`, override
+    `build(self, tree, parent)`.
+
+  ```rust
+  struct Sidebar { inner: Column }
+  impl Component for Sidebar {
+      fn spec(&mut self) -> &mut Spec { self.inner.spec() }
+      fn name(&self) -> &'static str { "Sidebar" }
+      fn widget(&self) -> Widget { self.inner.widget() }
+      fn prepare(&mut self) { self.inner.prepare(); }
+  }
+  ```
+
+- **Reach a node after mount** with `NodeRef` + `ref_` / `with_ref`:
+
+  ```rust
+  let title = NodeRef::new();
+  let header = Row::new().child(Text::subheading("Quill", theme).ref_(&title));
+  let tree = Column::new().child(header).into_tree();
+  if let Some(id) = title.get() { draw_components::set_text(&mut tree, id, "Inbox"); }
+  ```
+
+- **Add children in `prepare`** with `Spec::child` / `Spec::children` —
+  `Component::child` needs `self` by value, which `prepare(&mut self)` lacks:
+
+  ```rust
+  self.spec.child(Label::new(text).font_size(size).color(color));
+  ```
+
+- **Mount** static scenes once with `.into_tree()` /
+  `SceneTree::from_component(root)`. `tree.add_child` is the low-level primitive:
+  use it only in `build` overrides, dynamic runtime (overlays, router views), and
+  tools/tests/benches that capture ids.
+
+- **State** is passed in as `Rc<Cell<_>>` (a `DemoState`-like struct) and changed
+  through `on_click`/`on_drag` callbacks — never by reaching into the tree.
 
 ## Full example
 

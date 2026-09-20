@@ -26,22 +26,22 @@
 //! The app owns no window/backend/browser API. Both `wgpu_demo` and the WASM
 //! `web_demo` build and drive this exact app.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use draw_components::{
-    Badge, Button, Checkbox, Divider, Overlays, ResizeHandle, Router, Switch, Text,
+    Badge, Button, Checkbox, Divider, NodeRef, Overlays, ResizeHandle, Router, Spec, Switch, Text,
 };
 use draw_components::{Column, Component, Flex, Label, Panel, Row};
 use draw_core::{
     Color, Cursor, Edges, EventResult, InputEvent, NodeId, Rect, Size, Vec2, ViewportSize,
 };
 use draw_render::{CornerRadii, PaintContext};
-use draw_scene::SceneTree;
+use draw_scene::{SceneChild, SceneTree};
 use draw_theme::{radius, space, TextSize, Theme, Tone};
 use draw_ui::{
-    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Justify, MouseFilter, SizeBasis,
-    SurfaceStyle, TextMeasurer, TextOptions,
+    fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Control, Justify, MouseFilter,
+    SizeBasis, SurfaceStyle, TextMeasurer, TextOptions, Widget,
 };
 
 /// Sidebar width in logical pixels.
@@ -130,16 +130,87 @@ const NOTES: &[Note] = &[
 const NAV_ITEMS: &[&str] = &["All Notes", "Recent", "Favorites", "Shared"];
 const TAG_ITEMS: &[&str] = &["Design", "Rust", "Docs"];
 
+/// Shared, mutable application state.
+///
+/// The cells are cheap to clone, so the panes and the host read/write the same
+/// values without mutexes while each pane still owns its own node handles (see
+/// [`Sidebar`], [`NoteList`] and [`DetailPane`]).
+#[derive(Clone)]
+struct DemoState {
+    selected: Rc<Cell<usize>>,
+    selected_nav: Rc<Cell<usize>>,
+    clicks: Rc<Cell<u32>>,
+    sidebar_width: Rc<Cell<f32>>,
+    list_width: Rc<Cell<f32>>,
+    delete_requested: Rc<Cell<bool>>,
+    deleted: Rc<Cell<bool>>,
+}
+
+impl DemoState {
+    fn new() -> Self {
+        Self {
+            selected: Rc::new(Cell::new(0)),
+            selected_nav: Rc::new(Cell::new(0)),
+            clicks: Rc::new(Cell::new(0)),
+            sidebar_width: Rc::new(Cell::new(SIDEBAR_WIDTH)),
+            list_width: Rc::new(Cell::new(LIST_WIDTH)),
+            delete_requested: Rc::new(Cell::new(false)),
+            deleted: Rc::new(Cell::new(false)),
+        }
+    }
+}
+
+/// Node ids the panes report back through callback refs at mount time.
+///
+/// The panes only *write* these slots; [`DemoApp`] reads them after mounting and
+/// keeps the resolved values as plain fields.
+#[derive(Clone, Default)]
+struct Handles {
+    sidebar: NodeRef,
+    list: NodeRef,
+    detail: NodeRef,
+    hero: NodeRef,
+    detail_title: NodeRef,
+    detail_body: NodeRef,
+    detail_tag: NodeRef,
+    detail_meta: NodeRef,
+    primary_button: NodeRef,
+    nav_rows: Rc<RefCell<Vec<NodeId>>>,
+    list_rows: Rc<RefCell<Vec<NodeId>>>,
+    router: Rc<RefCell<Option<Router>>>,
+}
+
+/// The left-hand navigation pane: app icon, search, library nav and tag nav.
+struct Sidebar {
+    inner: Column,
+}
+
+/// The middle content list: header, divider and one row per note.
+struct NoteList {
+    inner: Column,
+}
+
+/// The right-hand routed detail pane: note / settings views.
+struct DetailPane {
+    spec: Spec,
+    theme: Theme,
+    route: Rc<Cell<usize>>,
+    note_view: Column,
+    settings: Column,
+    handles: Handles,
+}
+
 /// Application state shared by every demo host.
 pub struct DemoApp {
     tree: SceneTree,
     theme: Theme,
+    state: DemoState,
     sidebar: NodeId,
     list: NodeId,
     detail: NodeId,
     hero: NodeId,
-    list_rows: Vec<NodeId>,
     nav_rows: Vec<NodeId>,
+    list_rows: Vec<NodeId>,
     detail_title: NodeId,
     detail_body: NodeId,
     detail_tag: NodeId,
@@ -147,14 +218,7 @@ pub struct DemoApp {
     primary_button: NodeId,
     /// Router for the right-hand pane (0 = note detail, 1 = settings).
     detail_router: Router,
-    selected: Rc<Cell<usize>>,
-    selected_nav: Rc<Cell<usize>>,
-    sidebar_width: Rc<Cell<f32>>,
-    list_width: Rc<Cell<f32>>,
-    clicks: Rc<Cell<u32>>,
     overlays: Overlays,
-    delete_requested: Rc<Cell<bool>>,
-    deleted: Rc<Cell<bool>>,
     /// Extra top padding reserved on the sidebar to clear a transparent title bar.
     titlebar_inset: f32,
     viewport: ViewportSize,
@@ -174,83 +238,67 @@ impl DemoApp {
 
     /// Builds the app with an explicit theme.
     pub fn with_theme(theme: Theme) -> Self {
-        let mut tree = SceneTree::new();
-        let tree_root = tree.root();
+        // Shared state and node handles are created here and passed into the
+        // panes; the panes report their internal node ids back via `ref_`.
+        let state = DemoState::new();
+        let handles = Handles::default();
+
         // Top-level control (anchored to the viewport) plus a split row that
-        // owns the three panes. Keeping the frame separate means the split's
-        // flex layout is resolved by the layout engine, while the frame itself
-        // just fills the viewport.
-        let root = tree.add_child(tree_root, Flex::column().mouse_filter(MouseFilter::Ignore));
-        let split = tree.add_child(
-            root,
-            Flex::row()
-                .gap(0.0)
-                .padding(Edges::ZERO)
-                .mouse_filter(MouseFilter::Ignore),
-        );
+        // owns the three panes. The whole scene composes declaratively and is
+        // mounted once with `into_tree`; `tree.add_child` stays for runtime
+        // additions (overlays, router views).
+        let tree = Flex::column()
+            .mouse_filter(MouseFilter::Ignore)
+            .child(
+                Flex::row()
+                    .gap(0.0)
+                    .padding(Edges::ZERO)
+                    .mouse_filter(MouseFilter::Ignore)
+                    .child(Sidebar::new(theme, &state, &handles).ref_(&handles.sidebar))
+                    .child(
+                        ResizeHandle::vertical(theme)
+                            .target(handles.sidebar.clone())
+                            .width(state.sidebar_width.clone())
+                            .min(SIDEBAR_MIN)
+                            .max(SIDEBAR_MAX),
+                    )
+                    .child(NoteList::new(theme, &state, &handles).ref_(&handles.list))
+                    .child(
+                        ResizeHandle::vertical(theme)
+                            .target(handles.list.clone())
+                            .width(state.list_width.clone())
+                            .min(LIST_MIN)
+                            .max(LIST_MAX),
+                    )
+                    .child(DetailPane::new(theme, &state, &handles).ref_(&handles.detail)),
+            )
+            .into_tree();
 
-        let selected = Rc::new(Cell::new(0));
-        let selected_nav = Rc::new(Cell::new(0));
-        let delete_requested = Rc::new(Cell::new(false));
-        let clicks = Rc::new(Cell::new(0));
-        let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
-        let list_width = Rc::new(Cell::new(LIST_WIDTH));
-
-        // Split view: panes and separators are siblings in the flex row, so the
-        // dividers take part in layout instead of being overlaid on the column
-        // boundaries. The sidebar boundary is a draggable resize gutter; the
-        // list boundary is a static rule.
-        let (sidebar, nav_rows) =
-            build_sidebar(&mut tree, split, theme, &sidebar_width, &selected_nav);
-        tree.add_child(
-            split,
-            ResizeHandle::vertical(theme)
-                .target(sidebar)
-                .width(sidebar_width.clone())
-                .min(SIDEBAR_MIN)
-                .max(SIDEBAR_MAX),
-        );
-        let (list, list_rows) = build_list(&mut tree, split, theme, &list_width, &selected);
-        tree.add_child(
-            split,
-            ResizeHandle::vertical(theme)
-                .target(list)
-                .width(list_width.clone())
-                .min(LIST_MIN)
-                .max(LIST_MAX),
-        );
-        let detail = build_detail(
-            &mut tree,
-            split,
-            theme,
-            &selected,
-            &clicks,
-            &delete_requested,
-        );
+        // Resolve the callback refs into plain values before constructing `Self`.
+        let nav_rows = handles.nav_rows.borrow().clone();
+        let list_rows = handles.list_rows.borrow().clone();
+        let detail_router = handles.router.borrow_mut().take().expect("router mounted");
 
         Self {
             tree,
             theme,
-            sidebar,
-            list,
-            detail: detail.root,
-            hero: detail.hero,
-            list_rows,
+            state,
+            sidebar: handles.sidebar.get().expect("sidebar mounted"),
+            list: handles.list.get().expect("list mounted"),
+            detail: handles.detail.get().expect("detail mounted"),
+            hero: handles.hero.get().expect("detail hero mounted"),
             nav_rows,
-            detail_title: detail.title,
-            detail_body: detail.body,
-            detail_tag: detail.tag,
-            detail_meta: detail.meta,
-            primary_button: detail.primary_button,
-            detail_router: detail.router,
-            selected,
-            selected_nav,
-            clicks,
+            list_rows,
+            detail_title: handles.detail_title.get().expect("detail title mounted"),
+            detail_body: handles.detail_body.get().expect("detail body mounted"),
+            detail_tag: handles.detail_tag.get().expect("detail tag mounted"),
+            detail_meta: handles.detail_meta.get().expect("detail meta mounted"),
+            primary_button: handles
+                .primary_button
+                .get()
+                .expect("primary button mounted"),
+            detail_router,
             overlays: Overlays::new(theme),
-            sidebar_width,
-            list_width,
-            delete_requested,
-            deleted: Rc::new(Cell::new(false)),
             titlebar_inset: 0.0,
             viewport: ViewportSize::new(Size::new(1100.0, 720.0)),
         }
@@ -330,11 +378,11 @@ impl DemoApp {
     }
 
     pub fn selected(&self) -> usize {
-        self.selected.get()
+        self.state.selected.get()
     }
 
     pub fn selected_nav(&self) -> usize {
-        self.selected_nav.get()
+        self.state.selected_nav.get()
     }
 
     /// Current route of the right-hand detail pane (`0` = note, `1` = settings).
@@ -354,17 +402,17 @@ impl DemoApp {
 
     /// Current sidebar width, in logical pixels (draggable via the gutter).
     pub fn sidebar_width(&self) -> f32 {
-        self.sidebar_width.get()
+        self.state.sidebar_width.get()
     }
 
     /// Current list width, in logical pixels (draggable via the gutter).
     pub fn list_width(&self) -> f32 {
-        self.list_width.get()
+        self.state.list_width.get()
     }
 
     /// Number of times the primary ("New Note") button has been clicked.
     pub fn clicks(&self) -> u32 {
-        self.clicks.get()
+        self.state.clicks.get()
     }
 
     /// Center of the primary button in logical viewport coordinates.
@@ -391,8 +439,8 @@ impl DemoApp {
         // Apply the right-pane route (a click only writes the shared cell).
         self.detail_router.sync(&mut self.tree);
 
-        if self.delete_requested.replace(false) {
-            let deleted = self.deleted.clone();
+        if self.state.delete_requested.replace(false) {
+            let deleted = self.state.deleted.clone();
             let id = self
                 .overlays
                 .confirm("Delete note?", "This cannot be undone.");
@@ -401,11 +449,11 @@ impl DemoApp {
                 .destructive(id, true)
                 .on_confirm(id, move || deleted.set(true));
         }
-        if self.deleted.replace(false) {
+        if self.state.deleted.replace(false) {
             self.overlays.message_tone("Note deleted", Tone::Success);
         }
 
-        let index = self.selected.get().min(NOTES.len() - 1);
+        let index = self.state.selected.get().min(NOTES.len() - 1);
         let note = &NOTES[index];
         draw_components::set_text(&mut self.tree, self.detail_title, note.title);
         draw_components::set_text(&mut self.tree, self.detail_body, note.body);
@@ -540,40 +588,19 @@ fn nav_row_view(theme: Theme, label: &str, index: usize, selected: &Rc<Cell<usiz
         .on_click(move || click.set(index))
 }
 
-fn build_sidebar(
-    tree: &mut SceneTree,
-    root: NodeId,
-    theme: Theme,
-    width: &Rc<Cell<f32>>,
-    selected_nav: &Rc<Cell<usize>>,
-) -> (NodeId, Vec<NodeId>) {
-    let sidebar = tree.add_child(
-        root,
-        Column::new()
-            .gap(space::MD)
-            .padding(Edges::new(
-                space::LG,
-                SIDEBAR_PADDING_TOP,
-                space::MD,
-                space::MD,
-            ))
-            .basis(SizeBasis::Px(width.get()))
-            .shrink(0.0)
-            .surface(SurfaceStyle::new(theme.palette.surface)),
-    );
-
-    tree.add_child(
-        sidebar,
-        Row::new()
+impl Sidebar {
+    /// Composes the left-hand pane declaratively; the tree is not touched here.
+    ///
+    /// Leaf components are built first, then the column composes them once at
+    /// the end.
+    fn new(theme: Theme, state: &DemoState, handles: &Handles) -> Self {
+        let header = Row::new()
             .align(Align::Center)
             .gap(space::SM)
             .child(app_icon(20.0, theme))
-            .child(Text::subheading("Quill", theme)),
-    );
+            .child(Text::subheading("Quill", theme));
 
-    tree.add_child(
-        sidebar,
-        Panel::new()
+        let search = Panel::new()
             .color(Color::TRANSPARENT)
             .flat()
             .min_size(0.0, 30.0)
@@ -589,33 +616,69 @@ fn build_sidebar(
                     .text_options(TextOptions::no_wrap())
                     .anchors(Edges::new(0.0, 0.5, 1.0, 0.5))
                     .offsets(Edges::new(space::SM, -8.0, -space::SM, 8.0)),
-            ),
-    );
+            );
 
-    tree.add_child(sidebar, Text::caption("Library", theme).tone(Tone::Subtle));
-    let mut nav_rows = Vec::new();
-    for (index, label) in NAV_ITEMS.iter().enumerate() {
-        nav_rows.push(tree.add_child(sidebar, nav_row_view(theme, label, index, selected_nav)));
-    }
-    tree.add_child(sidebar, Text::caption("Tags", theme).tone(Tone::Subtle));
-    for (index, label) in TAG_ITEMS.iter().enumerate() {
-        nav_rows.push(tree.add_child(
-            sidebar,
-            nav_row_view(theme, label, NAV_ITEMS.len() + index, selected_nav),
-        ));
-    }
+        let library = Text::caption("Library", theme).tone(Tone::Subtle);
+        let tags = Text::caption("Tags", theme).tone(Tone::Subtle);
 
-    tree.add_child(sidebar, Flex::new().padding(Edges::ZERO).grow(1.0));
-    tree.add_child(
-        sidebar,
-        Row::new()
+        let nav_rows = NAV_ITEMS.iter().enumerate().map(|(index, label)| {
+            let rows = handles.nav_rows.clone();
+            nav_row_view(theme, label, index, &state.selected_nav)
+                .with_ref(move |id| rows.borrow_mut().push(id))
+        });
+        let tag_rows = TAG_ITEMS.iter().enumerate().map(|(index, label)| {
+            let rows = handles.nav_rows.clone();
+            nav_row_view(theme, label, NAV_ITEMS.len() + index, &state.selected_nav)
+                .with_ref(move |id| rows.borrow_mut().push(id))
+        });
+
+        let spacer = Flex::new().padding(Edges::ZERO).grow(1.0);
+        let footer = Row::new()
             .align(Align::Center)
             .gap(space::SM)
             .child(Badge::new("v0.1.0", theme).tone(Tone::Muted))
-            .child(Text::caption("local", theme).tone(Tone::Subtle)),
-    );
+            .child(Text::caption("local", theme).tone(Tone::Subtle));
 
-    (sidebar, nav_rows)
+        let inner = Column::new()
+            .gap(space::MD)
+            .padding(Edges::new(
+                space::LG,
+                SIDEBAR_PADDING_TOP,
+                space::MD,
+                space::MD,
+            ))
+            .basis(SizeBasis::Px(state.sidebar_width.get()))
+            .shrink(0.0)
+            .surface(SurfaceStyle::new(theme.palette.surface))
+            .child(header)
+            .child(search)
+            .child(library)
+            .children(nav_rows)
+            .child(tags)
+            .children(tag_rows)
+            .child(spacer)
+            .child(footer);
+
+        Self { inner }
+    }
+}
+
+impl Component for Sidebar {
+    fn spec(&mut self) -> &mut Spec {
+        self.inner.spec()
+    }
+
+    fn name(&self) -> &'static str {
+        "Sidebar"
+    }
+
+    fn widget(&self) -> Widget {
+        self.inner.widget()
+    }
+
+    fn prepare(&mut self) {
+        self.inner.prepare();
+    }
 }
 
 fn note_row_view(theme: Theme, note: &Note, index: usize, selected: &Rc<Cell<usize>>) -> Row {
@@ -669,141 +732,109 @@ fn note_row_view(theme: Theme, note: &Note, index: usize, selected: &Rc<Cell<usi
         .on_click(move || click.set(index))
 }
 
-fn build_list(
-    tree: &mut SceneTree,
-    root: NodeId,
-    theme: Theme,
-    width: &Rc<Cell<f32>>,
-    selected: &Rc<Cell<usize>>,
-) -> (NodeId, Vec<NodeId>) {
-    let list = tree.add_child(
-        root,
-        Column::new()
-            .gap(space::XS)
-            .padding(Edges::new(space::MD, space::MD, space::MD, space::MD))
-            .basis(SizeBasis::Px(width.get()))
-            .shrink(0.0)
-            .surface(SurfaceStyle::new(theme.palette.background)),
-    );
-
-    tree.add_child(
-        list,
-        Row::new()
+impl NoteList {
+    /// Composes the middle content list declaratively; no tree here.
+    ///
+    /// Leaf components are built first, then the column composes them once at
+    /// the end.
+    fn new(theme: Theme, state: &DemoState, handles: &Handles) -> Self {
+        let header = Row::new()
             .align(Align::Center)
             .justify(Justify::SpaceBetween)
             .gap(space::SM)
             .padding(Edges::new(space::SM, space::XS, space::SM, space::XS))
             .min_size(0.0, 32.0)
             .child(Text::heading("All Notes", theme))
-            .child(Text::small(format!("{} notes", NOTES.len()), theme).tone(Tone::Muted)),
-    );
-    tree.add_child(list, Divider::horizontal(theme));
+            .child(Text::small(format!("{} notes", NOTES.len()), theme).tone(Tone::Muted));
 
-    let rows = NOTES
-        .iter()
-        .enumerate()
-        .map(|(index, note)| tree.add_child(list, note_row_view(theme, note, index, selected)))
-        .collect();
+        let divider = Divider::horizontal(theme);
 
-    (list, rows)
+        let rows = NOTES.iter().enumerate().map(|(index, note)| {
+            let slots = handles.list_rows.clone();
+            note_row_view(theme, note, index, &state.selected)
+                .with_ref(move |id| slots.borrow_mut().push(id))
+        });
+
+        let inner = Column::new()
+            .gap(space::XS)
+            .padding(Edges::new(space::MD, space::MD, space::MD, space::MD))
+            .basis(SizeBasis::Px(state.list_width.get()))
+            .shrink(0.0)
+            .surface(SurfaceStyle::new(theme.palette.background))
+            .child(header)
+            .child(divider)
+            .children(rows);
+
+        Self { inner }
+    }
 }
 
-struct DetailIds {
-    root: NodeId,
-    hero: NodeId,
-    title: NodeId,
-    body: NodeId,
-    tag: NodeId,
-    meta: NodeId,
-    primary_button: NodeId,
-    router: Router,
+impl Component for NoteList {
+    fn spec(&mut self) -> &mut Spec {
+        self.inner.spec()
+    }
+
+    fn name(&self) -> &'static str {
+        "NoteList"
+    }
+
+    fn widget(&self) -> Widget {
+        self.inner.widget()
+    }
+
+    fn prepare(&mut self) {
+        self.inner.prepare();
+    }
 }
 
-fn build_detail(
-    tree: &mut SceneTree,
-    root: NodeId,
-    theme: Theme,
-    selected: &Rc<Cell<usize>>,
-    clicks: &Rc<Cell<u32>>,
-    delete_requested: &Rc<Cell<bool>>,
-) -> DetailIds {
-    // Shared route for the right-hand pane: 0 = note detail, 1 = settings.
-    let route = Rc::new(Cell::new(0));
+impl DetailPane {
+    /// Composes the right-hand pane declaratively; no tree here.
+    fn new(theme: Theme, state: &DemoState, handles: &Handles) -> Self {
+        // Shared route for the right-hand pane: 0 = note detail, 1 = settings.
+        let route = Rc::new(Cell::new(0));
 
-    // The router container: a transparent panel that fills the split row. Its
-    // child views use fill anchors, so exactly one (the visible one) occupies
-    // the whole pane.
-    let detail = tree.add_child(
-        root,
-        Panel::new()
-            .color(theme.palette.background)
-            .flat()
-            .grow(1.0),
-    );
+        // Toolbar (view 0).
+        let back = state.selected.clone();
+        let forward = state.selected.clone();
+        let to_settings = route.clone();
+        let nav_group = Row::new()
+            .align(Align::Center)
+            .gap(space::XS)
+            .child(icon_box(theme, 28.0).on_click(move || {
+                let value = back.get();
+                back.set(value.saturating_sub(1));
+            }))
+            .child(icon_box(theme, 28.0).on_click(move || {
+                let value = forward.get();
+                forward.set((value + 1).min(NOTES.len() - 1));
+            }))
+            // Gear placeholder: route to the settings view.
+            .child(icon_box(theme, 28.0).on_click(move || to_settings.set(1)));
 
-    // --- View 0: the note ------------------------------------------------
-    let note_view = tree.add_child(detail, Column::new().gap(0.0).padding(Edges::ZERO));
+        let counter = state.clicks.clone();
+        let actions = Row::new()
+            .align(Align::Center)
+            .gap(space::SM)
+            .child(Button::ghost("Share", theme))
+            .child(
+                Button::primary("New Note", theme)
+                    .on_click(move || counter.set(counter.get() + 1))
+                    .ref_(&handles.primary_button),
+            );
 
-    // Toolbar.
-    let back = selected.clone();
-    let forward = selected.clone();
-    let to_settings = route.clone();
-    let nav_group = Row::new()
-        .align(Align::Center)
-        .gap(space::XS)
-        .child(icon_box(theme, 28.0).on_click(move || {
-            let value = back.get();
-            back.set(value.saturating_sub(1));
-        }))
-        .child(icon_box(theme, 28.0).on_click(move || {
-            let value = forward.get();
-            forward.set((value + 1).min(NOTES.len() - 1));
-        }))
-        // Gear placeholder: route to the settings view.
-        .child(icon_box(theme, 28.0).on_click(move || to_settings.set(1)));
-
-    let counter = clicks.clone();
-    let toolbar = tree.add_child(
-        note_view,
-        Row::new()
+        let toolbar = Row::new()
             .align(Align::Center)
             .gap(space::SM)
             .padding(Edges::new(space::LG, space::SM, space::LG, space::SM))
             .min_size(0.0, 48.0)
             .child(nav_group)
             .child(Flex::new().padding(Edges::ZERO).grow(1.0))
-            .child(
-                Row::new()
-                    .align(Align::Center)
-                    .gap(space::SM)
-                    .child(Button::ghost("Share", theme))
-                    .child(Button::primary("New Note", theme).on_click(move || {
-                        counter.set(counter.get() + 1);
-                    })),
-            ),
-    );
-    // Capture the primary button id (last child of the actions row, itself the
-    // last child of the toolbar).
-    let actions = tree.children(toolbar).unwrap().last().copied().unwrap();
-    let primary_button = tree.children(actions).unwrap().last().copied().unwrap();
+            .child(actions);
 
-    tree.add_child(note_view, Divider::horizontal(theme));
+        // Content (view 0).
+        let note = &NOTES[0];
 
-    // Content.
-    let content = tree.add_child(
-        note_view,
-        Column::new().gap(space::LG).padding(Edges::new(
-            space::XXL,
-            space::LG,
-            space::XXL,
-            space::XXL,
-        )),
-    );
-
-    let note = &NOTES[0];
-    let hero = tree.add_child(
-        content,
-        Flex::new()
+        let hero = Flex::new()
             .padding(Edges::ZERO)
             .min_size(0.0, 220.0)
             .surface(
@@ -825,82 +856,150 @@ fn build_detail(
                         theme.palette.subtle.with_alpha(0.18),
                     );
                 }
-            }),
-    );
+            })
+            .ref_(&handles.hero);
 
-    let title_row = tree.add_child(content, Row::new().align(Align::Center).gap(space::SM));
-    let detail_title = tree.add_child(title_row, Text::heading(note.title, theme).grow(1.0));
-    let detail_tag = tree.add_child(title_row, Text::caption(note.tag, theme).tone(Tone::Accent));
+        let delete_flag = state.delete_requested.clone();
+        let content = Column::new()
+            .gap(space::LG)
+            .padding(Edges::new(space::XXL, space::LG, space::XXL, space::XXL))
+            .child(hero)
+            .child(
+                Row::new()
+                    .align(Align::Center)
+                    .gap(space::SM)
+                    .child(
+                        Text::heading(note.title, theme)
+                            .grow(1.0)
+                            .ref_(&handles.detail_title),
+                    )
+                    .child(
+                        Text::caption(note.tag, theme)
+                            .tone(Tone::Accent)
+                            .ref_(&handles.detail_tag),
+                    ),
+            )
+            .child(
+                Text::small(format!("Edited {} · {}", note.modified, note.tag), theme)
+                    .tone(Tone::Muted)
+                    .ref_(&handles.detail_meta),
+            )
+            .child(
+                Text::new(note.body, theme)
+                    .tone(Tone::Muted)
+                    .ref_(&handles.detail_body),
+            )
+            .child(
+                Row::new()
+                    .align(Align::Center)
+                    .gap(space::XL)
+                    .child(Checkbox::new("Pin note", theme))
+                    .child(Switch::new(theme).label("Shared")),
+            )
+            .child(Divider::horizontal(theme))
+            .child(
+                Row::new()
+                    .align(Align::Center)
+                    .gap(space::SM)
+                    .child(Button::secondary("Open", theme))
+                    .child(Button::secondary("Duplicate", theme))
+                    .child(Button::ghost("Delete", theme).on_click(move || delete_flag.set(true))),
+            );
 
-    let detail_meta = tree.add_child(
-        content,
-        Text::small(format!("Edited {} · {}", note.modified, note.tag), theme).tone(Tone::Muted),
-    );
-    let detail_body = tree.add_child(content, Text::new(note.body, theme).tone(Tone::Muted));
+        let note_view = Column::new()
+            .gap(0.0)
+            .padding(Edges::ZERO)
+            .child(toolbar)
+            .child(Divider::horizontal(theme))
+            .child(content);
 
-    tree.add_child(
-        content,
-        Row::new()
-            .align(Align::Center)
-            .gap(space::XL)
-            .child(Checkbox::new("Pin note", theme))
-            .child(Switch::new(theme).label("Shared")),
-    );
-    tree.add_child(content, Divider::horizontal(theme));
-
-    let delete_flag = delete_requested.clone();
-    tree.add_child(
-        content,
-        Row::new()
-            .align(Align::Center)
-            .gap(space::SM)
-            .child(Button::secondary("Open", theme))
-            .child(Button::secondary("Duplicate", theme))
-            .child(Button::ghost("Delete", theme).on_click(move || delete_flag.set(true))),
-    );
-
-    // --- View 1: settings ------------------------------------------------
-    let settings = tree.add_child(
-        detail,
-        Column::new()
+        // View 1: settings.
+        let to_note = route.clone();
+        let settings = Column::new()
+            .child(Text::heading("hello", theme))
             .gap(space::LG)
             .padding(Edges::all(space::XXL))
-            .surface(SurfaceStyle::new(theme.palette.background)),
-    );
-    tree.add_child(settings, Text::heading("Settings", theme));
-    tree.add_child(
-        settings,
-        Text::new(
-            "Preferences for this workspace. A different view in the same pane.",
+            .surface(SurfaceStyle::new(theme.palette.background))
+            .child(Text::heading("Settings", theme))
+            .child(
+                Text::new(
+                    "Preferences for this workspace. A different view in the same pane.",
+                    theme,
+                )
+                .tone(Tone::Muted),
+            )
+            .child(Checkbox::new("Enable sync", theme))
+            .child(Switch::new(theme).label("Notifications"))
+            .child(Divider::horizontal(theme))
+            .child(Button::secondary("Back to note", theme).on_click(move || to_note.set(0)));
+
+        // The router container is a transparent panel that fills the split row.
+        let mut spec = Spec::default();
+        spec.data.layout.grow = 1.0;
+
+        Self {
+            spec,
             theme,
-        )
-        .tone(Tone::Muted),
-    );
-    tree.add_child(settings, Checkbox::new("Enable sync", theme));
-    tree.add_child(settings, Switch::new(theme).label("Notifications"));
-    tree.add_child(settings, Divider::horizontal(theme));
+            route,
+            note_view,
+            settings,
+            handles: handles.clone(),
+        }
+    }
+}
 
-    let to_note = route.clone();
-    tree.add_child(
-        settings,
-        Button::secondary("Back to note", theme).on_click(move || to_note.set(0)),
-    );
+impl Component for DetailPane {
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
 
-    // --- Router: show one view at a time ---------------------------------
-    let mut router = Router::with_route(detail, route);
-    router.add_node(note_view);
-    router.add_node(settings);
-    router.sync(tree);
+    fn name(&self) -> &'static str {
+        "DetailPane"
+    }
 
-    DetailIds {
-        root: detail,
-        hero,
-        title: detail_title,
-        body: detail_body,
-        tag: detail_tag,
-        meta: detail_meta,
-        primary_button,
-        router,
+    fn widget(&self) -> Widget {
+        Widget::Panel {
+            color: self.theme.palette.background,
+            border: None,
+        }
+    }
+
+    /// Mounts the two views, wires the router and reports it via [`Handles`].
+    fn build(mut self, tree: &mut SceneTree, parent: NodeId) -> NodeId {
+        self.prepare();
+        let spec = std::mem::take(self.spec());
+        let root = tree.add_control(parent, self.name());
+        tree.set_data(root, Control::new(spec.data, self.widget()));
+
+        let note_view = tree.add_child(root, self.note_view);
+        let settings = tree.add_child(root, self.settings);
+
+        let mut router = Router::with_route(root, self.route.clone());
+        router.add_node(note_view);
+        router.add_node(settings);
+        router.sync(tree);
+        self.handles.router.borrow_mut().replace(router);
+
+        draw_components::apply_spec(tree, root, spec);
+        root
+    }
+}
+
+impl SceneChild for Sidebar {
+    fn attach(self, tree: &mut SceneTree, parent: NodeId) -> NodeId {
+        <Self as Component>::build(self, tree, parent)
+    }
+}
+
+impl SceneChild for NoteList {
+    fn attach(self, tree: &mut SceneTree, parent: NodeId) -> NodeId {
+        <Self as Component>::build(self, tree, parent)
+    }
+}
+
+impl SceneChild for DetailPane {
+    fn attach(self, tree: &mut SceneTree, parent: NodeId) -> NodeId {
+        <Self as Component>::build(self, tree, parent)
     }
 }
 
