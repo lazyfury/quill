@@ -66,7 +66,10 @@ const WINDOW_HEIGHT: f32 = 500.0;
 /// purpose: a panel hangs off a status item rather than sitting in the middle of
 /// a screen.
 const PANEL_WIDTH: f32 = 300.0;
-const PANEL_HEIGHT: f32 = 400.0;
+/// The body's height for the current content: header, status line, error line,
+/// the currency cards and the footer (hint plus the countdown row). The cards
+/// keep their own height, so this is what decides how much room the footer has.
+const PANEL_HEIGHT: f32 = 420.0;
 /// Gap between the status item and the top of the panel window, in logical
 /// pixels. Zero: the window's top edge *is* the arrow's tip, so the wedge
 /// touches the menu bar the way a system popover's does.
@@ -97,6 +100,13 @@ fn panel_device_size(scale: f32) -> Size {
 const MENU_BAR_MAX: f32 = 40.0;
 /// Menu-bar refresh interval when `--every` is not given.
 const DEFAULT_REFRESH_SECS: u64 = 60 * 5;
+/// How often the countdown line is repainted while the panel is open.
+///
+/// The line reads out whole seconds, so a coarser tick would skip numbers and a
+/// finer one would wake the loop for nothing. A closed panel has no countdown to
+/// show, and then the loop sleeps until the refresh itself is due.
+#[cfg(target_os = "macos")]
+const COUNTDOWN_TICK: Duration = Duration::from_secs(1);
 /// How long after a panel hides itself a status-item click is ignored. See
 /// [`App::toggle_panel`].
 #[cfg(target_os = "macos")]
@@ -207,6 +217,21 @@ impl Source {
             Self::Polled => "轮询",
             Self::Fallback => "兜底",
         }
+    }
+}
+
+/// When the run loop should wake next.
+///
+/// With the panel open the countdown has to tick, so the loop wakes on the
+/// second — unless the refresh is due sooner, in which case that comes first.
+/// With the panel closed there is nothing to animate and the loop sleeps
+/// straight through to the refresh.
+#[cfg(target_os = "macos")]
+fn wake_at(now: Instant, refresh_due: Instant, counting: bool) -> Instant {
+    if counting {
+        (now + COUNTDOWN_TICK).min(refresh_due)
+    } else {
+        refresh_due
     }
 }
 
@@ -584,10 +609,21 @@ impl App {
             // activates the app, which an accessory app does not do by itself.
             window.set_visible(true);
             window.focus_window();
-            window.request_redraw();
         }
         self.menu.open = true;
-        self.trace("打开面板");
+        // Fill the countdown before the first frame, so a reopening panel does
+        // not flash a footer without a line that appears one frame later.
+        self.update_countdown();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+        self.trace(&format!(
+            "打开面板，倒计时 {}",
+            self.view
+                .countdown_text()
+                .filter(|line| !line.is_empty())
+                .unwrap_or("（无）")
+        ));
     }
 
     /// Hides the panel. The window and its GPU resources stay alive, so the
@@ -960,8 +996,11 @@ impl App {
         }
 
         let Some(interval) = self.menu.interval else {
+            // `--every 0`: no timer, so no countdown line either.
+            self.update_countdown();
             return;
         };
+
         let now = Instant::now();
         let due = *self.menu.next.get_or_insert(now + interval);
         if now >= due {
@@ -970,9 +1009,44 @@ impl App {
             self.tick();
             self.request_redraw();
         }
-        if let Some(next) = self.menu.next {
-            // `WaitUntil` is consumed once it fires, so it is re-armed here.
-            event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+
+        self.update_countdown();
+
+        let refresh_due = self.menu.next.unwrap_or(now + interval);
+        event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at(
+            now,
+            refresh_due,
+            self.menu.open,
+        )));
+    }
+
+    /// Pushes the time left before the next automatic refresh into the view, and
+    /// schedules a frame when the line moved.
+    ///
+    /// The view does the formatting; this only owns the clock. Opening the panel
+    /// seeds the deadline early — before the first frame — so the panel does not
+    /// open without a line that shows up one batch later. A closed panel gets
+    /// `None`, which is also what a run without a timer shows, so the line never
+    /// claims a refresh that will not happen.
+    fn update_countdown(&mut self) {
+        let left = match (self.menu.open, self.menu.interval) {
+            (true, Some(interval)) => {
+                let next = *self
+                    .menu
+                    .next
+                    .get_or_insert_with(|| Instant::now() + interval);
+                Some(next.saturating_duration_since(Instant::now()))
+            }
+            _ => None,
+        };
+        if self.view.set_countdown(left) {
+            // Narrating each move is the only way to see the countdown tick in a
+            // run that takes no screenshots.
+            self.trace(&format!(
+                "倒计时 → {}",
+                self.view.countdown_text().unwrap_or("（无）")
+            ));
+            self.request_redraw();
         }
     }
 
@@ -1559,6 +1633,33 @@ mod tests {
         );
         assert_eq!(tray.top(), 0.0, "flush with the menu bar");
         assert_eq!(tray.size.height, 24.0 * 2.0);
+    }
+
+    /// The wedges of the countdown loop: while the panel is up the loop has to
+    /// come back on the second to move the line, but a refresh that falls due
+    /// first wins — and a closed panel goes straight to the refresh.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_loop_wakes_on_the_second_only_while_the_countdown_is_visible() {
+        let now = Instant::now();
+        let soon = now + Duration::from_millis(400);
+        let far = now + Duration::from_secs(300);
+
+        assert_eq!(
+            wake_at(now, far, false),
+            far,
+            "closed: sleep to the refresh"
+        );
+        assert_eq!(
+            wake_at(now, far, true),
+            now + COUNTDOWN_TICK,
+            "open: come back for the countdown"
+        );
+        assert_eq!(
+            wake_at(now, soon, true),
+            soon,
+            "a refresh due before the tick still wins"
+        );
     }
 
     #[cfg(target_os = "macos")]

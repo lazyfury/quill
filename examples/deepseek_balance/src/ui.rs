@@ -22,9 +22,18 @@
 //! feeds the result back through [`BalanceApp::apply_result`], which rewrites the
 //! text nodes and re-shows the currency cards. The optional [`TextMeasurer`]
 //! comes from the backend's real font, so layout matches rendering.
+//!
+//! ## Countdown
+//!
+//! The host owns the clock — it knows the interval and when the next automatic
+//! refresh is due — and pushes only the time left into the view
+//! ([`BalanceApp::set_countdown`]). The view formats it and hides the line when
+//! there is no timer, so a window run (no timer) never shows a countdown for a
+//! refresh that will not happen.
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use draw_components::{Button, Card, Column, Component, Divider, Flex, NodeRef, Ref, Row, Text};
 use draw_core::{
@@ -73,6 +82,9 @@ const STATUS_BUSY: &str = "刷新中…";
 const STATUS_FAILED: &str = "刷新失败";
 /// Footer hint: the two environment overrides.
 const FOOTER_HINT: &str = "DEEPSEEK_API_KEY / DEEPSEEK_BALANCE_URL 可覆盖默认值";
+/// Prefix of the countdown line, e.g. `自动刷新 04:32` (see
+/// [`BalanceApp::set_countdown`]).
+const COUNTDOWN_PREFIX: &str = "自动刷新";
 
 /// State shared with the click callbacks.
 ///
@@ -127,6 +139,10 @@ pub struct BalanceApp {
     refresh_button: NodeId,
     status: NodeId,
     error: NodeId,
+    countdown: NodeId,
+    /// The countdown line currently on screen, so a repeat of the same second
+    /// costs nothing. `None` means the line is hidden.
+    countdown_line: Option<String>,
     available_ok: NodeId,
     available_bad: NodeId,
     slots: Vec<CurrencySlot>,
@@ -176,7 +192,7 @@ impl BalanceApp {
                     .ref_(&refs.error),
             )
             .child(currencies(theme, &refs))
-            .child(Text::caption(FOOTER_HINT, theme).tone(Tone::Subtle));
+            .child(footer(theme, &refs));
 
         let tree = Flex::column()
             .mouse_filter(MouseFilter::Ignore)
@@ -203,6 +219,8 @@ impl BalanceApp {
             refresh_button: refs.refresh.get().expect("refresh button mounted"),
             status: refs.status.get().expect("status label mounted"),
             error: refs.error.get().expect("error label mounted"),
+            countdown: refs.countdown.get().expect("countdown label mounted"),
+            countdown_line: None,
             available_ok: refs.available_ok.get().expect("availability label mounted"),
             available_bad: refs
                 .available_bad
@@ -218,6 +236,9 @@ impl BalanceApp {
         let (ok, bad) = (app.available_ok, app.available_bad);
         app.set_visible(ok, false);
         app.set_visible(bad, false);
+        // The countdown line waits for the host to report a timer.
+        let countdown = app.countdown;
+        app.set_visible(countdown, false);
         let hidden: Vec<NodeId> = app.slots[1..].iter().map(|slot| slot.card).collect();
         for card in hidden {
             app.set_visible(card, false);
@@ -267,6 +288,19 @@ impl BalanceApp {
     /// Current error-line text (empty when the last refresh succeeded).
     pub fn error_text(&self) -> Option<&str> {
         text(&self.tree, self.error)
+    }
+
+    /// Current countdown-line text (`None` while the line is hidden).
+    ///
+    /// The host reads it back to narrate the timer in a self-check run.
+    pub fn countdown_text(&self) -> Option<&str> {
+        text(&self.tree, self.countdown)
+    }
+
+    /// Whether the countdown line is on screen.
+    #[cfg(test)]
+    pub fn countdown_visible(&self) -> Option<bool> {
+        self.tree.is_visible(self.countdown)
     }
 
     /// Total for currency card `index`.
@@ -401,6 +435,28 @@ impl BalanceApp {
         }
     }
 
+    /// Shows the time left before the host's next automatic refresh, or hides
+    /// the line when there is no timer (`None`).
+    ///
+    /// The host owns the clock, so it calls this once per event batch; the same
+    /// second formatted twice is a no-op. Returns whether the line changed, so
+    /// the host only schedules a frame when the countdown actually moved.
+    pub fn set_countdown(&mut self, remaining: Option<Duration>) -> bool {
+        let line = remaining.map(|left| format!("{COUNTDOWN_PREFIX} {}", clock(left)));
+        if line == self.countdown_line {
+            return false;
+        }
+        match line.as_deref() {
+            Some(text) => {
+                draw_components::set_text(&mut self.tree, self.countdown, text);
+                self.set_visible(self.countdown, true);
+            }
+            None => self.set_visible(self.countdown, false),
+        }
+        self.countdown_line = line;
+        true
+    }
+
     /// Takes the pending refresh request. The host calls this after `update` and
     /// queries the endpoint off-thread when it returns `true`.
     pub fn take_refresh_request(&mut self) -> bool {
@@ -493,6 +549,7 @@ struct Refs {
     refresh: NodeRef,
     status: NodeRef,
     error: NodeRef,
+    countdown: NodeRef,
     available_ok: NodeRef,
     available_bad: NodeRef,
     slots: Vec<SlotRefs>,
@@ -573,6 +630,34 @@ fn currencies(theme: Theme, refs: &Refs) -> Column {
         .children(cards)
 }
 
+/// The footer: what the environment can override, then how long until the next
+/// automatic refresh. The countdown node is hidden unless the host starts a
+/// timer, so this reads as one line in window mode.
+fn footer(theme: Theme, refs: &Refs) -> Column {
+    Column::new()
+        .gap(space::XXS)
+        .child(Text::caption(FOOTER_HINT, theme).tone(Tone::Subtle))
+        .child(
+            Text::caption("", theme)
+                .tone(Tone::Subtle)
+                .ref_(&refs.countdown),
+        )
+}
+
+/// A countdown as `MM:SS`, or `H:MM:SS` past an hour.
+///
+/// Rounded up, so a countdown never reads `00:00` while a second is still left:
+/// with truncation the final value would be on screen for two seconds.
+fn clock(remaining: Duration) -> String {
+    let seconds = remaining.as_secs() + u64::from(remaining.subsec_millis() > 0);
+    let (hours, minutes, seconds) = (seconds / 3_600, (seconds % 3_600) / 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes:02}:{seconds:02}")
+    }
+}
+
 /// One currency card: total on top, then the granted / topped-up breakdown.
 fn currency_card(theme: Theme, refs: &SlotRefs) -> Ref<Card> {
     Card::new(theme)
@@ -650,7 +735,7 @@ mod tests {
     /// The body size the host asks for when it wants the panel (mirrors
     /// `host::PANEL_WIDTH` / `host::PANEL_HEIGHT`).
     const PANEL_WIDTH_TEST: f32 = 300.0;
-    const PANEL_HEIGHT_TEST: f32 = 400.0;
+    const PANEL_HEIGHT_TEST: f32 = 420.0;
 
     fn sample() -> Balance {
         Balance {
@@ -805,6 +890,100 @@ mod tests {
         assert_eq!(app.error_text(), Some("HTTP 401: unauthorized"));
         assert_eq!(app.total_text(0), Some("110.00"), "last good values stay");
         assert!(!app.is_loading());
+    }
+
+    /// Until the host reports an interval there is nothing to count down, so the
+    /// line stays out of the layout instead of promising a refresh that a window
+    /// run (no timer) would never make.
+    #[test]
+    fn the_countdown_line_is_hidden_until_the_host_starts_a_timer() {
+        let mut app = settled(520.0, 460.0);
+        assert_eq!(app.countdown_visible(), Some(false));
+
+        assert!(app.set_countdown(Some(Duration::from_secs(300))));
+        assert_eq!(app.countdown_visible(), Some(true));
+        assert_eq!(app.countdown_text(), Some("自动刷新 05:00"));
+    }
+
+    /// The host calls this every batch; only a move of the displayed second is
+    /// worth a frame.
+    #[test]
+    fn the_countdown_line_only_moves_once_a_second() {
+        let mut app = settled(520.0, 460.0);
+        assert!(app.set_countdown(Some(Duration::from_millis(4_500))));
+        assert_eq!(app.countdown_text(), Some("自动刷新 00:05"));
+
+        assert!(
+            !app.set_countdown(Some(Duration::from_millis(4_100))),
+            "the same second on screen does not need a frame"
+        );
+        assert!(app.set_countdown(Some(Duration::from_millis(3_900))));
+        assert_eq!(app.countdown_text(), Some("自动刷新 00:04"));
+    }
+
+    #[test]
+    fn the_countdown_line_goes_away_when_the_timer_stops() {
+        let mut app = settled(520.0, 460.0);
+        app.set_countdown(Some(Duration::from_secs(12)));
+
+        assert!(app.set_countdown(None));
+        assert_eq!(app.countdown_visible(), Some(false));
+        assert!(!app.set_countdown(None), "and stays put");
+    }
+
+    #[test]
+    fn the_countdown_reads_out_mm_ss() {
+        let cases = [
+            (Duration::ZERO, "00:00"),
+            (Duration::from_millis(1), "00:01"),
+            (Duration::from_secs(5), "00:05"),
+            (Duration::from_secs(59), "00:59"),
+            (Duration::from_secs(60), "01:00"),
+            (Duration::from_secs(300), "05:00"),
+            (Duration::from_secs(3_599), "59:59"),
+            (Duration::from_secs(3_600), "1:00:00"),
+            (Duration::from_secs(3_661), "1:01:01"),
+            // Rounded up: 4.0s is `00:04` for one second, not two.
+            (Duration::from_millis(4_000), "00:04"),
+            (Duration::from_millis(4_001), "00:05"),
+        ];
+        for (remaining, expected) in cases {
+            assert_eq!(clock(remaining), expected, "for {remaining:?}");
+        }
+    }
+
+    /// The countdown is one more row in the panel, and the panel is sized for
+    /// it: the row has to land below the cards and stay inside the window. A
+    /// transparent, non-scrolling window clips whatever crosses its edge, so a
+    /// row that fell off would simply never be seen.
+    #[test]
+    fn the_countdown_line_sits_inside_the_panel() {
+        let mut app = panel();
+        app.set_countdown(Some(Duration::from_secs(300)));
+        let viewport = viewport(PANEL_WIDTH_TEST, PANEL_HEIGHT_TEST + ARROW_HEIGHT);
+        app.layout(viewport);
+
+        let window = Rect::from_min_size(
+            Vec2::ZERO,
+            Size::new(PANEL_WIDTH_TEST, PANEL_HEIGHT_TEST + ARROW_HEIGHT),
+        );
+        let line = draw_ui::control(&app.tree, app.countdown)
+            .expect("countdown control")
+            .rect;
+        let card = draw_ui::control(&app.tree, app.slots[0].card)
+            .expect("card control")
+            .rect;
+
+        assert!(
+            line.top() >= card.bottom(),
+            "the row follows the cards: {line:?} vs {card:?}"
+        );
+        assert!(
+            window.contains(Vec2::new(line.left(), line.top()))
+                && window.contains(Vec2::new(line.left(), line.bottom() - 0.5)),
+            "the row must stay inside the panel: {line:?}"
+        );
+        assert_eq!(app.countdown_text(), Some("自动刷新 05:00"));
     }
 
     #[test]
