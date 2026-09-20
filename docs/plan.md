@@ -161,7 +161,13 @@ priority order and add native tests.
   headless `--selfcheck` that asserts the frame does not grow when the listing
   goes from 5 000 to 200 000 rows (85 controls, 64 commands, 19 pooled rows at
   900x620). It is also the first host to translate a platform wheel into
-  `InputEvent::Wheel` (`host::wheel_pixels`).
+  `InputEvent::Wheel` (`host::wheel_pixels`). Its right pane is a **resizable
+  split** (`ResizeHandle::vertical` driving the main pane's basis) holding a
+  second `List`: a hex dump of the selected file's first 64 KiB, so 4 096 rows of
+  data cost the same ~30 mounted rows as 64 do. Two notes for whoever copies the
+  shape: a handle's `min`/`max` are build-time constants and cannot see the
+  viewport, so a resizing host must re-clamp on `layout`; and every virtualized
+  list in a view needs its own `ListState::sync` in the same frame step.
 - `draw_core::Key` has no `PageUp` / `PageDown`, so list UIs cannot map a
   page-step key yet (the browser falls back to arrows + `Home` / `End`). Adding
   the two variants is additive and would let `List` offer a page step.

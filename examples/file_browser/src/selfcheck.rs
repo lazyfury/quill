@@ -17,17 +17,21 @@
 //!   的条件，不开窗就能抓到 UI 回归。
 
 use draw_backend_recording::{RecordedFrame, RecordingBackend};
-use draw_core::{Size, Vec2, ViewportSize};
+use draw_core::{InputEvent, PointerButton, Size, Vec2, ViewportSize};
 use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Severity};
 use draw_render::{DrawCommand, PaintContext, RenderBackend};
 use draw_theme::Theme;
 
+use crate::preview::{self, Preview};
 use crate::scan::{Entry, Listing};
-use crate::ui::{Browser, ROW_HEIGHT};
+use crate::ui::{Browser, MAIN_WIDTH, PREVIEW_MIN, RESIZE_GUTTER, ROW_HEIGHT};
 
 /// 自检用的窗口尺寸（跟宿主的初始窗口一致）。
-const WIDTH: f32 = 900.0;
-const HEIGHT: f32 = 620.0;
+const WIDTH: f32 = 1100.0;
+const HEIGHT: f32 = 680.0;
+
+/// 预览栏里放这么多字节：64 KiB = 4 096 行 hex，画出来的却只有视口那几十行。
+const PREVIEW_BYTES: usize = 64 * 1024;
 
 /// 清单里放这么多行，但画出来的只有视口那二十几行 —— 数字差就是这份自检
 /// 要证明的事。
@@ -104,6 +108,24 @@ fn contains(frame: &RecordedFrame, needle: &str) -> bool {
     texts(frame).iter().any(|text| text.contains(needle))
 }
 
+/// 含 `needle` 的那条文字画在什么位置。用来断言"这段内容属于哪一栏"。
+fn position_of(frame: &RecordedFrame, needle: &str) -> Option<Vec2> {
+    frame.commands().iter().find_map(|command| match command {
+        DrawCommand::DrawText { text, position, .. } if text.contains(needle) => Some(*position),
+        _ => None,
+    })
+}
+
+/// 一个选中了文件、右栏放着字节的浏览器（不碰磁盘：`fixture` 直接给字节）。
+fn previewed(bytes: Vec<u8>) -> Browser {
+    let mut app = browser(ROWS);
+    // 第 1 行是文件（每 10 行一个目录），选中它才会请求预览。
+    app.select(1);
+    app.apply_preview(Preview::fixture("sample.bin", bytes));
+    app.layout(ViewportSize::new(Size::new(WIDTH, HEIGHT)));
+    app
+}
+
 /// 位置在窗口内（留 0.5 的抗锯齿余量）。
 fn on_screen(point: Vec2) -> bool {
     point.x >= -0.5 && point.y >= -0.5 && point.x <= WIDTH + 0.5 && point.y <= HEIGHT + 0.5
@@ -144,6 +166,12 @@ pub fn check() -> (usize, String) {
         app.pool_size(),
         app.visible_range(),
         frame.command_count()
+    ));
+    out.push_str(&format!(
+        "  分栏：主栏 {:.0} + 把手 {:.0} + 预览栏 {:.0}\n",
+        app.main_width(),
+        RESIZE_GUTTER,
+        app.preview_width()
     ));
 
     // -- 结构体检 --
@@ -268,8 +296,11 @@ pub fn check() -> (usize, String) {
     let mut scrolled = browser(ROWS);
     let viewport = ViewportSize::new(Size::new(WIDTH, HEIGHT));
     let before = scrolled.offset();
+    // 落在**列表**上（主栏中间），不是落在右栏或者分隔条上 —— 滚轮是沿祖先链
+    // 找滚动回调的，点在空地上就没人接。
+    let over_list = Vec2::new(MAIN_WIDTH / 2.0, HEIGHT / 2.0);
     scrolled.event(&draw_core::InputEvent::Wheel {
-        position: Vec2::new(WIDTH / 2.0, HEIGHT / 2.0),
+        position: over_list,
         delta: Vec2::new(0.0, 10.0 * ROW_HEIGHT),
     });
     scrolled.layout(viewport);
@@ -293,6 +324,124 @@ pub fn check() -> (usize, String) {
         ));
     } else {
         fail(&mut out, &mut failures, "滚动后视口行区间没变".to_string());
+    }
+
+    // -- 分栏：拖那条分隔条，改的是右栏的宽度 --
+    let mut split = browser(ROWS);
+    let before = split.preview_width();
+    let gutter = Vec2::new(split.main_width() + RESIZE_GUTTER / 2.0, 360.0);
+    split.event(&InputEvent::PointerDown {
+        position: gutter,
+        button: PointerButton::Left,
+    });
+    split.event(&InputEvent::PointerMove {
+        position: gutter + Vec2::new(60.0, 0.0),
+    });
+    split.event(&InputEvent::PointerUp {
+        position: gutter + Vec2::new(60.0, 0.0),
+        button: PointerButton::Left,
+    });
+    split.layout(viewport);
+    let after = split.preview_width();
+    if (before - after - 60.0).abs() < 1e-3 {
+        out.push_str(&format!(
+            "  ok    拖 60px：预览栏 {before:.0} -> {after:.0}（主栏 {:.0}）\n",
+            split.main_width()
+        ));
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            format!("拖动没生效：预览栏 {before} -> {after}，应该正好少 60"),
+        );
+    }
+
+    // 分隔条管不了"窗口变窄了" —— 那一半由 layout 补，否则右栏会被挤成 0 宽。
+    split.layout(ViewportSize::new(Size::new(600.0, 600.0)));
+    if (split.preview_width() - PREVIEW_MIN).abs() < 1e-3 {
+        out.push_str(&format!(
+            "  ok    窗口窄到 600 时预览栏仍保留 {:.0}px\n",
+            split.preview_width()
+        ));
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            format!(
+                "窗口变窄后预览栏是 {}，应该被保住 {}",
+                split.preview_width(),
+                PREVIEW_MIN
+            ),
+        );
+    }
+
+    // -- 二进制预览：右栏把字节画成 hex --
+    let (_, preview_frame) = record(previewed(b"Hello, world!\n".to_vec()));
+    for needle in ["sample.bin", "00000000", "48 65 6c 6c 6f", "Hello, world!."] {
+        if contains(&preview_frame, needle) {
+            out.push_str(&format!("  ok    右栏含 `{needle}`\n"));
+        } else {
+            fail(&mut out, &mut failures, format!("右栏里找不到 `{needle}`"));
+        }
+    }
+
+    // 右栏的内容确实画在右栏里（x 越过主栏右边界），不是混在左栏。
+    match position_of(&preview_frame, "00000000") {
+        Some(point) if point.x > MAIN_WIDTH => {
+            out.push_str(&format!("  ok    hex 行画在右栏（x={:.0}）\n", point.x));
+        }
+        other => fail(
+            &mut out,
+            &mut failures,
+            format!("hex 行没画在右栏：{other:?}（主栏右边界 {MAIN_WIDTH}）"),
+        ),
+    }
+
+    // 64 KiB = 4 096 行数据，画出来的只有视口那几十行。
+    let big = previewed(vec![0x5a; PREVIEW_BYTES]);
+    let (big, big_frame) = record(big);
+    let hex_rows = texts(&big_frame)
+        .iter()
+        .filter(|text| text.len() == 8 && text.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .count();
+    let hex_budget = (HEIGHT / crate::ui::HEX_ROW_HEIGHT).ceil() as usize + 2;
+    if big.preview_rows() == PREVIEW_BYTES / preview::BYTES_PER_ROW && hex_rows <= hex_budget {
+        out.push_str(&format!(
+            "  ok    {:.0} KiB 预览有 {} 行数据，只画了 {hex_rows} 行（<= {hex_budget}）\n",
+            PREVIEW_BYTES as f32 / 1024.0,
+            big.preview_rows()
+        ));
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            format!(
+                "预览没被虚拟化：{} 行数据画了 {hex_rows} 行（上限 {hex_budget}）",
+                big.preview_rows()
+            ),
+        );
+    }
+    if !contains(&big_frame, "0000fff0") {
+        out.push_str("  ok    最后一行的偏移量根本没被画出来\n");
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            "视口外的 hex 行也被画了 —— 虚拟化失效".to_string(),
+        );
+    }
+    let grown = big.control_count() - app.control_count();
+    if grown < 150 {
+        out.push_str(&format!(
+            "  ok    4 096 行数据只让树多了 {grown} 个控件（池 {}）\n",
+            big.preview_pool_size()
+        ));
+    } else {
+        fail(
+            &mut out,
+            &mut failures,
+            format!("预览让控件数涨了 {grown} 个 —— 像是把数据全挂上了"),
+        );
     }
 
     if failures == 0 {
@@ -458,7 +607,7 @@ mod tests {
         let mut app = browser(ROWS);
         let viewport = ViewportSize::new(Size::new(WIDTH, HEIGHT));
         app.event(&draw_core::InputEvent::Wheel {
-            position: Vec2::new(WIDTH / 2.0, HEIGHT / 2.0),
+            position: Vec2::new(MAIN_WIDTH / 2.0, HEIGHT / 2.0),
             delta: Vec2::new(0.0, 10.0 * ROW_HEIGHT),
         });
         app.layout(viewport);
@@ -478,5 +627,64 @@ mod tests {
         }
         assert_eq!(app.pool_size(), pool);
         assert_eq!(app.control_count(), app.control_count());
+    }
+
+    /// 右栏把选中文件的字节画成 hex：三列都在。
+    #[test]
+    fn the_preview_pane_draws_the_bytes() {
+        let (_, frame) = record(previewed(b"Hello, world!\n".to_vec()));
+        assert!(contains(&frame, "sample.bin"), "右栏标题");
+        assert!(contains(&frame, "00000000"), "偏移量那一列");
+        assert!(contains(&frame, "48 65 6c 6c 6f"), "十六进制那一列");
+        assert!(contains(&frame, "Hello, world!."), "ascii 那一列");
+    }
+
+    /// 右栏的内容画在主栏**右边** —— 两栏没叠在一起。
+    #[test]
+    fn the_preview_pane_is_on_the_right() {
+        let (_, frame) = record(previewed(b"Hello, world!\n".to_vec()));
+        let point = position_of(&frame, "00000000").expect("画了 hex 行");
+        assert!(
+            point.x > MAIN_WIDTH,
+            "hex 行应该在 x>{MAIN_WIDTH} 的地方，实际 {point:?}"
+        );
+    }
+
+    /// 64 KiB = 4 096 行数据，画出来的只有视口那几十行。
+    #[test]
+    fn a_big_preview_draws_only_the_visible_rows() {
+        let (app, frame) = record(previewed(vec![0x5a; PREVIEW_BYTES]));
+        assert_eq!(app.preview_rows(), PREVIEW_BYTES / preview::BYTES_PER_ROW);
+        assert!(!contains(&frame, "0000fff0"), "视口外的 hex 行不该被画");
+        assert!(app.preview_pool_size() < 40);
+    }
+
+    /// 拖 60px：主栏吃掉这 60px，预览栏让出来 —— 一个手柄调两个栏。
+    #[test]
+    fn dragging_the_gutter_narrows_the_preview_pane() {
+        let mut app = browser(ROWS);
+        let before = app.preview_width();
+        let gutter = Vec2::new(app.main_width() + RESIZE_GUTTER / 2.0, 360.0);
+        app.event(&InputEvent::PointerDown {
+            position: gutter,
+            button: PointerButton::Left,
+        });
+        app.event(&InputEvent::PointerMove {
+            position: gutter + Vec2::new(60.0, 0.0),
+        });
+        app.event(&InputEvent::PointerUp {
+            position: gutter + Vec2::new(60.0, 0.0),
+            button: PointerButton::Left,
+        });
+        app.layout(ViewportSize::new(Size::new(WIDTH, HEIGHT)));
+        assert!((before - app.preview_width() - 60.0).abs() < 1e-3);
+    }
+
+    /// 分隔条（`min`/`max`）管不了窗口变窄，那一半由 `layout` 补。
+    #[test]
+    fn a_narrow_window_keeps_the_preview_pane_alive() {
+        let mut app = browser(ROWS);
+        app.layout(ViewportSize::new(Size::new(600.0, 600.0)));
+        assert!((app.preview_width() - PREVIEW_MIN).abs() < 1e-3);
     }
 }

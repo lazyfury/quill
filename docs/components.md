@@ -249,6 +249,14 @@ tree.add_child(
 `LayoutStyle.basis` on drag; the surrounding `Flex` re-adapts the other panes.
 Fixed panes/gutters should use `shrink(0.0)`.
 
+One gutter resizes two panes: give the *left* pane a `basis` and let the right one
+`grow(1.0)`, then point the handle at the left pane — dragging left shrinks it and
+the right pane grows by exactly that much. The handle's `min` / `max` are
+build-time constants, so it cannot clamp against the *window*: a host whose window
+can shrink has to re-clamp the width itself on every `layout` (see
+`examples/file_browser`, which keeps `viewport - PREVIEW_MIN - gutter` as the
+ceiling) or the flexible pane disappears.
+
 ### Cursor feedback
 
 `ControlData.cursor` carries a backend-neutral `draw_core::Cursor`
@@ -349,7 +357,11 @@ naive list's 300 K controls and 200 K commands at 100 K).
 `examples/file_browser` is the end-to-end example: a directory scanner feeding a
 `List`, with the scan on a worker thread, keyboard navigation, and a headless
 self-check that asserts the frame stays flat when the listing grows from 5 000
-to 200 000 rows.
+to 200 000 rows. Its right pane is a second `List` — a hex dump of the selected
+file's first 64 KiB (4 096 rows of data, ~30 rows mounted) — behind a
+`ResizeHandle`, which is also the cheapest way to see that **one view can hold
+several virtualized lists**: each needs its own `ListState::sync` in the same
+frame step (`layout` → sync every list → `layout` again if any changed).
 
 ## Switch views (Router)
 

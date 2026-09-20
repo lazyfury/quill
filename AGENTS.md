@@ -230,6 +230,22 @@ through a winit `EventLoopProxy`). `wgpu` only in
       real consumer of `List` and the first host that turns a platform wheel into
       `InputEvent::Wheel` (`host::wheel_pixels`); it scans directories on a worker
       thread and verifies itself headlessly with `--selfcheck` / `--dump`.
+   - **Stage 25.15 (resizable split + binary preview, demo layer only — no core
+     change):** `examples/file_browser` splits into two panes the way
+     `demo_app` does — `Flex::row()` of `main(basis Px) |
+     ResizeHandle::vertical(theme).target(main) | preview(grow 1)`, so the one
+     gutter drives the left pane's basis and the right pane takes the rest.
+     Two things the component cannot do for you: a handle's `min`/`max` are
+     fixed at build time and know nothing about the viewport, so
+     `Browser::layout` re-clamps the main width to
+     `viewport - PREVIEW_MIN - gutter` every frame (otherwise a narrow window
+     squeezes the right pane to zero); and each virtualized list needs its own
+     `ListState::sync` in that same three-step frame. The right pane is a second
+     `List` over the selected file's first 64 KiB — 4096 rows of data, ~30 rows
+     mounted — formatted by `examples/file_browser/src/preview.rs` (pure
+     offset/hex/ascii functions) and read on a worker thread with the same
+     generation guard as the directory scan, so sweeping the selection with the
+     arrow keys leaves exactly one request in flight.`
 
 ## Per-stage gate (must run)
 

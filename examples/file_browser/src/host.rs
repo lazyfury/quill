@@ -27,6 +27,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key as WinitKey, NamedKey};
 use winit::window::{Window, WindowId};
 
+use crate::preview::{self, Preview};
 use crate::scan::{self, Listing};
 use crate::ui::{Browser, ROW_HEIGHT};
 
@@ -34,8 +35,8 @@ use crate::ui::{Browser, ROW_HEIGHT};
 const WHEEL_LINE_HEIGHT: f32 = 3.0 * ROW_HEIGHT;
 
 /// 窗口初始大小：列表的行池就是按这个高度算出来的。
-const WINDOW_WIDTH: f64 = 900.0;
-const WINDOW_HEIGHT: f64 = 620.0;
+const WINDOW_WIDTH: f64 = 1100.0;
+const WINDOW_HEIGHT: f64 = 680.0;
 
 /// 命令行选项（由 [`crate::main`] 解析）。
 #[derive(Clone, Debug)]
@@ -54,6 +55,9 @@ pub struct Options {
 enum UserEvent {
     /// 一份清单，带上它是第几次请求 —— 迟到的旧结果（用户已经翻走了）会被丢掉。
     Listing(u64, Listing),
+    /// 一份二进制预览，同样带请求号：按住方向键扫过一堆文件时，只有最后一次
+    /// 的结果该落到右栏。
+    Preview(u64, Preview),
 }
 
 /// Runs the browser until the window closes (or `--frames` runs out).
@@ -83,6 +87,8 @@ struct App {
     proxy: EventLoopProxy<UserEvent>,
     /// 第几次读目录请求；回来的结果带着这个号，对不上就说明已经过期。
     generation: u64,
+    /// 第几次读文件请求。跟目录分开计：两者可以同时在进行，互不作废。
+    preview_generation: u64,
     /// `--frames` 剩下的帧数。
     frames_left: Option<u32>,
     last_frame: Instant,
@@ -111,6 +117,7 @@ impl App {
             },
             proxy,
             generation: 0,
+            preview_generation: 0,
             frames_left: options.frames,
             last_frame: Instant::now(),
         }
@@ -215,6 +222,16 @@ impl App {
         });
     }
 
+    fn spawn_preview(&mut self, path: std::path::PathBuf) {
+        let proxy = self.proxy.clone();
+        self.preview_generation += 1;
+        let generation = self.preview_generation;
+        std::thread::spawn(move || {
+            let preview = preview::Preview::read(&path);
+            let _ = proxy.send_event(UserEvent::Preview(generation, preview));
+        });
+    }
+
     fn feed(&mut self, event: &InputEvent) {
         self.browser.event(event);
     }
@@ -222,9 +239,12 @@ impl App {
     fn render(&mut self, event_loop: &ActiveEventLoop) {
         // 1. 点击转交过来的"打开"（回调里拿不到 &mut self，所以在视图里排队）。
         self.browser.update();
-        // 2. 有读目录的请求就派出去 —— 绝不在这一帧里读磁盘。
+        // 2. 有读目录 / 读文件的请求就派出去 —— 绝不在这一帧里读磁盘。
         if let Some(path) = self.browser.take_navigation() {
             self.spawn_scan(path);
+        }
+        if let Some(path) = self.browser.take_preview_request() {
+            self.spawn_preview(path);
         }
 
         let (Some(surface), Some(backend), Some(config)) = (
@@ -307,6 +327,16 @@ impl ApplicationHandler<UserEvent> for App {
                         "{} — quill 文件浏览器",
                         scan::display_path(self.browser.path())
                     ));
+                    window.request_redraw();
+                }
+            }
+            UserEvent::Preview(generation, preview) => {
+                // 用户在字节回来之前又选中了别的文件：这份结果过期了。
+                if generation != self.preview_generation {
+                    return;
+                }
+                self.browser.apply_preview(preview);
+                if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
