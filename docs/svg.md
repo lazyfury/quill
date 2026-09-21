@@ -71,7 +71,7 @@ at 24×24 emits ~224 K commands (~106 per icon) rather than ~361 K without the
 skips. Anti-aliasing comes from the wgpu backend's 4x MSAA, not from denser
 geometry.
 
-In-repo consumer: `examples/image_editor` uses it two ways — the toolbar's tool
+Consumer (the `image_editor` project, a sibling checkout): it uses it two ways — the toolbar's tool
 and undo/redo buttons each build an `Icon` component (which strokes one SVG via a
 foreground decorator; see `icons.rs` / `ui/toolbar.rs`), and a sidebar gallery
 draws a grid of 20 (`icons.rs`). Setting `IMAGE_EDITOR_ICON_DIR` points the same

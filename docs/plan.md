@@ -47,7 +47,7 @@ audited by `draw_profile`'s inspector, or it is not "done".
 | `Toolbar` | next | grouped icon buttons + separators |
 | `Modal` / `Toast` | done | `Overlays::confirm` (scrim) / `Overlays::message` (transient) |
 | `Popover` | done | `Overlays::popover`, anchored with edge flipping |
-| `Menu` / `MenuItem` | done | floating surface + rows (`shortcut`/`tone`/`disabled`); `Overlays::menu` anchors `BelowStart`; used by `examples/image_editor` |
+| `Menu` / `MenuItem` | done | floating surface + rows (`shortcut`/`tone`/`disabled`); `Overlays::menu` anchors `BelowStart`; used by `image_editor` |
 | `Progress`, `Spinner`, `Skeleton` | later | uses `Arc`/rounded primitives |
 | `ScrollView` | next | the clip + offset model now exists (`ControlData.clip`, `set_on_scroll`); wrap it in a component with a draggable scrollbar |
 
@@ -138,10 +138,11 @@ priority order and add native tests.
 - Keyboard navigation (arrow keys move list selection; `⌘K` command palette).
 - Command palette overlay using the `List`/`Input` components.
 
-## Demo (`examples/image_editor`)
+## Demo (`image_editor`)
 
-A Photoshop-style editor built on `draw_ui` / `draw_components` (own workspace,
-see its README). Phases 1–8 landed. The next three reuse the overlay layer
+A Photoshop-style editor built on `draw_ui` / `draw_components`. It graduated to
+its own repo (sibling checkout `../image_editor`, consuming these crates via
+relative path deps — see its README). Phases 1–8 landed. The next three reuse the overlay layer
 (`draw_components::Overlays`) and the worker-thread / `EventLoopProxy` pattern
 from `examples/file_browser`:
 

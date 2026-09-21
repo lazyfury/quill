@@ -89,81 +89,12 @@ file_browser   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   the first real consumer of `draw_components::List`, and the
                   first host to translate a platform wheel into
                   `InputEvent::Wheel`)
-image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
-                 draw_components, draw_svg, draw_backend_wgpu, draw_backend_recording,
-                 draw_profile, winit, tracing
-                  (standalone demo: own workspace, NOT a workspace member;
-                   the Photoshop-style editor demo whose UI is built with the
-                   quill stack instead of egui. Landed: a `HomeView` landing page
-                   (the app starts here) with a 「新建窗口」action that opens a
-                   *native* `NewDocumentView` window via
-                  `event_loop.create_window` — not a modal — to pick the new
-                  document's size / background colour, plus a placeholder
-                  「画廊」; the editor still lives in the **main window**, which
-                  switches from Home to `EditorView` on create. So
-                  `application.rs` hosts multiple windows (`Vec<WindowState>`,
-                  one surface/backend per window), menu/toolbar/tool-options
-                  bar/status bar, a resizable right sidebar whose file/history/
-                  properties panels are grouped into one project-local tabs card
-                  (`ui/tabs.rs`: `TabsView` owns the tab bar and the three content
-                  containers, `SidebarTab` is the shared active-tab state, and
-                  `EditorView` syncs visibility with `SceneTree::set_visible` so a
-                  closed tab costs no layout/paint) sitting above the layer panel,
-                  split by a single `ResizeHandle::horizontal`; the panels share one
-                  look via the project-local `ui/card.rs`
-                  (`Card`: surface + padding + gap, no border/radius, like the
-                  palette), a resizable colour-palette panel on the
-                  left (`ui/palette.rs`: an HSV picker built from `Component::on_pointer`
-                  plus preset swatches) and a history panel (`ui/history_panel.rs`,
-                  a virtualized `List` of the undo/redo stack you can click to
-                  jump),
-                  `document` model (`Document`/`Layer`/`PixelBuffer`, plus
-                  `PixelRegion`), `canvas` (a `Node2D` + `Visual::Image`, camera
-                  zoom/pan, coordinate conversion), `renderer` (CPU compositor),
-                  a working layer panel, `tools` (`BrushTool` paint/erase in the
-                  active layer), `history` (`Command`/`History`: one stroke = one
-                  undo, and layer edits are undoable too — paint, move
-                  (`SetLayerPositionCommand`), add/remove, rename/visibility/
-                  opacity/order (`LayerMetaCommand`), crop; toolbar buttons +
-                  `Ctrl/Cmd+Z`), and Lucide icons (toolbar tool + undo/redo
-                  buttons) built as an `Icon` component that strokes straight
-                  into the IR via `draw_svg` (no rasterization, no texture;
-                  vendored 7-icon subset matching the toolbar +
-                  `IMAGE_EDITOR_ICON_DIR` to point at a full pack)), and PNG import/export (`io` `codec`/`file` on the
-                  `png` crate — a dependency only in this example, the core
-                  stays dependency-free; a sidebar `file` panel with inline
-                  path editing since winit has no native file dialog), and the
-                  move / rectangle-select / eyedropper tools (`MoveTool` moves a
-                  layer's `position`; selection lives in `AppState` and clips the
-                  brush via `canvas::pixel_selection`; the eyedropper reads the
-                  composite through `renderer::sample_pixel`), and a real menu
-                  bar (a title click opens `draw_components::Overlays::menu`,
-                  whose content is a `Menu` of `MenuItem`s; undo/redo, import/
-                  export, zoom/fit, clear-selection and about are wired, the rest
-                  are labeled placeholders; the reusable `Menu`/`MenuItem` live
-                  in `draw_components`), and a compact custom theme
-                  (`theme::editor_theme`, `Density::COMPACT`). The default canvas
-                  is a 128×128 pixel-art document with a **pixel mode**
-                  (`BrushTool.hard` + `BrushShape::{Round, Square}`, both toggled
-                  from the tool-options bar: hard edges at any size, snapped to the
-                  pixel grid, a Bresenham 1px line, and a screen-space pixel grid
-                  overlay above `zoom >= 6`), displayed with nearest-neighbour
-                  texture filtering
-                  (`WgpuBackend::set_texture_filter` + `TextureFilter::Nearest`)
-                  and a checkerboard transparency backdrop (toggled from the 视图
-                  menu). The move tool drags a
-                  layer's `position` (its pixel-buffer origin, possibly negative);
-                  the first brush stroke calls
-                  `Document::ensure_layer_covers_document`, which grows the buffer to
-                  the union of its extent and the document, so strokes land under
-                  the cursor, the vacated document area stays drawable, and pixels
-                  moved off-canvas are kept (not cropped) — the history regions are
-                  shifted to match; the 图层 menu's 「裁到文档」 reclaims the grown
-                  buffer. Verified headlessly
-                  with `--selfcheck` (undo/redo, a real export->decode + import
-                  round-trip, the three tools, the menu open -> item -> close
-                  loop, and an icon/FillCircle check))
 ```
+
+`image_editor` (the Photoshop-style app) used to live in `examples/image_editor`:
+it graduated to its own repo (a sibling checkout, `../image_editor`) and consumes
+these crates through relative path deps, so it is no longer part of this
+checkout.
 
 Planned (Stage 25, see `docs/godot-migration.md`):
 
@@ -208,7 +139,6 @@ None of the demos is a dependency of the core crates.
 | `examples/wgpu_demo` | root member | native `wgpu` + `winit` | `cargo test -p wgpu_demo`; run `cargo run -p wgpu_demo --release` | `examples/wgpu_demo/README.md`, `docs/debug.md` |
 | `examples/deepseek_balance` | **standalone** (own workspace) | own `util` sub-crate (member of that workspace); native `wgpu` + `winit` + `ureq` | `cargo test --manifest-path examples/deepseek_balance/Cargo.toml`; `cargo run --manifest-path examples/deepseek_balance/Cargo.toml -- --selfcheck` | dependency block above, crate module docs |
 | `examples/file_browser` | **standalone** (own workspace) | single crate; native `wgpu` + `winit` | `cargo test --manifest-path examples/file_browser/Cargo.toml`; `cargo run --manifest-path examples/file_browser/Cargo.toml -- --selfcheck` (`--dump` too) | dependency block above |
-| `examples/image_editor` | **standalone** (own workspace) | single crate; native `wgpu` + `winit` + `png` + `tracing`; vendored SVG icons | `cargo test --manifest-path examples/image_editor/Cargo.toml`; `cargo run --manifest-path examples/image_editor/Cargo.toml -- --selfcheck` | `examples/image_editor/README.md`, `examples/image_editor/todo.md` |
 
 Headless self-check binaries (`--selfcheck`, and `--dump*` where noted) render
 the same UI into `draw_backend_recording` and print a report; they are the
@@ -402,9 +332,10 @@ cargo bench --workspace --no-run
 ```
 
 `--workspace` excludes the **standalone** demos (`examples/deepseek_balance`,
-`examples/file_browser`, `examples/image_editor`). When you touch one, also run
-its own gate with `--manifest-path` (fmt / check / test) and its `--selfcheck`;
-see "Demo workspace modes & how to test" above.
+`examples/file_browser`). When you touch one, also run its own gate with
+`--manifest-path` (fmt / check / test) and its `--selfcheck`; see "Demo workspace
+modes & how to test" above. `image_editor` now lives in its own repo
+(`../image_editor`); changes there have their own gate.
 
 Then emit the report and stop for approval.
 

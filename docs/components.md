@@ -431,11 +431,11 @@ overlays.menu(title_node, move |tree, node| {
 `tone` (`destructive()` for delete), and `disabled(true)` dims it and drops the
 click. `Menu::min_width` overrides the 200px default; the surface stretches each
 row. A menu item click does not close the overlay by itself — the host closes it
-when it drains the action (see `examples/image_editor`).
+when it drains the action (see `image_editor`).
 
 The overlay consumes an outside click (that is how it dismisses), so a host whose
 menu bar should switch menus in one click has to intercept the title hit *before*
-delegating to `Overlays`: `examples/image_editor` checks the pointer against its
+delegating to `Overlays`: `image_editor` checks the pointer against its
 menu-title nodes on `PointerDown`, closes the overlay, and lets the click reach
 the tree (clicking the open title closes it; clicking another switches).
 

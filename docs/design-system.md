@@ -84,7 +84,7 @@ Components read `theme.spacing(Space::…)`, `theme.control_height(size)`,
 `Button::regular()`) and defaults to `theme.default_control()`; an explicit
 `.min_size(..)` on a component wins over the density default (so a toolbar can
 pin its icon buttons to a fixed size). A custom theme (e.g.
-`examples/image_editor::theme::editor_theme`) is just a `Theme` value with a
+`image_editor::theme::editor_theme`) is just a `Theme` value with a
 different density.
 
 ## Components — `draw_components`
@@ -331,7 +331,7 @@ backward-compatible addition and record it here.
   the `Default`, so every existing `TextOptions` literal/`default()` call keeps
   the old output.
 - **Wrapping flex containers report the stacked cross size** (driven by
-  `examples/image_editor`'s new-document preset row): `measure_flex` computed a
+  `image_editor`'s new-document preset row): `measure_flex` computed a
   container's preferred cross size from the tallest single item even when `wrap`
   was on, so a row that broke into two lines still reported one line's height.
   The container kept that height and the second line overlapped the sibling below
@@ -350,7 +350,7 @@ backward-compatible addition and record it here.
   unchanged. `Menu`/`MenuItem` themselves are plain `draw_components` themed
   components — no `Widget`/`ControlData` shape changed.
 - **`Theme.density` (`Density`) — spacing and control metrics as a token**
-  (driven by `examples/image_editor`'s compact theme): spacing and control
+  (driven by `image_editor`'s compact theme): spacing and control
   metrics were hardcoded `draw_theme` consts, so a custom theme could only swap
   colors. `Theme` now carries a `Density` (`space_scale`, `control_height`,
   `control_height_mini`, `control_padding_x`/`_y`, `row_height`,
@@ -362,13 +362,13 @@ backward-compatible addition and record it here.
   `ControlSize` (`mini()` / `regular()`, default from the theme).
   `Density::COMFORTABLE` (the default) reproduces the previous metrics exactly,
   so existing themes and components are unchanged.
-- **`ResizeHandle::invert()`** (driven by `examples/image_editor`'s resizable
+- **`ResizeHandle::invert()`** (driven by `image_editor`'s resizable
   right sidebar): the handle assumed its target pane was on the *near* side, so
   a right-hand sidebar (target on the far side) resized in the wrong direction.
   `invert()` flips the drag delta. Additive — the default behavior and every
   existing call site are unchanged.
 - **`Control::pointer_callback` / `Component::on_pointer`** (driven by
-  `examples/image_editor`'s colour picker): `DragCallback` only reports a
+  `image_editor`'s colour picker): `DragCallback` only reports a
   **delta**, so a component could not map the pointer onto its own rectangle
   (sliders, colour pickers). `Control` gains an additive
   `pointer_callback: Option<Rc<RefCell<dyn FnMut(Rect, Vec2)>>>` fired on press

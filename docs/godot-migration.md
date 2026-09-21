@@ -255,7 +255,7 @@ Additive, outside the frozen core where possible.
 
 - Sprites/textures: `Sprite2D` (or `Visual::Image`) with atlas / animation /
   flip / 9-slice; texture registration already exists in the backends.
-  **`Visual::Image { texture, size }` landed for `examples/image_editor`'s
+  **`Visual::Image { texture, size }` landed for `image_editor`'s
   canvas** — a `Node2D` drawn by `SceneTree::paint` and hit-tested like a rect —
   plus `SceneTree::paint`/`input` handling it. Atlas / animation / flip /
   9-slice and a `Sprite2D` type are still future.
