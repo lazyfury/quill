@@ -345,96 +345,108 @@ impl EditorView {
                     .child(toolbar)
                     .child(Divider::vertical(theme))
                     .child(
-                        // 调色盘外面留一圈边距，让它像右栏那些卡片一样“浮”在底色上，
-                        // 而不是一条贴着工具栏的通栏面板。
-                        Flex::column()
-                            .basis(SizeBasis::Px(palette_width.get()))
-                            .shrink(0.0)
-                            .padding(Edges::all(space::XS))
-                            .mouse_filter(MouseFilter::Ignore)
-                            .child(palette_panel)
-                            .ref_(&refs.palette_panel),
-                    )
-                    .child(
-                        ResizeHandle::vertical(theme)
-                            .target(refs.palette_panel.clone())
-                            .width(palette_width.clone())
-                            .min(PALETTE_MIN)
-                            .max(PALETTE_MAX)
-                            .ref_(&refs.palette_handle),
+                        Flex::row()
+                            .background(theme.background())
+                            .padding(Edges::ZERO)
+                            .gap(0.0)
+                            .child(
+                                // 调色盘外面留一圈边距，让它像右栏那些卡片一样“浮”在底色上，
+                                // 而不是一条贴着工具栏的通栏面板。
+                                Flex::column()
+                                    .basis(SizeBasis::Px(palette_width.get()))
+                                    .shrink(0.0)
+                                    .padding(Edges::ZERO)
+                                    .mouse_filter(MouseFilter::Ignore)
+                                    .child(palette_panel)
+                                    .ref_(&refs.palette_panel),
+                            )
+                            .child(
+                                ResizeHandle::vertical(theme)
+                                    .target(refs.palette_panel.clone())
+                                    .width(palette_width.clone())
+                                    .min(PALETTE_MIN)
+                                    .max(PALETTE_MAX)
+                                    .ref_(&refs.palette_handle),
+                            ),
                     )
                     .child(canvas::canvas_area().ref_(&refs.canvas))
                     .child(
-                        ResizeHandle::vertical(theme)
-                            .target(refs.sidebar.clone())
-                            .width(sidebar_width.clone())
-                            .min(SIDEBAR_MIN)
-                            .invert()
-                            .ref_(&refs.sidebar_handle),
-                    )
-                    .child(
-                        Flex::column()
-                            .basis(SizeBasis::Px(sidebar_width.get()))
-                            .shrink(0.0)
-                            .gap(space::XXXS)
+                        Flex::row()
+                            .background(theme.background())
                             .padding(Edges::ZERO)
-                            .mouse_filter(MouseFilter::Ignore)
+                            .gap(0.0)
                             .child(
-                                file_panel
-                                    .basis(SizeBasis::Px(file_height.get()))
-                                    .shrink(0.0)
-                                    .ref_(&refs.file_panel),
-                            )
-                            .child(
-                                ResizeHandle::horizontal(theme)
-                                    .target(refs.file_panel.clone())
-                                    .width(file_height.clone())
-                                    .min(FILE_PANEL_MIN)
-                                    .max(FILE_PANEL_MAX)
-                                    .ref_(&refs.file_handle),
-                            )
-                            .child(layer_panel::layer_panel(
-                                theme,
-                                state.clone(),
-                                layer_list,
-                                rename_request.clone(),
-                            ))
-                            .child(
-                                ResizeHandle::horizontal(theme)
-                                    .target(refs.props_panel.clone())
-                                    .width(props_height.clone())
+                                ResizeHandle::vertical(theme)
+                                    .target(refs.sidebar.clone())
+                                    .width(sidebar_width.clone())
+                                    .min(SIDEBAR_MIN)
                                     .invert()
-                                    .min(PROPS_PANEL_MIN)
-                                    .max(PROPS_PANEL_MAX)
-                                    .ref_(&refs.props_handle),
+                                    .ref_(&refs.sidebar_handle),
                             )
                             .child(
-                                properties_panel::properties_panel(
-                                    theme,
-                                    &refs.props_name,
-                                    &refs.props_detail,
-                                    &refs.props_geometry,
-                                )
-                                .basis(SizeBasis::Px(props_height.get()))
-                                .shrink(0.0)
-                                .ref_(&refs.props_panel),
-                            )
-                            .child(
-                                ResizeHandle::horizontal(theme)
-                                    .target(refs.history_panel.clone())
-                                    .width(history_height.clone())
-                                    .invert()
-                                    .min(HISTORY_PANEL_MIN)
-                                    .max(HISTORY_PANEL_MAX)
-                                    .ref_(&refs.history_handle),
-                            )
-                            .child(
-                                history_panel::history_panel(theme, history_list)
-                                    .basis(SizeBasis::Px(history_height.get()))
+                                Flex::column()
+                                    .basis(SizeBasis::Px(sidebar_width.get()))
                                     .shrink(0.0)
-                                    .ref_(&refs.history_panel),
-                            )
-                            .ref_(&refs.sidebar),
+                                    .gap(space::XXXS)
+                                    .padding(Edges::ZERO)
+                                    .mouse_filter(MouseFilter::Ignore)
+                                    .child(
+                                        file_panel
+                                            .basis(SizeBasis::Px(file_height.get()))
+                                            .shrink(0.0)
+                                            .ref_(&refs.file_panel),
+                                    )
+                                    .child(
+                                        ResizeHandle::horizontal(theme)
+                                            .target(refs.file_panel.clone())
+                                            .width(file_height.clone())
+                                            .min(FILE_PANEL_MIN)
+                                            .max(FILE_PANEL_MAX)
+                                            .ref_(&refs.file_handle),
+                                    )
+                                    .child(layer_panel::layer_panel(
+                                        theme,
+                                        state.clone(),
+                                        layer_list,
+                                        rename_request.clone(),
+                                    ))
+                                    .child(
+                                        ResizeHandle::horizontal(theme)
+                                            .target(refs.props_panel.clone())
+                                            .width(props_height.clone())
+                                            .invert()
+                                            .min(PROPS_PANEL_MIN)
+                                            .max(PROPS_PANEL_MAX)
+                                            .ref_(&refs.props_handle),
+                                    )
+                                    .child(
+                                        properties_panel::properties_panel(
+                                            theme,
+                                            &refs.props_name,
+                                            &refs.props_detail,
+                                            &refs.props_geometry,
+                                        )
+                                        .basis(SizeBasis::Px(props_height.get()))
+                                        .shrink(0.0)
+                                        .ref_(&refs.props_panel),
+                                    )
+                                    .child(
+                                        ResizeHandle::horizontal(theme)
+                                            .target(refs.history_panel.clone())
+                                            .width(history_height.clone())
+                                            .invert()
+                                            .min(HISTORY_PANEL_MIN)
+                                            .max(HISTORY_PANEL_MAX)
+                                            .ref_(&refs.history_handle),
+                                    )
+                                    .child(
+                                        history_panel::history_panel(theme, history_list)
+                                            .basis(SizeBasis::Px(history_height.get()))
+                                            .shrink(0.0)
+                                            .ref_(&refs.history_panel),
+                                    )
+                                    .ref_(&refs.sidebar),
+                            ),
                     ),
             )
             .child(status_bar::status_bar(
