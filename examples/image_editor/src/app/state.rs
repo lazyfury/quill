@@ -15,8 +15,8 @@ use crate::document::{
 /// 工具的实现（Brush engine、框选……）在后续 Phase；Phase 1/2 只做选择。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ActiveTool {
-    #[default]
     Move,
+    #[default]
     Brush,
     Eraser,
     RectangleSelect,
@@ -165,11 +165,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_default_tool_is_move_and_tools_have_labels() {
+    fn the_default_tool_is_brush_and_tools_have_labels() {
         let state = AppState::default();
-        assert_eq!(state.active_tool, ActiveTool::Move);
-        assert_eq!(state.active_tool.label(), "移动工具");
-        assert_eq!(state.active_tool.short_label(), "移动");
+        assert_eq!(state.active_tool, ActiveTool::Brush);
+        assert_eq!(state.active_tool.label(), "画笔工具");
+        assert_eq!(state.active_tool.short_label(), "画笔");
         assert_eq!(ActiveTool::ALL.len(), 5);
     }
 
