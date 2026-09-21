@@ -87,7 +87,12 @@ the GPU pass is a single textured-triangle pipeline (`src/shader.wgsl`):
   image repeatedly (a painting canvas, a live preview) should call
   `WgpuBackend::update_texture` instead: when the size is unchanged it rewrites
   the existing GPU texture and keeps its bind group, so the per-update cost is
-  just the pixel copy rather than a fresh texture + view + bind group.
+  just the pixel copy rather than a fresh texture + view + bind group. Sampling
+  is per texture: `WgpuBackend::set_texture_filter` (or
+  `register_texture_with_filter`) chooses `TextureFilter::{Linear, Nearest}` —
+  the default is `Linear`, and `Nearest` keeps texel edges for pixel art / a
+  zoomed low-resolution canvas. The filter is a backend-side property of the
+  `TextureId`; the neutral `DrawImage` command stays filter-free.
 - `DrawText` uses a real font loaded at startup with `ab_glyph` (`QUILL_FONT`
   if set, otherwise a per-OS candidate list: macOS `Arial Unicode`, Linux
   `DejaVuSans`/Noto CJK, Windows Arial/MSYH) and shaped with `rustybuzz` plus

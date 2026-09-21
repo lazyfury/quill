@@ -138,6 +138,22 @@ impl Vertex {
     }
 }
 
+/// How a registered texture is sampled when it is scaled.
+///
+/// The default is [`Linear`](Self::Linear) (smooth scaling, good for photos and
+/// UI imagery). [`Nearest`](Self::Nearest) keeps hard texel edges, which is what
+/// pixel-art / low-resolution canvases want when zoomed in. The filter is a
+/// backend-side property of a [`TextureId`], not part of the neutral
+/// `DrawImage` command, so the IR stays filter-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextureFilter {
+    /// Bilinear magnification (the default).
+    #[default]
+    Linear,
+    /// Nearest-texel magnification / minification.
+    Nearest,
+}
+
 /// Which texture a draw range samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Surface {
@@ -235,8 +251,12 @@ pub struct WgpuBackend {
     pub(super) font_bind_group: wgpu::BindGroup,
     pub(super) font_sampler: wgpu::Sampler,
     pub(super) image_sampler: wgpu::Sampler,
+    /// Used for textures registered with [`TextureFilter::Nearest`].
+    pub(super) nearest_sampler: wgpu::Sampler,
     pub(super) textures: HashMap<TextureId, wgpu::BindGroup>,
     pub(super) texture_sizes: HashMap<TextureId, (u32, u32)>,
+    /// Per-texture sampling filter; absent means [`TextureFilter::Linear`].
+    pub(super) texture_filters: HashMap<TextureId, TextureFilter>,
     /// Kept so [`WgpuBackend::update_texture`] can rewrite pixels in place
     /// instead of allocating a new GPU texture every frame.
     pub(super) texture_objects: HashMap<TextureId, wgpu::Texture>,
@@ -368,6 +388,7 @@ impl WgpuBackend {
                 rgba.len()
             )));
         }
+        let filter = self.filter_for(id);
         let texture = upload_texture(
             &self.device,
             &self.queue,
@@ -381,13 +402,67 @@ impl WgpuBackend {
             &self.device,
             &self.bind_group_layout,
             &view,
-            &self.image_sampler,
+            self.sampler(filter),
             "texture",
         );
         self.textures.insert(id, group);
         self.texture_sizes.insert(id, (width, height));
         self.texture_objects.insert(id, texture);
         Ok(())
+    }
+
+    /// Registers an image and remembers a non-default sampling [`TextureFilter`].
+    ///
+    /// Equivalent to [`set_texture_filter`](Self::set_texture_filter) followed by
+    /// [`register_texture`](Self::register_texture).
+    pub fn register_texture_with_filter(
+        &mut self,
+        id: TextureId,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        filter: TextureFilter,
+    ) -> Result<(), WgpuError> {
+        self.texture_filters.insert(id, filter);
+        self.register_texture(id, width, height, rgba)
+    }
+
+    /// Sets how an image texture is sampled when scaled.
+    ///
+    /// Call before registering the texture, or afterwards: an already-registered
+    /// texture gets its bind group rebuilt so the change takes effect on the next
+    /// frame. Returns nothing when the filter is unchanged.
+    pub fn set_texture_filter(&mut self, id: TextureId, filter: TextureFilter) {
+        if self.filter_for(id) == filter {
+            return;
+        }
+        self.texture_filters.insert(id, filter);
+        let rebuilt = self.texture_objects.get(&id).map(|texture| {
+            let view = texture.create_view(&Default::default());
+            bind_group(
+                &self.device,
+                &self.bind_group_layout,
+                &view,
+                self.sampler(filter),
+                "texture",
+            )
+        });
+        if let Some(group) = rebuilt {
+            self.textures.insert(id, group);
+        }
+    }
+
+    /// The filter recorded for `id` (`Linear` when none was set).
+    fn filter_for(&self, id: TextureId) -> TextureFilter {
+        self.texture_filters.get(&id).copied().unwrap_or_default()
+    }
+
+    /// The GPU sampler for a filter.
+    fn sampler(&self, filter: TextureFilter) -> &wgpu::Sampler {
+        match filter {
+            TextureFilter::Linear => &self.image_sampler,
+            TextureFilter::Nearest => &self.nearest_sampler,
+        }
     }
 
     /// Uploads new pixels for a texture, reusing the GPU texture and its bind

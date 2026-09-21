@@ -7,7 +7,9 @@
 //! If no adapter is available (e.g. a GPU-less CI box) the tests skip rather
 //! than fail, so the rest of the workspace still builds and tests.
 
-use draw_backend_wgpu::{wgpu, FontConfig, FontMode, PixelBuffer, WgpuBackend, PIXEL_GLYPH_RATIO};
+use draw_backend_wgpu::{
+    wgpu, FontConfig, FontMode, PixelBuffer, TextureFilter, WgpuBackend, PIXEL_GLYPH_RATIO,
+};
 use draw_core::{Color, Rect, Size, Vec2, ViewportSize};
 use draw_render::{CornerRadii, Paint, PaintContext, RenderBackend, TextAlign, TextureId};
 
@@ -316,6 +318,71 @@ fn draw_image_samples_a_registered_texture() {
     assert_pixel_tol(&pixels, 24, 8, [0, 255, 0, 255], 16);
     assert_pixel_tol(&pixels, 8, 24, [0, 0, 255, 255], 16);
     assert_pixel_tol(&pixels, 24, 24, [255, 255, 255, 255], 16);
+}
+
+#[test]
+fn nearest_texture_filter_keeps_hard_texel_edges() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    // 2x1: left texel red, right texel green.
+    let texture = [255, 0, 0, 255, 0, 255, 0, 255];
+    let id = TextureId::new(7);
+    backend
+        .register_texture_with_filter(id, 2, 1, &texture, TextureFilter::Nearest)
+        .unwrap();
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        id,
+        Rect::from_min_size(Vec2::ZERO, Size::splat(32.0)),
+        None,
+        Paint::new(Color::WHITE),
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    // Each half samples its texel exactly, including right up to the boundary
+    // (linear filtering would blend the two centre columns).
+    assert_pixel(&pixels, 4, 16, [255, 0, 0, 255]);
+    assert_pixel(&pixels, 15, 16, [255, 0, 0, 255]);
+    assert_pixel(&pixels, 16, 16, [0, 255, 0, 255]);
+    assert_pixel(&pixels, 27, 16, [0, 255, 0, 255]);
+}
+
+#[test]
+fn set_texture_filter_rebuilds_an_existing_texture() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    let texture = [255, 0, 0, 255, 0, 255, 0, 255];
+    let id = TextureId::new(8);
+    // Registered with the default linear filter: the centre is a blend.
+    backend.register_texture(id, 2, 1, &texture).unwrap();
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        id,
+        Rect::from_min_size(Vec2::ZERO, Size::splat(32.0)),
+        None,
+        Paint::new(Color::WHITE),
+    );
+    let linear = render(&mut backend, ctx, viewport(32.0, 32.0));
+    let blended = linear.pixel(16, 16).unwrap();
+    assert!(
+        blended[0] < 255 && blended[1] > 0,
+        "linear sampling should blend at the boundary, got {blended:?}"
+    );
+
+    // Switching to nearest rebuilds the bind group; the boundary is now hard.
+    backend.set_texture_filter(id, TextureFilter::Nearest);
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        id,
+        Rect::from_min_size(Vec2::ZERO, Size::splat(32.0)),
+        None,
+        Paint::new(Color::WHITE),
+    );
+    let nearest = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&nearest, 16, 16, [0, 255, 0, 255]);
 }
 
 #[test]

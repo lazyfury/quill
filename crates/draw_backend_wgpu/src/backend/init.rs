@@ -87,6 +87,16 @@ impl WgpuBackend {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
+        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("draw_backend_wgpu.nearest_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
         let font_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("draw_backend_wgpu.font_sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -149,9 +159,11 @@ impl WgpuBackend {
             font_bind_group,
             font_sampler,
             image_sampler,
+            nearest_sampler,
             textures: HashMap::new(),
             texture_sizes: HashMap::new(),
             texture_objects: HashMap::new(),
+            texture_filters: HashMap::new(),
             offscreen: None,
             msaa: None,
             frame: None,
