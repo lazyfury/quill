@@ -92,9 +92,17 @@ file_browser   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
 image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                  draw_components, draw_svg, draw_backend_wgpu, draw_backend_recording,
                  draw_profile, winit, tracing
-                 (standalone demo: own workspace, NOT a workspace member;
-                  the Photoshop-style editor demo whose UI is built with the
-                  quill stack instead of egui. Landed: menu/toolbar/tool-options
+                  (standalone demo: own workspace, NOT a workspace member;
+                   the Photoshop-style editor demo whose UI is built with the
+                   quill stack instead of egui. Landed: a `HomeView` landing page
+                   (the app starts here) with a 「新建窗口」action that opens a
+                   *native* `NewDocumentView` window via
+                  `event_loop.create_window` — not a modal — to pick the new
+                  document's size / background colour, plus a placeholder
+                  「画廊」; the editor still lives in the **main window**, which
+                  switches from Home to `EditorView` on create. So
+                  `application.rs` hosts multiple windows (`Vec<WindowState>`,
+                  one surface/backend per window), menu/toolbar/tool-options
                   bar/status bar, a resizable right sidebar whose file/history/
                   properties panels are grouped into one project-local tabs card
                   (`ui/tabs.rs`: `TabsView` owns the tab bar and the three content

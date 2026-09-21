@@ -1,12 +1,18 @@
 //! 窗口宿主：拥有 winit 窗口与 wgpu 后端，把平台事件翻译成后端无关的
 //! `InputEvent`。
 //!
-//! 视图（[`crate::ui::EditorView`]）完全不碰平台；这一层照
-//! `examples/file_browser` / `examples/wgpu_demo` 的骨架来：
+//! 视图（[`crate::ui::HomeView`] / [`crate::ui::EditorView`]）完全不碰平台；
+//! 这一层照 `examples/file_browser` / `examples/wgpu_demo` 的骨架来：
 //!
 //! ```text
-//! winit events -> InputEvent -> EditorView -> DrawList -> WgpuBackend -> surface
+//! winit events -> InputEvent -> view -> DrawList -> WgpuBackend -> surface
 //! ```
+//!
+//! **多窗口**：主窗口首屏是主页（[`crate::ui::HomeView`]），点「新建窗口」不由
+//! 这里弹模态框，而是 `event_loop.create_window` 开一个**原生**的「新建文档」
+//! 窗口（[`crate::ui::NewDocumentView`]）选尺寸 / 背景色；创建后编辑器仍然在
+//! **主窗口**里（主窗口从主页切到 [`EditorView`]）。每个窗口有自己的 surface /
+//! `WgpuBackend`（纹理命名空间独立）。
 //!
 //! Phase 1 没有长任务，所以没有工作线程；`--frames N` 让真实渲染管线能在
 //! 无头环境里跑够帧数再退出。
@@ -27,11 +33,14 @@ use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::app::state::AppState;
-use crate::ui::EditorView;
+use crate::ui::{EditorView, HomeView, NewDocumentResult, NewDocumentSpec, NewDocumentView};
 
-/// 初始窗口大小。
+/// 主窗口（主页 / 编辑器）的初始大小。
 const WINDOW_WIDTH: f64 = 1280.0;
 const WINDOW_HEIGHT: f64 = 800.0;
+/// 「新建文档」窗口的初始大小。
+const NEW_DOCUMENT_WIDTH: f64 = 360.0;
+const NEW_DOCUMENT_HEIGHT: f64 = 400.0;
 
 /// 命令行选项（由 [`crate::main`] 解析）。
 #[derive(Clone, Debug, Default)]
@@ -53,15 +62,36 @@ pub fn run(options: Options) {
     event_loop.run_app(&mut app).expect("run event loop");
 }
 
-struct App {
-    instance: wgpu::Instance,
-    window: Option<Arc<Window>>,
-    surface: Option<wgpu::Surface<'static>>,
-    backend: Option<WgpuBackend>,
-    config: Option<wgpu::SurfaceConfiguration>,
+/// 一个窗口承载的视图。
+enum View {
+    /// 主窗口的落地页。
+    Home(HomeView),
+    /// 主窗口的编辑器。
+    Editor(EditorView),
+    /// 「新建文档」辅助窗口。
+    NewDocument(NewDocumentView),
+}
+
+/// 一个原生窗口 + 它自己的 surface / 后端 / 状态。
+struct WindowState {
+    window: Arc<Window>,
+    surface: wgpu::Surface<'static>,
+    backend: WgpuBackend,
+    config: wgpu::SurfaceConfiguration,
     scale_factor: f64,
     cursor: Vec2,
-    editor: EditorView,
+    view: View,
+}
+
+struct App {
+    instance: wgpu::Instance,
+    windows: Vec<WindowState>,
+    /// 主窗口（主页 -> 编辑器）；关闭它即退出应用。
+    main_window: Option<WindowId>,
+    /// 当前打开的「新建文档」窗口（同时只允许一个）。
+    new_document: Option<WindowId>,
+    /// 主题配色（`--light`）。
+    light: bool,
     font_mode: FontMode,
     /// 当前修饰键状态（Ctrl/Cmd+Z 这类快捷键在平台层处理）。
     modifiers: ModifiersState,
@@ -71,26 +101,13 @@ struct App {
 
 impl App {
     fn new(options: Options) -> Self {
-        // 编辑器自己的主题：设计系统的调色板 + 紧凑密度（更小 padding、mini 控件）。
-        let theme = crate::theme::editor_theme(options.light);
-        tracing::info!(target: "image_editor", theme = ?theme.mode, "application_start");
-        let state = AppState::default();
-        tracing::info!(
-            target: "image_editor",
-            name = state.document.name.as_str(),
-            width = state.document.width,
-            height = state.document.height,
-            "document_created"
-        );
+        tracing::info!(target: "image_editor", light = options.light, "application_start");
         Self {
             instance: wgpu::Instance::default(),
-            window: None,
-            surface: None,
-            backend: None,
-            config: None,
-            scale_factor: 1.0,
-            cursor: Vec2::ZERO,
-            editor: EditorView::new(theme, state),
+            windows: Vec::new(),
+            main_window: None,
+            new_document: None,
+            light: options.light,
             font_mode: if options.pixel_font {
                 FontMode::Pixel
             } else {
@@ -101,26 +118,40 @@ impl App {
         }
     }
 
-    /// 首次 resume 时创建窗口、surface、backend 和交换链。
+    /// 编辑器自己的主题：设计系统的调色板 + 紧凑密度（更小 padding、mini 控件）。
+    fn theme(&self) -> Theme {
+        crate::theme::editor_theme(self.light)
+    }
+
+    /// 首次 resume 时创建主窗口（首屏是主页）。
     fn init(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
+        if !self.windows.is_empty() {
             return;
         }
-        let title = format!(
-            "{} — quill 图像编辑器（Phase 8）",
-            self.editor.document_name()
-        );
-        let attributes = Window::default_attributes()
-            .with_title(title)
-            .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
-        let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
+        self.open_main_window(event_loop);
+    }
 
+    fn window_index(&self, id: WindowId) -> Option<usize> {
+        self.windows
+            .iter()
+            .position(|state| state.window.id() == id)
+    }
+
+    /// 建 surface + 后端 + 交换链配置（每个窗口一套，纹理互相隔离）。
+    fn create_surface(
+        &self,
+        window: &Arc<Window>,
+    ) -> (
+        wgpu::Surface<'static>,
+        WgpuBackend,
+        wgpu::SurfaceConfiguration,
+    ) {
         let surface = self
             .instance
             .create_surface(window.clone())
             .expect("create surface");
 
-        let mut backend = WgpuBackend::from_instance(
+        let backend = WgpuBackend::from_instance(
             &self.instance,
             Some(&surface),
             wgpu::PowerPreference::HighPerformance,
@@ -148,13 +179,11 @@ impl App {
             view_formats: Vec::new(),
         };
         surface.configure(backend.device(), &config);
+        (surface, backend, config)
+    }
 
-        self.scale_factor = window.scale_factor();
-        backend.set_scale_factor(self.scale_factor as f32);
-        backend.set_clear_color(theme_background(self.editor.theme()));
-        // 像素图：文档纹理放大时用最近邻采样，放大后是硬边像素而不是模糊插值。
-        backend.set_texture_filter(crate::canvas::DOCUMENT_TEXTURE, TextureFilter::Nearest);
-
+    /// 给一个后端装字体，并返回用真实度量排版的 `TextMeasurer`。
+    fn text_measurer(&self, backend: &mut WgpuBackend) -> Rc<dyn TextMeasurer> {
         let font_config = FontConfig {
             mode: self.font_mode,
             device_pixel_rasterization: true,
@@ -162,15 +191,120 @@ impl App {
         if let Err(error) = backend.set_font_config(font_config) {
             eprintln!("font setup failed, using fallback: {error}");
         }
-        // 用后端的真实字体度量排版，否则量到的宽度跟画出来的宽度不一致。
-        self.editor.set_text_measurer(Rc::new(BackendTextMeasurer {
+        Rc::new(BackendTextMeasurer {
             metrics: backend.text_metrics(),
-        }));
+        })
+    }
 
+    /// 开主窗口（首屏是主页）。
+    fn open_main_window(&mut self, event_loop: &ActiveEventLoop) {
+        let theme = self.theme();
+        let attributes = Window::default_attributes()
+            .with_title("quill 图像编辑器")
+            .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+        let window = Arc::new(
+            event_loop
+                .create_window(attributes)
+                .expect("create main window"),
+        );
+
+        let scale_factor = window.scale_factor();
+        let (surface, mut backend, config) = self.create_surface(&window);
+        backend.set_scale_factor(scale_factor as f32);
+        backend.set_clear_color(theme_background(theme));
+
+        let mut home = HomeView::new(theme);
+        let measurer = self.text_measurer(&mut backend);
+        home.set_text_measurer(measurer);
+
+        self.main_window = Some(window.id());
+        tracing::info!(target: "image_editor", "home_window_opened");
+        let window = self.push_window(
+            window,
+            surface,
+            backend,
+            config,
+            scale_factor,
+            View::Home(home),
+        );
+        window.request_redraw();
+    }
+
+    /// 开一个**原生**的「新建文档」窗口（首页「新建窗口」真正走的路）。
+    ///
+    /// 只负责选尺寸 / 背景色，不是模态框；创建后编辑器仍然在**主窗口**里
+    /// （见 [`apply_new_document`](Self::apply_new_document)）。
+    fn open_new_document_window(&mut self, event_loop: &ActiveEventLoop) {
+        // 已经开着就把它提到前面，不再开第二个。
+        if let Some(id) = self.new_document {
+            if let Some(index) = self.window_index(id) {
+                self.windows[index].window.focus_window();
+                return;
+            }
+        }
+
+        let theme = self.theme();
+        let attributes = Window::default_attributes()
+            .with_title("新建文档 — quill 图像编辑器")
+            .with_inner_size(LogicalSize::new(NEW_DOCUMENT_WIDTH, NEW_DOCUMENT_HEIGHT));
+        let window = Arc::new(
+            event_loop
+                .create_window(attributes)
+                .expect("create new-document window"),
+        );
+
+        let scale_factor = window.scale_factor();
+        let (surface, mut backend, config) = self.create_surface(&window);
+        backend.set_scale_factor(scale_factor as f32);
+        backend.set_clear_color(theme_background(theme));
+
+        let mut view = NewDocumentView::new(theme);
+        let measurer = self.text_measurer(&mut backend);
+        view.set_text_measurer(measurer);
+
+        self.new_document = Some(window.id());
+        tracing::info!(target: "image_editor", "new_document_window_opened");
+        let window = self.push_window(
+            window,
+            surface,
+            backend,
+            config,
+            scale_factor,
+            View::NewDocument(view),
+        );
+        window.request_redraw();
+    }
+
+    /// 把「新建文档」窗口的选择变成主窗口里的一个新编辑器。
+    fn apply_new_document(&mut self, spec: NewDocumentSpec) {
+        let Some(index) = self.main_window.and_then(|id| self.window_index(id)) else {
+            return;
+        };
+        let theme = self.theme();
+        let state = AppState::with_document(spec.width, spec.height, spec.background);
+        let mut editor = EditorView::new(theme, state);
+        tracing::info!(
+            target: "image_editor",
+            name = editor.document_name().as_str(),
+            width = spec.width,
+            height = spec.height,
+            "document_created"
+        );
+
+        let metrics = self.windows[index].backend.text_metrics();
+        editor.set_text_measurer(Rc::new(BackendTextMeasurer { metrics }));
+        self.windows[index]
+            .backend
+            .set_clear_color(theme_background(editor.theme()));
+
+        // 像素图：文档纹理放大时用最近邻采样，放大后是硬边像素而不是模糊插值。
+        self.windows[index]
+            .backend
+            .set_texture_filter(crate::canvas::DOCUMENT_TEXTURE, TextureFilter::Nearest);
         // 文档合成结果 -> 后端纹理。视图画的是 `Visual::Image(DOCUMENT_TEXTURE)`，
         // 所以必须在首帧之前把同一 id 注册好，否则后端会退回白色兜底纹理。
-        if let Some(pixels) = self.editor.take_texture_upload() {
-            if let Err(error) = backend.update_texture(
+        if let Some(pixels) = editor.take_texture_upload() {
+            if let Err(error) = self.windows[index].backend.update_texture(
                 crate::canvas::DOCUMENT_TEXTURE,
                 pixels.width,
                 pixels.height,
@@ -180,77 +314,144 @@ impl App {
             }
         }
 
-        self.window = Some(window);
-        self.surface = Some(surface);
-        self.backend = Some(backend);
-        self.config = Some(config);
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
+        self.windows[index]
+            .window
+            .set_title(&format!("{} — quill 图像编辑器", editor.document_name()));
+        self.windows[index].view = View::Editor(editor);
+        self.windows[index].window.request_redraw();
+    }
+
+    /// 关掉一个窗口，并维护主 / 辅助窗口的登记。
+    fn close_window(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
+        let Some(index) = self.window_index(id) else {
+            return;
+        };
+        self.windows.remove(index);
+        if self.main_window == Some(id) {
+            // 主窗口关闭 = 退出应用（辅助窗口随之结束）。
+            self.main_window = None;
+            event_loop.exit();
+            return;
+        }
+        if self.new_document == Some(id) {
+            self.new_document = None;
         }
     }
 
-    fn resize(&mut self, width: u32, height: u32) {
-        let (Some(surface), Some(backend), Some(config)) = (
-            self.surface.as_ref(),
-            self.backend.as_ref(),
-            self.config.as_mut(),
-        ) else {
+    /// 收下一个已经建好的窗口状态，返回它的窗口句柄。
+    fn push_window(
+        &mut self,
+        window: Arc<Window>,
+        surface: wgpu::Surface<'static>,
+        backend: WgpuBackend,
+        config: wgpu::SurfaceConfiguration,
+        scale_factor: f64,
+        view: View,
+    ) -> Arc<Window> {
+        self.windows.push(WindowState {
+            window: window.clone(),
+            surface,
+            backend,
+            config,
+            scale_factor,
+            cursor: Vec2::ZERO,
+            view,
+        });
+        window
+    }
+
+    fn resize(&mut self, index: usize, width: u32, height: u32) {
+        let Some(state) = self.windows.get_mut(index) else {
             return;
         };
         if width == 0 || height == 0 {
             return;
         }
-        config.width = width;
-        config.height = height;
-        surface.configure(backend.device(), config);
+        state.config.width = width;
+        state.config.height = height;
+        state
+            .surface
+            .configure(state.backend.device(), &state.config);
     }
 
-    fn feed(&mut self, event: &InputEvent) {
-        let _ = self.editor.event(event);
-    }
-
-    fn render(&mut self, event_loop: &ActiveEventLoop) {
-        // 1. 把共享状态（工具、提示）同步到控件上。
-        self.editor.update();
-        // 2. 文档像素有变化就重新合成并上传纹理。
-        if let Some(pixels) = self.editor.take_texture_upload() {
-            if let Some(backend) = self.backend.as_mut() {
-                if let Err(error) = backend.update_texture(
-                    crate::canvas::DOCUMENT_TEXTURE,
-                    pixels.width,
-                    pixels.height,
-                    &pixels.data,
-                ) {
-                    eprintln!("document texture upload failed: {error}");
-                }
+    /// 把一个后端无关的输入事件送给这个窗口的视图。
+    fn feed(&mut self, index: usize, event: &InputEvent) {
+        let Some(state) = self.windows.get_mut(index) else {
+            return;
+        };
+        match &mut state.view {
+            View::Home(home) => {
+                let _ = home.event(event);
+            }
+            View::Editor(editor) => {
+                let _ = editor.event(event);
+            }
+            View::NewDocument(view) => {
+                let _ = view.event(event);
             }
         }
+    }
 
-        let (Some(surface), Some(backend), Some(config)) = (
-            self.surface.as_ref(),
-            self.backend.as_mut(),
-            self.config.as_ref(),
-        ) else {
+    fn render(&mut self, event_loop: &ActiveEventLoop, index: usize) {
+        let Some(state) = self.windows.get_mut(index) else {
             return;
         };
 
         let logical = Size::new(
-            config.width as f32 / self.scale_factor as f32,
-            config.height as f32 / self.scale_factor as f32,
+            state.config.width as f32 / state.scale_factor as f32,
+            state.config.height as f32 / state.scale_factor as f32,
         );
         let viewport = ViewportSize::new(logical);
 
-        // 2. 排布 -> 3. 绘制成后端无关的 DrawList。
-        self.editor.layout(viewport);
-        let mut ctx = PaintContext::new();
-        self.editor.paint(&mut ctx);
-        let list = ctx.into_draw_list();
+        let list = {
+            let mut ctx = PaintContext::new();
+            match &mut state.view {
+                View::Home(home) => {
+                    home.layout(viewport);
+                    home.paint(&mut ctx);
+                }
+                View::NewDocument(view) => {
+                    view.update();
+                    view.layout(viewport);
+                    view.paint(&mut ctx);
+                }
+                View::Editor(editor) => {
+                    // 1. 把共享状态（工具、提示）同步到控件上。
+                    editor.update();
+                    // 2. 文档像素有变化就重新合成并上传纹理。
+                    if let Some(pixels) = editor.take_texture_upload() {
+                        if let Err(error) = state.backend.update_texture(
+                            crate::canvas::DOCUMENT_TEXTURE,
+                            pixels.width,
+                            pixels.height,
+                            &pixels.data,
+                        ) {
+                            eprintln!("document texture upload failed: {error}");
+                        }
+                    }
+                    // 3. 排布 -> 绘制成后端无关的 DrawList。
+                    editor.layout(viewport);
+                    editor.paint(&mut ctx);
+                }
+            }
+            ctx.into_draw_list()
+        };
+        // 主页点过「新建窗口」没有？取走请求（只在主页窗口才可能为真）。
+        let open_new_document =
+            matches!(&state.view, View::Home(home) if home.take_new_window_request());
+        // 「新建文档」窗口按了创建 / 取消没有？
+        let new_document_result = match &state.view {
+            View::NewDocument(view) => view.take_result(),
+            _ => None,
+        };
 
         // 4. 交给后端。
-        let surface_texture = match surface.get_current_texture() {
+        let surface_texture = match state.surface.get_current_texture() {
             Ok(texture) => texture,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                surface.configure(backend.device(), config);
+                state
+                    .surface
+                    .configure(state.backend.device(), &state.config);
                 return;
             }
             Err(wgpu::SurfaceError::Timeout) => return,
@@ -259,19 +460,38 @@ impl App {
                 return;
             }
         };
-
         let view = surface_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-
-        if backend
-            .begin_frame_with_view(view, config.width, config.height, config.format, viewport)
+        if state
+            .backend
+            .begin_frame_with_view(
+                view,
+                state.config.width,
+                state.config.height,
+                state.config.format,
+                viewport,
+            )
             .is_ok()
         {
-            let _ = backend.submit(&list);
-            let _ = backend.end_frame();
+            let _ = state.backend.submit(&list);
+            let _ = state.backend.end_frame();
         }
         surface_texture.present();
+
+        let window_id = self.windows[index].window.id();
+        // 主窗口的「新建窗口」：开原生「新建文档」窗口。
+        if open_new_document {
+            tracing::info!(target: "image_editor", "new_window_requested");
+            self.open_new_document_window(event_loop);
+        }
+        // 「新建文档」窗口出结果：创建 -> 主窗口换成编辑器；取消 -> 只关窗。
+        if let Some(result) = new_document_result {
+            if let NewDocumentResult::Create(spec) = result {
+                self.apply_new_document(spec);
+            }
+            self.close_window(event_loop, window_id);
+        }
 
         // `event_loop.exit()` 不会立刻停 —— 退出前可能还排着一次重画，所以
         // 先把计数清掉，免得重复触发（也免得重复打印）。
@@ -284,11 +504,20 @@ impl App {
                 event_loop.exit();
             } else {
                 self.frames_left = Some(left);
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
+                if let Some(state) = self.windows.get(index) {
+                    state.window.request_redraw();
                 }
             }
         }
+    }
+
+    fn to_logical(&self, index: usize, position: winit::dpi::PhysicalPosition<f64>) -> Vec2 {
+        let scale = self
+            .windows
+            .get(index)
+            .map(|state| state.scale_factor)
+            .unwrap_or(1.0) as f32;
+        Vec2::new(position.x as f32 / scale, position.y as f32 / scale)
     }
 }
 
@@ -300,64 +529,85 @@ impl ApplicationHandler for App {
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
+        let Some(index) = self
+            .windows
+            .iter()
+            .position(|state| state.window.id() == window_id)
+        else {
+            return;
+        };
+
         // A redraw is already the render itself; do not request another.
         if matches!(event, WindowEvent::RedrawRequested) {
-            self.render(event_loop);
+            self.render(event_loop, index);
             return;
         }
 
         match event {
             WindowEvent::CloseRequested => {
-                event_loop.exit();
+                self.close_window(event_loop, window_id);
                 return;
             }
-            WindowEvent::Resized(size) => self.resize(size.width, size.height),
+            WindowEvent::Resized(size) => self.resize(index, size.width, size.height),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.scale_factor = scale_factor;
-                if let Some(backend) = self.backend.as_mut() {
-                    backend.set_scale_factor(scale_factor as f32);
+                if let Some(state) = self.windows.get_mut(index) {
+                    state.scale_factor = scale_factor;
+                    state.backend.set_scale_factor(scale_factor as f32);
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor = self.to_logical(position);
-                self.feed(&InputEvent::PointerMove {
-                    position: self.cursor,
-                });
+                let position = self.to_logical(index, position);
+                if let Some(state) = self.windows.get_mut(index) {
+                    state.cursor = position;
+                }
+                self.feed(index, &InputEvent::PointerMove { position });
             }
-            WindowEvent::CursorLeft { .. } => self.feed(&InputEvent::PointerLeave),
+            WindowEvent::CursorLeft { .. } => self.feed(index, &InputEvent::PointerLeave),
             WindowEvent::MouseInput { state, button, .. } => {
-                let position = self.cursor;
+                let position = self.windows[index].cursor;
                 let button = pointer_button(button);
                 let event = match state {
                     ElementState::Pressed => InputEvent::PointerDown { position, button },
                     ElementState::Released => InputEvent::PointerUp { position, button },
                 };
-                self.feed(&event);
+                self.feed(index, &event);
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let delta = wheel_pixels(delta, self.scale_factor as f32);
-                let position = self.cursor;
-                self.feed(&InputEvent::Wheel {
-                    position,
-                    delta: Vec2::new(0.0, delta),
-                });
+                let scale = self.windows[index].scale_factor as f32;
+                let delta = wheel_pixels(delta, scale);
+                let position = self.windows[index].cursor;
+                self.feed(
+                    index,
+                    &InputEvent::Wheel {
+                        position,
+                        delta: Vec2::new(0.0, delta),
+                    },
+                );
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                let pressed = event.state == ElementState::Pressed;
                 // Ctrl/Cmd+Z 这类快捷键先在这里截掉：`InputEvent::KeyDown` 没有
                 // 修饰键字段（`draw_core` 刻意保持最小），所以由宿主映射到
-                // `EditorView::undo/redo`，不当作普通按键 / 文本。
-                if !(event.state == ElementState::Pressed
-                    && self.history_shortcut(&event.logical_key))
-                {
+                // `EditorView::undo/redo`，不当作普通按键 / 文本。主页窗口没有
+                // 编辑器，直接跳过。
+                let mut consumed = false;
+                if pressed {
+                    if let Some(View::Editor(editor)) =
+                        self.windows.get_mut(index).map(|state| &mut state.view)
+                    {
+                        consumed = history_shortcut(editor, self.modifiers, &event.logical_key);
+                    }
+                }
+                if !consumed {
                     // 已提交文本（IME / 打字）先送：重命名编辑用它写入缓冲区。
-                    if event.state == ElementState::Pressed {
+                    if pressed {
                         if let Some(text) = event.text.as_ref() {
                             let text: String = text.chars().filter(|ch| !ch.is_control()).collect();
                             if !text.is_empty() {
-                                self.feed(&InputEvent::TextInput { text });
+                                self.feed(index, &InputEvent::TextInput { text });
                             }
                         }
                     }
@@ -366,7 +616,7 @@ impl ApplicationHandler for App {
                             ElementState::Pressed => InputEvent::KeyDown { key },
                             ElementState::Released => InputEvent::KeyUp { key },
                         };
-                        self.feed(&input);
+                        self.feed(index, &input);
                     }
                 }
             }
@@ -377,43 +627,34 @@ impl ApplicationHandler for App {
         }
 
         // Any handled event may have changed the UI; schedule exactly one frame.
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
+        if let Some(state) = self.windows.get(index) {
+            state.window.request_redraw();
         }
     }
 }
 
-impl App {
-    /// Ctrl/Cmd+Z 撤销，Ctrl+Y 或 Shift+Ctrl/Cmd+Z 重做；命中返回 `true`。
-    fn history_shortcut(&mut self, key: &WinitKey) -> bool {
-        if !(self.modifiers.control_key() || self.modifiers.super_key()) {
-            return false;
-        }
-        let WinitKey::Character(text) = key else {
-            return false;
-        };
-        match text.to_lowercase().as_str() {
-            "z" if self.modifiers.shift_key() => {
-                self.editor.redo();
-                true
-            }
-            "z" => {
-                self.editor.undo();
-                true
-            }
-            "y" => {
-                self.editor.redo();
-                true
-            }
-            _ => false,
-        }
+/// Ctrl/Cmd+Z 撤销，Ctrl+Y 或 Shift+Ctrl/Cmd+Z 重做；命中返回 `true`。
+fn history_shortcut(editor: &mut EditorView, modifiers: ModifiersState, key: &WinitKey) -> bool {
+    if !(modifiers.control_key() || modifiers.super_key()) {
+        return false;
     }
-
-    fn to_logical(&self, position: winit::dpi::PhysicalPosition<f64>) -> Vec2 {
-        Vec2::new(
-            position.x as f32 / self.scale_factor as f32,
-            position.y as f32 / self.scale_factor as f32,
-        )
+    let WinitKey::Character(text) = key else {
+        return false;
+    };
+    match text.to_lowercase().as_str() {
+        "z" if modifiers.shift_key() => {
+            editor.redo();
+            true
+        }
+        "z" => {
+            editor.undo();
+            true
+        }
+        "y" => {
+            editor.redo();
+            true
+        }
+        _ => false,
     }
 }
 

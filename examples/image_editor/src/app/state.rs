@@ -113,6 +113,19 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 用「新建窗口」选出来的尺寸 / 背景色开一个全新的编辑会话（空历史）。
+    pub fn with_document(width: u32, height: u32, background: Color) -> Self {
+        Self {
+            active_tool: ActiveTool::default(),
+            canvas: CanvasCamera::default(),
+            document: Document::with_background("未命名", width, height, background),
+            history: History::new(),
+            foreground: Color::BLACK,
+            background: Color::WHITE,
+            selection: None,
+        }
+    }
+
     /// 撤销一步，返回命令名字；没有可撤销的返回 `None`。
     pub fn undo(&mut self) -> Option<&'static str> {
         let Self {

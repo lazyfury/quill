@@ -19,6 +19,20 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --light
 cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
 ```
 
+## 主页与多窗口
+
+启动先进**主页**（`src/ui/home.rs` 的 `HomeView`）：
+
+- 「新建窗口」：由宿主 `application.rs` 调 `event_loop.create_window` 开一个
+  **原生**的「新建文档」窗口（`src/ui/new_document.rs` 的 `NewDocumentView`），
+  里面选画布尺寸和背景色 —— 是操作系统级的窗口，不是应用内模态框。
+  点「创建」后，编辑器出现在**主窗口**里（主窗口从主页切到 `EditorView`），
+  新建窗口自动关闭；点「取消」或关窗就放弃。
+- 「画廊」：占位（一张 `EmptyState`），以后放最近打开的文档。
+
+宿主用 `Vec<WindowState>` 管多个窗口，每个窗口一套 surface / `WgpuBackend`
+（纹理命名空间隔离）。
+
 ## 阶段
 
 按 `AGENTS.md` 的 Phase 计划逐步实现，**一次一个 Phase**。
