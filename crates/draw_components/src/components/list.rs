@@ -7,7 +7,9 @@ use std::rc::Rc;
 use draw_core::{Color, Edges, NodeId, Vec2};
 use draw_scene::SceneTree;
 use draw_theme::{default_theme, Mode, Space, TextSize, Theme, Tone};
-use draw_ui::{dynamic_surface_decor, Control, MouseFilter, SizeBasis, SurfaceStyle, Widget};
+use draw_ui::{
+    dynamic_surface_decor, Align, Control, MouseFilter, SizeBasis, SurfaceStyle, Widget,
+};
 
 use crate::base::{
     apply_spec, set_on_click, set_on_scroll, set_text, update_control, Component, Spec,
@@ -325,6 +327,9 @@ impl ListInner {
         let mut row = Row::new()
             .gap(self.gap)
             .padding(Edges::new(self.padding, 0.0, self.padding, 0.0))
+            // Cells take their natural height and sit on the row's centre line,
+            // instead of stretching to the full row (which top-aligns the text).
+            .align(Align::Center)
             // Rows are placed by the list, not by their parent: left/right span
             // the container, top/bottom come from the scroll offset.
             .anchors(Edges::new(0.0, 0.0, 1.0, 0.0));
@@ -717,6 +722,25 @@ mod tests {
         assert_eq!(fixture.cell(0, 0), "r5c0");
         assert_eq!(fixture.cell(0, 1), "r5c1");
         assert_eq!(fixture.cell(2, 0), "r7c0");
+    }
+
+    /// Cells keep their natural height and sit on the row's centre line, so list
+    /// text is vertically centered instead of stretched to the top.
+    #[test]
+    fn a_row_centers_its_cells_vertically() {
+        let fixture = Fixture::new(3, 2);
+        let row = fixture.state.rows()[0];
+        let row_rect = draw_ui::control(&fixture.tree, row).unwrap().rect;
+        let cells: Vec<NodeId> = fixture.tree.children(row).unwrap().to_vec();
+        assert_eq!(cells.len(), 2);
+        for cell in cells {
+            let cell_rect = draw_ui::control(&fixture.tree, cell).unwrap().rect;
+            assert!(
+                (row_rect.center().y - cell_rect.center().y).abs() < 0.5,
+                "cell {cell_rect:?} is not on the row centre line"
+            );
+            assert!(cell_rect.size.height < row_rect.size.height);
+        }
     }
 
     #[test]
