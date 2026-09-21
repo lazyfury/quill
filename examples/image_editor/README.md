@@ -109,6 +109,9 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   **HSV 取色器**（饱和/明度方块 + 色相条，拖动即改前景色），下面是当前前景 /
   背景与 16 个预设色块。取色器靠 `Component::on_pointer`（press + move 给绝对
   位置）把指针映射到自己的矩形上；没有渐变图元，方块用一小片实心色块拼出。
+  面板外观抽成了项目内的 `ui/card.rs`（`Card`：`surface` 底 + 内边距 + 行间距，
+  无边框 / 圆角），右栏的文件 / 图层 / 属性 / 历史和它用同一套，侧栏看起来是
+  一组卡片。
 
 ### 计划（Phase 10+）
 
@@ -194,6 +197,7 @@ src/
 │   └── move_tool.rs     # Phase 8：MoveTool（拖动当前图层）
 ├── ui/
 │   ├── mod.rs           # EditorView：页面 + 文档 Node2D + 相机同步 + undo/redo
+│   ├── card.rs          # 项目内简单卡片（侧栏统一外观：surface + 内边距）
 │   ├── menu.rs          # 菜单栏
 │   ├── toolbar.rs       # 工具栏（工具 + 撤销/重做）
 │   ├── palette.rs       # 左侧调色盘面板（HSV 取色器 + 前景/背景 + 预设色块）

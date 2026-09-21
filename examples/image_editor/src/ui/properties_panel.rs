@@ -3,8 +3,10 @@
 //! 只读。可编辑的控件（滑杆、下拉）会随更丰富的组件一起加，这里先把当前
 //! 图层的真实状态摆出来。
 
-use draw_components::{Card, Component, Divider, NodeRef, Text};
+use draw_components::{Component, Divider, NodeRef, Text};
 use draw_theme::{space, Theme, Tone};
+
+use crate::ui::card::Card;
 
 /// 属性面板。三个文本槽位由 [`EditorView`](crate::ui::EditorView) 回写。
 pub fn properties_panel(

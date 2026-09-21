@@ -14,7 +14,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use draw_components::{Button, Card, Column, Component, Divider, Flex, List, ListColumn, Text};
+use draw_components::{Button, Column, Component, Divider, Flex, List, ListColumn, Text};
 use draw_core::Edges;
 use draw_theme::{space, TextSize, Theme, Tone};
 use draw_ui::MouseFilter;
@@ -23,6 +23,7 @@ use crate::app::state::AppState;
 use crate::document::{
     AddLayerCommand, Document, Layer, LayerMetaCommand, PixelBuffer, RemoveLayerCommand,
 };
+use crate::ui::card::Card;
 
 /// 图层行高（逻辑像素）。列表的池大小按它算。
 pub const LAYER_ROW_HEIGHT: f32 = 28.0;

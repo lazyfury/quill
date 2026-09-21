@@ -15,11 +15,12 @@ use std::rc::Rc;
 use draw_components::{Button, Component, Flex, NodeRef, Text};
 use draw_core::{Color, Edges, Rect, Size, Vec2};
 use draw_render::PaintContext;
-use draw_theme::{radius, space, SurfaceLevel, Theme};
+use draw_theme::{radius, space, Theme};
 use draw_ui::{Align, MouseFilter, SurfaceStyle};
 
 use crate::app::state::AppState;
 use crate::document::Color as DocColor;
+use crate::ui::card::Card;
 
 /// 预设颜色（RGB 0..255）：黑白灰 + 一组常用色。
 pub const SWATCHES: [(u8, u8, u8); 16] = [
@@ -109,11 +110,7 @@ pub fn palette_panel(
 
     let hsv: PickerHsv = Rc::new(Cell::new((0.0, 1.0, 1.0)));
 
-    Flex::column()
-        .gap(space::SM)
-        .padding(Edges::all(space::SM))
-        .background(theme.surface(SurfaceLevel::Surface))
-        .mouse_filter(MouseFilter::Ignore)
+    Card::new(theme)
         .child(Text::subheading("颜色", theme))
         .child(picker(theme, state.clone(), hsv, picker_ref))
         .child(current_colors(theme, state))

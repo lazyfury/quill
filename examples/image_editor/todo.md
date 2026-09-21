@@ -70,11 +70,12 @@
 
 ## Done（近期）
 
-- **调色盘 + 历史面板**：**左侧独立调色盘面板**（`ui/palette.rs`，宽度可拖；
-  **HSV 取色器**（饱和/明度方块 + 色相条，用 `Component::on_pointer` 映射指针）
-  + 前景 / 背景 + 16 个预设色块）；右侧栏「历史」面板（虚拟化 `List`，
-  `History::undo_labels`/`redo_labels`，点一步撤 / 重做到那里，`ui/history_panel.rs`）；
-  右栏高度钳制改为三个可拖面板。
+- **项目内 Card + 调色盘 + 历史面板**：`ui/card.rs` 统一侧栏卡片外观
+  （surface + 内边距 + 行间距，无边框 / 圆角），文件 / 图层 / 属性 / 历史和调色盘
+  都用它；左侧独立调色盘面板（`ui/palette.rs`，宽度可拖；**HSV 取色器** ——
+  饱和/明度方块 + 色相条，用 `Component::on_pointer` 映射指针 —— 加前景 / 背景与
+  16 个预设色块）；右侧栏「历史」面板（虚拟化 `List`，`History::undo_labels`/
+  `redo_labels`，点一步撤 / 重做到那里，`ui/history_panel.rs`）。
 - **撤销补全 + 右侧栏可调**：移动工具（`SetLayerPositionCommand`）、新建 / 删除图层
   （`AddLayerCommand`/`RemoveLayerCommand`）、重命名 / 可见性 / 不透明度 / 排序
   （`LayerMetaCommand`，不克隆像素）、裁到文档（`CropLayerCommand`）全部入历史；

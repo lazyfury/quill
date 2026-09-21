@@ -8,10 +8,12 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use draw_components::{Button, Card, Component, Divider, Flex, NodeRef, Text};
+use draw_components::{Button, Component, Divider, Flex, NodeRef, Text};
 use draw_core::Edges;
 use draw_theme::{space, TextSize, Theme, Tone};
 use draw_ui::MouseFilter;
+
+use crate::ui::card::Card;
 
 /// 文件面板上的动作。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -15,6 +15,7 @@
 //! 持有共享状态，并把 `CanvasCamera` 同步到文档节点的变换。
 
 mod canvas;
+mod card;
 mod file_panel;
 mod history_panel;
 mod layer_panel;
@@ -41,7 +42,7 @@ use draw_core::{
 };
 use draw_render::{Paint, PaintContext};
 use draw_scene::{SceneChild, SceneTree, Visual};
-use draw_theme::{space, SurfaceLevel, Theme};
+use draw_theme::{space, Theme};
 use draw_ui::{MouseFilter, SizeBasis, TextMeasurer};
 
 use crate::app::state::{ActiveTool, AppState, HistoryAction};
@@ -60,7 +61,7 @@ use crate::ui::options_bar::{options_bar, options_hint, tool_has_brush, OptionsR
 /// 工具栏宽度（逻辑像素）。
 const TOOLBAR_WIDTH: f32 = 52.0;
 /// 左侧调色盘面板的宽度（可拖）。
-const PALETTE_WIDTH: f32 = 112.0;
+const PALETTE_WIDTH: f32 = 172.0;
 const PALETTE_MIN: f32 = 96.0;
 const PALETTE_MAX: f32 = 220.0;
 /// 右侧栏默认 / 最小宽度（逻辑像素）。
@@ -371,8 +372,7 @@ impl EditorView {
                             .basis(SizeBasis::Px(sidebar_width.get()))
                             .shrink(0.0)
                             .gap(space::XXS)
-                            .padding(Edges::all(space::SM))
-                            .background(theme.surface(SurfaceLevel::Surface))
+                            .padding(Edges::ZERO)
                             .mouse_filter(MouseFilter::Ignore)
                             .child(
                                 file_panel

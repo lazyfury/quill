@@ -9,10 +9,11 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use draw_components::{Card, Component, Divider, List, ListColumn, Text};
+use draw_components::{Component, Divider, List, ListColumn, Text};
 use draw_theme::{space, Theme};
 
 use crate::app::state::AppState;
+use crate::ui::card::Card;
 
 /// 历史行高（逻辑像素）。
 pub const HISTORY_ROW_HEIGHT: f32 = 24.0;

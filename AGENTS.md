@@ -97,7 +97,9 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   quill stack instead of egui. Landed: menu/toolbar/tool-options
                   bar/status bar, a resizable right sidebar whose file/layer/
                   properties/history sections are split by `ResizeHandle::horizontal`
-                  dividers (`ResizeHandle`), a resizable colour-palette panel on the
+                  dividers and share one look via the project-local `ui/card.rs`
+                  (`Card`: surface + padding + gap, no border/radius, like the
+                  palette), a resizable colour-palette panel on the
                   left (`ui/palette.rs`: an HSV picker built from `Component::on_pointer`
                   plus preset swatches) and a history panel (`ui/history_panel.rs`,
                   a virtualized `List` of the undo/redo stack you can click to
