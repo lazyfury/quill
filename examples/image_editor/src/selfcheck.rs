@@ -211,7 +211,7 @@ pub fn check() -> (usize, String) {
     // Phase 5：在当前图层上画一笔（屏幕 -> 文档坐标由视图内部换算）。
     let brush_point = view
         .canvas_camera()
-        .document_to_screen(Vec2::new(64.0, 64.0));
+        .document_to_screen(Vec2::new(64.5, 64.5));
     view.event(&InputEvent::PointerDown {
         position: brush_point,
         button: PointerButton::Left,
@@ -316,7 +316,7 @@ pub fn check() -> (usize, String) {
     view.update();
     let black = view
         .canvas_camera()
-        .document_to_screen(Vec2::new(64.0, 64.0));
+        .document_to_screen(Vec2::new(64.5, 64.5));
     click_at(&mut view, black);
     view.update();
     if view.foreground() != Color::BLACK {
@@ -357,7 +357,7 @@ pub fn check() -> (usize, String) {
     let before = view.active_layer_position().unwrap_or_default();
     let move_start = view
         .canvas_camera()
-        .document_to_screen(Vec2::new(64.0, 64.0));
+        .document_to_screen(Vec2::new(64.5, 64.5));
     let move_end = move_start + Vec2::new(10.0, 10.0);
     view.event(&InputEvent::PointerDown {
         position: move_start,

@@ -308,7 +308,14 @@ impl Ui {
             let basis = resolve_basis(layout.basis, p_main, inner_main(horizontal, inner));
             let gap = if index == 0 { 0.0 } else { style.gap };
             pref_main += basis.max(c_min_main) + gap;
-            min_main += c_min_main + gap;
+            // A wrapping flex can break between items, so its minimum main size is
+            // the widest item, not the sum of one line (otherwise a wrapped grid
+            // would force its container as wide as a single unbounded row).
+            if style.wrap {
+                min_main = min_main.max(c_min_main);
+            } else {
+                min_main += c_min_main + gap;
+            }
             pref_cross = pref_cross.max(p_cross);
             min_cross = min_cross.max(c_min_cross);
         }
@@ -1413,6 +1420,40 @@ mod tests {
         assert_eq!(
             crate::control(&tree, root).unwrap().rect,
             draw_core::Rect::ZERO
+        );
+    }
+
+    #[test]
+    fn a_wrapping_flex_min_width_is_the_widest_item() {
+        // A row of three 20px items: it may break between items, so its minimum
+        // width is one item, not the single-line sum (otherwise a wrapped grid
+        // would force its container as wide as an unbounded row).
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        let root = add(
+            &mut tree,
+            tree_root,
+            ControlData::fill_parent(),
+            Widget::Flex(FlexStyle::row().wrap(true)),
+        );
+        for _ in 0..3 {
+            let mut data = ControlData::default();
+            data.min_size = Size::new(20.0, 10.0);
+            add(&mut tree, root, data, panel(Color::RED));
+        }
+        crate::set_text_measurer(&mut tree, Rc::new(crate::ApproxTextMeasurer::default()));
+        let wanted = crate::content_size(&tree, Size::new(10_000.0, 1_000.0));
+        assert!(
+            wanted.min.width < wanted.preferred.width,
+            "min {} should be smaller than the one-line preferred {}",
+            wanted.min.width,
+            wanted.preferred.width
+        );
+        // The widest item (plus the root's own padding) is the floor.
+        assert!(
+            wanted.min.width <= 20.0 + 32.0,
+            "min = {}",
+            wanted.min.width
         );
     }
 }

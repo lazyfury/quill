@@ -2145,6 +2145,21 @@ mod tests {
     }
 
     #[test]
+    fn palette_swatches_wrap_within_the_panel() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let c0 = view.palette_swatch_center(0).expect("swatch 0");
+        let c1 = view.palette_swatch_center(1).expect("swatch 1");
+        let c2 = view.palette_swatch_center(2).expect("swatch 2");
+        let c3 = view.palette_swatch_center(3).expect("swatch 3");
+        assert!(
+            (c0.y - c1.y).abs() < 0.5 && (c1.y - c2.y).abs() < 0.5,
+            "前 3 个应在同一行"
+        );
+        assert!(c3.y > c0.y + 1.0, "第 4 个应换到下一行");
+    }
+
+    #[test]
     fn clicking_a_palette_swatch_sets_the_foreground() {
         let mut view = EditorView::new(Theme::dark(), AppState::default());
         view.layout(viewport());
@@ -2671,7 +2686,7 @@ mod tests {
 
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(64.0, 64.0));
+            .document_to_screen(Vec2::new(64.5, 64.5));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -2716,7 +2731,7 @@ mod tests {
 
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(64.0, 64.0));
+            .document_to_screen(Vec2::new(64.5, 64.5));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -2745,7 +2760,7 @@ mod tests {
         paint_a_stroke(&mut view);
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(64.0, 64.0));
+            .document_to_screen(Vec2::new(64.5, 64.5));
         assert_eq!(
             view.state
                 .borrow()
@@ -2798,7 +2813,7 @@ mod tests {
         view.update();
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(64.0, 64.0));
+            .document_to_screen(Vec2::new(64.5, 64.5));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -3008,7 +3023,7 @@ mod tests {
         view.update();
 
         let camera = view.canvas_camera();
-        let start = camera.document_to_screen(Vec2::new(64.0, 64.0));
+        let start = camera.document_to_screen(Vec2::new(64.5, 64.5));
         let end = start + Vec2::new(12.0, -8.0);
         let a = camera.screen_to_document(start);
         let b = camera.screen_to_document(end);
@@ -3045,7 +3060,7 @@ mod tests {
         });
         view.update();
         let camera = view.canvas_camera();
-        let start = camera.document_to_screen(Vec2::new(64.0, 64.0));
+        let start = camera.document_to_screen(Vec2::new(64.5, 64.5));
         let end = start + Vec2::new(10.0 * camera.zoom, 0.0);
         view.event(&InputEvent::PointerDown {
             position: start,
@@ -3066,7 +3081,7 @@ mod tests {
         view.update();
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(64.0, 64.0));
+            .document_to_screen(Vec2::new(64.5, 64.5));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -3098,7 +3113,7 @@ mod tests {
         view.update();
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(64.0, 64.0));
+            .document_to_screen(Vec2::new(64.5, 64.5));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -3144,7 +3159,7 @@ mod tests {
             key: Key::Character('b'),
         });
         view.update();
-        let inside = camera.document_to_screen(Vec2::new(64.0, 64.0));
+        let inside = camera.document_to_screen(Vec2::new(64.5, 64.5));
         let outside = camera.document_to_screen(Vec2::new(100.0, 100.0));
         for point in [inside, outside] {
             view.event(&InputEvent::PointerDown {
