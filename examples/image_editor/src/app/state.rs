@@ -98,7 +98,7 @@ pub struct AppState {
     pub active_tool: ActiveTool,
     /// 画布相机（缩放 / 平移）。Phase 3 起真正参与坐标转换与渲染。
     pub canvas: CanvasCamera,
-    /// 当前文档。`AppState::default()` 会创建一个 800×600 文档。
+    /// 当前文档。`AppState::default()` 会创建一个 128×128 文档（像素图测试用）。
     pub document: Document,
     /// 撤销 / 重做栈（Phase 6）。属于编辑会话，不属于文档数据。
     pub history: History,
@@ -172,9 +172,9 @@ mod tests {
     }
 
     #[test]
-    fn the_default_state_creates_an_800_by_600_document_and_identity_camera() {
+    fn the_default_state_creates_a_128_by_128_document_and_identity_camera() {
         let state = AppState::default();
-        assert_eq!((state.document.width, state.document.height), (800, 600));
+        assert_eq!((state.document.width, state.document.height), (128, 128));
         assert_eq!(state.document.name, "未命名");
         assert_eq!(state.canvas.zoom, 1.0);
         assert_eq!(state.foreground, Color::BLACK);

@@ -26,7 +26,10 @@ pub struct Layer {
     /// [`Document`]: super::Document
     pub opacity: f32,
     pub blend_mode: BlendMode,
-    /// 相对文档原点的像素偏移（Phase 3 的 Canvas 用它摆放图层）。
+    /// 图层像素缓冲区的原点：`pixels[0, 0]` 在文档坐标里的位置。
+    ///
+    /// 可以是负数、缓冲区也可以比文档大，所以移出画布的内容会留在缓冲里
+    /// （可以再移回来），不会因为移动而丢掉。
     pub position: Point,
     pub pixels: PixelBuffer,
 }

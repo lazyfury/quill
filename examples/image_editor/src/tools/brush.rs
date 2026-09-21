@@ -10,7 +10,7 @@
 use draw_core::Vec2;
 
 use super::tool::{PointerEvent, Tool, ToolContext};
-use crate::document::{Color, Document, LayerId, PaintCommand, PixelBuffer, PixelRegion};
+use crate::document::{Color, Document, LayerId, PaintCommand, PixelBuffer, PixelRegion, Point};
 
 /// 画笔模式。擦除复用同一套 stamp / 插值逻辑。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,10 +48,12 @@ impl BrushTool {
     pub const MIN_SIZE: f32 = 1.0;
     pub const MAX_SIZE: f32 = 200.0;
 
-    /// 默认的绘画画笔（黑、12px、不透明）。
+    /// 默认的绘画画笔（黑、1px、不透明）。
+    ///
+    /// 1px 是像素图默认值：配合最近邻纹理过滤，放大后画出的就是硬边单像素。
     pub fn paint() -> Self {
         Self {
-            size: 12.0,
+            size: 1.0,
             opacity: 1.0,
             color: Color::BLACK,
             mode: BrushMode::Paint,
@@ -85,10 +87,14 @@ impl BrushTool {
     }
 
     /// 从上一个采样点到 `to` 画一段。第一个采样点（`last == None`）只压一次。
+    ///
+    /// `to` / `last` 是**文档坐标**；写入时按当前图层的 `position`（缓冲区原点）
+    /// 换算到缓冲区索引，所以笔迹始终对着光标。
     pub fn stroke_to(&mut self, document: &mut Document, to: Vec2) {
         let Some(layer) = document.active_layer_mut() else {
             return;
         };
+        let offset = layer.position;
         let buffer = &mut layer.pixels;
 
         let last = self.last.unwrap_or(to);
@@ -99,13 +105,19 @@ impl BrushTool {
         let steps = (distance / step).ceil().max(1.0) as u32;
         for sample in 1..=steps {
             let t = sample as f32 / steps as f32;
-            self.dab(buffer, last + delta * t);
+            self.dab(buffer, offset, last + delta * t);
         }
         self.last = Some(to);
     }
 
-    /// 在 `center` 压一个圆形 stamp。
-    fn dab(&self, buffer: &mut PixelBuffer, center: Vec2) {
+    /// 在文档坐标 `center` 压一个圆形 stamp；落在 `offset`（图层缓冲区原点）
+    /// 之外的像素被裁掉。
+    fn dab(&self, buffer: &mut PixelBuffer, offset: Point, mut center: Vec2) {
+        // 像素笔（size <= 1）：把落点吸附到光标下的那个像素，压出一个实心
+        // 像素，不做边缘抗锯齿——像素图的线条才干净。
+        if self.size <= 1.0 {
+            center = Vec2::new(center.x.floor() + 0.5, center.y.floor() + 0.5);
+        }
         let radius = (self.size * 0.5).max(0.5);
         let min_x = (center.x - radius - 1.0).floor() as i64;
         let max_x = (center.x + radius + 1.0).ceil() as i64;
@@ -114,8 +126,11 @@ impl BrushTool {
 
         for y in min_y..=max_y {
             for x in min_x..=max_x {
-                if x < 0 || y < 0 || x >= buffer.width as i64 || y >= buffer.height as i64 {
-                    continue;
+                // 选区 / 距离都在文档坐标里算。
+                if let Some(clip) = self.clip {
+                    if x < 0 || y < 0 || !clip.contains(x as u32, y as u32) {
+                        continue;
+                    }
                 }
                 // 像素中心相对 stamp 圆心的距离；边缘 1px 抗锯齿。
                 let dx = x as f32 + 0.5 - center.x;
@@ -125,16 +140,17 @@ impl BrushTool {
                 if coverage <= 0.0 {
                     continue;
                 }
-                let alpha = coverage * self.opacity;
-                let (x, y) = (x as u32, y as u32);
-                if let Some(clip) = self.clip {
-                    if !clip.contains(x, y) {
-                        continue;
-                    }
+                // 文档坐标 -> 图层缓冲区索引。
+                let bx = x - offset.x as i64;
+                let by = y - offset.y as i64;
+                if bx < 0 || by < 0 || bx >= buffer.width as i64 || by >= buffer.height as i64 {
+                    continue;
                 }
+                let alpha = coverage * self.opacity;
+                let (bx, by) = (bx as u32, by as u32);
                 match self.mode {
-                    BrushMode::Paint => buffer.blend_pixel(x, y, self.color, alpha),
-                    BrushMode::Erase => buffer.erase_pixel(x, y, alpha),
+                    BrushMode::Paint => buffer.blend_pixel(bx, by, self.color, alpha),
+                    BrushMode::Erase => buffer.erase_pixel(bx, by, alpha),
                 }
             }
         }
@@ -158,6 +174,13 @@ impl Tool for BrushTool {
     fn on_pointer_down(&mut self, ctx: &mut ToolContext, event: PointerEvent) {
         self.drawing = true;
         self.last = None;
+        // 落笔前把当前图层缓冲区扩到覆盖整张文档：笔迹落在光标下（选区外的
+        // 文档区域也能画），并且移出画布的内容保留在缓冲区里、不裁掉。
+        if let Some(id) = ctx.document.active_layer().map(|layer| layer.id) {
+            let (dx, dy) = ctx.document.ensure_layer_covers_document(id);
+            // 缓冲区坐标整体平移了，旧命令记录的区域要跟着平移。
+            ctx.history.translate_layer(id, dx, dy);
+        }
         // 快照当前图层，抬笔时用于算差异区域（撤销只存这一块）。
         self.pending = ctx.document.active_layer().map(|layer| PendingStroke {
             layer: layer.id,
@@ -223,8 +246,95 @@ mod tests {
         brush.stroke_to(&mut document, Vec2::new(16.0, 16.0));
         let color = at(&document, 16, 16);
         assert_eq!((color.r, color.g, color.b), (255, 0, 0));
-        // 4px 半径之外（默认 12px 直径 -> r=6）还是背景。
+        // 相邻像素还是背景（1px 笔只填光标下的那个像素）。
         assert_eq!(at(&document, 30, 30), Color::WHITE);
+    }
+
+    #[test]
+    fn a_one_pixel_brush_snaps_to_the_pixel_under_the_cursor() {
+        let mut document = document();
+        let mut brush = BrushTool::paint().with_color(Color::RED);
+        // 落点在像素 (10, 20) 内部而非中心：像素笔应实心填满该像素、无灰边。
+        brush.stroke_to(&mut document, Vec2::new(10.3, 20.7));
+        assert_eq!(at(&document, 10, 20), Color::RED);
+        assert_eq!(at(&document, 9, 20), Color::WHITE, "左邻不沾");
+        assert_eq!(at(&document, 10, 19), Color::WHITE, "上邻不沾");
+        assert_eq!(at(&document, 11, 21), Color::WHITE, "右下不沾");
+    }
+
+    #[test]
+    fn painting_after_moving_a_layer_lands_under_the_cursor() {
+        let mut document = document();
+        let mut history = History::new();
+        let id = document.active_layer().unwrap().id;
+        // 图层右移 10：左边 10 格在文档里空出来。
+        document.set_layer_position(id, crate::document::Point::new(10, 0));
+
+        // 直接在空出来的文档坐标 (2, 2) 落笔。
+        let mut brush = BrushTool::paint().with_color(Color::RED);
+        brush.on_pointer_down(
+            &mut context(&mut document, &mut history),
+            left(Vec2::new(2.0, 2.0)),
+        );
+        brush.on_pointer_up(
+            &mut context(&mut document, &mut history),
+            left(Vec2::new(2.0, 2.0)),
+        );
+
+        let layer = document.active_layer().unwrap();
+        assert_eq!(
+            layer.position,
+            crate::document::Point::ZERO,
+            "落笔前烘进像素"
+        );
+        assert_eq!(
+            layer.pixels.get_pixel(2, 2),
+            Color::RED,
+            "笔迹在文档坐标下落笔"
+        );
+        assert_eq!(
+            layer.pixels.get_pixel(12, 2),
+            Color::WHITE,
+            "不会偏移到 +10"
+        );
+    }
+
+    #[test]
+    fn undo_after_moving_the_layer_still_targets_the_moved_stroke() {
+        let mut document = document();
+        let mut history = History::new();
+        let id = document.active_layer().unwrap().id;
+        let mut brush = BrushTool::paint().with_color(Color::RED);
+        // 笔画 A 在文档 (4, 4)。
+        brush.on_pointer_down(
+            &mut context(&mut document, &mut history),
+            left(Vec2::new(4.0, 4.0)),
+        );
+        brush.on_pointer_up(
+            &mut context(&mut document, &mut history),
+            left(Vec2::new(4.0, 4.0)),
+        );
+        // 图层右移 10，A 的像素跟着去缓冲区索引 14。
+        document.set_layer_position(id, crate::document::Point::new(10, 0));
+        // 笔画 B 触发缓冲区扩展 + 历史区域平移。
+        brush.on_pointer_down(
+            &mut context(&mut document, &mut history),
+            left(Vec2::new(20.0, 20.0)),
+        );
+        brush.on_pointer_up(
+            &mut context(&mut document, &mut history),
+            left(Vec2::new(20.0, 20.0)),
+        );
+
+        assert_eq!(history.undo(&mut document), Some("画笔"), "先撤 B");
+        assert_eq!(history.undo(&mut document), Some("画笔"), "再撤 A");
+        let layer = document.active_layer().unwrap();
+        assert_eq!(layer.position, crate::document::Point::ZERO);
+        assert_eq!(
+            layer.pixels.get_pixel(14, 4),
+            Color::WHITE,
+            "撤销 A 应命中平移后的坐标"
+        );
     }
 
     #[test]
@@ -308,7 +418,7 @@ mod tests {
             brush.stroke_to(&mut document, Vec2::new(700.0, 500.0));
         }
         let ms = timer.elapsed().as_secs_f64() / n as f64 * 1000.0;
-        eprintln!("stroke (600px, size 12) {ms:.3} ms");
+        eprintln!("stroke (600px, size 1) {ms:.3} ms");
     }
 
     #[test]

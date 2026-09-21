@@ -130,7 +130,7 @@ pub fn check() -> (usize, String) {
     // Phase 5：在当前图层上画一笔（屏幕 -> 文档坐标由视图内部换算）。
     let brush_point = view
         .canvas_camera()
-        .document_to_screen(Vec2::new(400.0, 300.0));
+        .document_to_screen(Vec2::new(64.0, 64.0));
     view.event(&InputEvent::PointerDown {
         position: brush_point,
         button: PointerButton::Left,
@@ -151,8 +151,8 @@ pub fn check() -> (usize, String) {
     if composite.get_pixel(0, 0) != Color::WHITE {
         failures.push("CPU 合成结果不是白底".to_string());
     }
-    if composite.get_pixel(400, 300) != Color::BLACK {
-        failures.push("画笔没有在 (400, 300) 留下像素".to_string());
+    if composite.get_pixel(64, 64) != Color::BLACK {
+        failures.push("画笔没有在 (64, 64) 留下像素".to_string());
     }
     if !view.can_undo() {
         failures.push("一笔画笔之后应该能撤销".to_string());
@@ -164,7 +164,7 @@ pub fn check() -> (usize, String) {
     view.update();
     view.mark_texture_dirty();
     let undone = view.take_texture_upload().expect("撤销后应重合成");
-    if undone.get_pixel(400, 300) != Color::WHITE {
+    if undone.get_pixel(64, 64) != Color::WHITE {
         failures.push("撤销没有还原画笔笔触".to_string());
     }
     if !view.can_redo() {
@@ -176,7 +176,7 @@ pub fn check() -> (usize, String) {
     view.update();
     view.mark_texture_dirty();
     let redone = view.take_texture_upload().expect("重做后应重合成");
-    if redone.get_pixel(400, 300) != Color::BLACK {
+    if redone.get_pixel(64, 64) != Color::BLACK {
         failures.push("重做没有恢复画笔笔触".to_string());
     }
 
@@ -191,7 +191,7 @@ pub fn check() -> (usize, String) {
             if exported.get_pixel(0, 0) != Color::WHITE {
                 failures.push("导出的 PNG 背景不是白色".to_string());
             }
-            if exported.get_pixel(400, 300) != Color::BLACK {
+            if exported.get_pixel(64, 64) != Color::BLACK {
                 failures.push("导出的 PNG 缺少画笔像素".to_string());
             }
         }
@@ -228,7 +228,7 @@ pub fn check() -> (usize, String) {
     view.update();
     let black = view
         .canvas_camera()
-        .document_to_screen(Vec2::new(400.0, 300.0));
+        .document_to_screen(Vec2::new(64.0, 64.0));
     click_at(&mut view, black);
     view.update();
     if view.foreground() != Color::BLACK {
@@ -242,10 +242,10 @@ pub fn check() -> (usize, String) {
     view.update();
     let select_start = view
         .canvas_camera()
-        .document_to_screen(Vec2::new(380.0, 280.0));
+        .document_to_screen(Vec2::new(54.0, 54.0));
     let select_end = view
         .canvas_camera()
-        .document_to_screen(Vec2::new(420.0, 320.0));
+        .document_to_screen(Vec2::new(74.0, 74.0));
     view.event(&InputEvent::PointerDown {
         position: select_start,
         button: PointerButton::Left,
@@ -269,7 +269,7 @@ pub fn check() -> (usize, String) {
     let before = view.active_layer_position().unwrap_or_default();
     let move_start = view
         .canvas_camera()
-        .document_to_screen(Vec2::new(400.0, 300.0));
+        .document_to_screen(Vec2::new(64.0, 64.0));
     let move_end = move_start + Vec2::new(10.0, 10.0);
     view.event(&InputEvent::PointerDown {
         position: move_start,
@@ -405,7 +405,7 @@ pub fn check() -> (usize, String) {
         ("帮助", "菜单栏"),
         ("画笔", "工具栏"),
         ("吸管", "工具栏"),
-        ("800 × 600", "文档尺寸"),
+        ("128 × 128", "文档尺寸"),
         ("图层", "图层面板"),
         ("背景", "图层列表"),
         ("100%", "图层不透明度"),

@@ -43,7 +43,8 @@ use draw_ui::{MouseFilter, SizeBasis, TextMeasurer};
 
 use crate::app::state::{ActiveTool, AppState, HistoryAction};
 use crate::canvas::{
-    document_to_pixel, pixel_selection, screen_to_document, CanvasCamera, DOCUMENT_TEXTURE,
+    document_to_pixel, paint_backdrop, pixel_selection, screen_to_document, CanvasCamera,
+    DOCUMENT_TEXTURE,
 };
 use crate::document::{LayerId, PixelBuffer};
 use crate::icons::IconSet;
@@ -1227,8 +1228,8 @@ impl EditorView {
     /// 选项栏的 `−` / `+` 请求 -> 真正的笔刷调整。
     fn apply_brush_adjust(&mut self, adjust: BrushAdjust) {
         match adjust {
-            BrushAdjust::SizeDown => self.adjust_brush_size(-2.0),
-            BrushAdjust::SizeUp => self.adjust_brush_size(2.0),
+            BrushAdjust::SizeDown => self.adjust_brush_size(-1.0),
+            BrushAdjust::SizeUp => self.adjust_brush_size(1.0),
             BrushAdjust::OpacityDown => self.adjust_brush_opacity(-0.05),
             BrushAdjust::OpacityUp => self.adjust_brush_opacity(0.05),
         }
@@ -1289,6 +1290,8 @@ impl EditorView {
         let state = self.state.borrow();
         self.renderer
             .render(&state.document, &mut self.render_target);
+        // 显示用：透明区域补上棋盘格。导出走 `export_png_to`，仍是纯合成。
+        paint_backdrop(&mut self.render_target.pixels);
         Some(self.render_target.pixels.clone())
     }
 
@@ -1718,7 +1721,7 @@ mod tests {
             button: PointerButton::Left,
         });
         view.update();
-        assert_eq!(view.brush_size(), before + 2.0);
+        assert_eq!(view.brush_size(), before + 1.0);
     }
 
     #[test]
@@ -1774,13 +1777,34 @@ mod tests {
     }
 
     #[test]
+    fn transparent_document_pixels_show_the_checkerboard() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        // 默认文档带白色「背景」图层：棋盘格被盖住。
+        view.mark_texture_dirty();
+        let covered = view.take_texture_upload().expect("应产出合成结果");
+        assert_eq!(covered.get_pixel(0, 0), Color::WHITE);
+
+        // 隐藏背景图层后，透明区域应露出棋盘格。
+        let background = view.state.borrow().document.layers[0].id;
+        view.state
+            .borrow_mut()
+            .document
+            .set_layer_visible(background, false);
+        view.mark_texture_dirty();
+        let revealed = view.take_texture_upload().expect("应产出合成结果");
+        assert_eq!(revealed.get_pixel(0, 0), crate::canvas::color_at(0, 0));
+        assert_eq!(revealed.get_pixel(8, 0), crate::canvas::color_at(8, 0));
+    }
+
+    #[test]
     fn the_first_layout_fits_and_centers_the_document() {
         let mut view = EditorView::new(Theme::dark(), AppState::default());
         view.layout(viewport());
         let area = view.canvas_area_rect().expect("canvas area");
         let camera = view.canvas_camera();
         assert!(camera.zoom > 0.0);
-        let center = camera.document_to_screen(Vec2::new(400.0, 300.0));
+        let center = camera.document_to_screen(Vec2::new(64.0, 64.0));
         assert!(
             (center.x - area.center().x).abs() < 0.5,
             "center = {center:?}"
@@ -1952,7 +1976,7 @@ mod tests {
 
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(400.0, 300.0));
+            .document_to_screen(Vec2::new(64.0, 64.0));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -1973,7 +1997,7 @@ mod tests {
             .active_layer()
             .unwrap()
             .pixels
-            .get_pixel(400, 300);
+            .get_pixel(64, 64);
         assert_eq!(painted, Color::BLACK);
         assert!(view.take_texture_upload().is_some(), "画笔改动要重传纹理");
     }
@@ -1982,14 +2006,22 @@ mod tests {
     fn the_eraser_clears_instead_of_painting() {
         let mut view = EditorView::new(Theme::dark(), AppState::default());
         view.layout(viewport());
-        view.event(&InputEvent::KeyDown {
-            key: Key::Character('e'),
+        // 走真实路径：点工具栏的橡皮按钮（不是快捷键）。
+        let eraser = view.tool_center(ActiveTool::Eraser).expect("eraser button");
+        view.event(&InputEvent::PointerDown {
+            position: eraser,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: eraser,
+            button: PointerButton::Left,
         });
         view.update();
+        assert_eq!(view.active_tool(), ActiveTool::Eraser);
 
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(400.0, 300.0));
+            .document_to_screen(Vec2::new(64.0, 64.0));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -2006,9 +2038,61 @@ mod tests {
             .active_layer()
             .unwrap()
             .pixels
-            .get_pixel(400, 300)
+            .get_pixel(64, 64)
             .a;
         assert_eq!(alpha, 0, "橡皮把背景擦透明");
+    }
+
+    #[test]
+    fn erasing_removes_a_brush_stroke() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        paint_a_stroke(&mut view);
+        let point = view
+            .canvas_camera()
+            .document_to_screen(Vec2::new(64.0, 64.0));
+        assert_eq!(
+            view.state
+                .borrow()
+                .document
+                .active_layer()
+                .unwrap()
+                .pixels
+                .get_pixel(64, 64),
+            Color::BLACK,
+            "画笔应在 (64,64) 留下黑色"
+        );
+
+        // 点工具栏的橡皮，再在同一位置擦一下。
+        let eraser = view.tool_center(ActiveTool::Eraser).expect("eraser button");
+        view.event(&InputEvent::PointerDown {
+            position: eraser,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: eraser,
+            button: PointerButton::Left,
+        });
+        view.update();
+        view.event(&InputEvent::PointerDown {
+            position: point,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: point,
+            button: PointerButton::Left,
+        });
+
+        let alpha = view
+            .state
+            .borrow()
+            .document
+            .active_layer()
+            .unwrap()
+            .pixels
+            .get_pixel(64, 64)
+            .a;
+        assert_eq!(alpha, 0, "橡皮应把这一笔擦掉（alpha=0）");
     }
 
     /// 用画笔在画布中央画一笔（屏幕坐标 -> 文档坐标由视图换算）。
@@ -2019,7 +2103,7 @@ mod tests {
         view.update();
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(400.0, 300.0));
+            .document_to_screen(Vec2::new(64.0, 64.0));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -2056,15 +2140,15 @@ mod tests {
         paint_a_stroke(&mut view);
         view.mark_texture_dirty();
         let painted = view.take_texture_upload().expect("脏文档应产出合成结果");
-        assert_eq!(painted.get_pixel(400, 300), Color::BLACK);
+        assert_eq!(painted.get_pixel(64, 64), Color::BLACK);
 
         view.undo();
         let undone = view.take_texture_upload().expect("撤销后应重合成");
-        assert_eq!(undone.get_pixel(400, 300), Color::WHITE);
+        assert_eq!(undone.get_pixel(64, 64), Color::WHITE);
 
         view.redo();
         let redone = view.take_texture_upload().expect("重做后应重合成");
-        assert_eq!(redone.get_pixel(400, 300), Color::BLACK);
+        assert_eq!(redone.get_pixel(64, 64), Color::BLACK);
     }
 
     #[test]
@@ -2159,7 +2243,7 @@ mod tests {
 
         let exported = crate::io::read_png(&path).expect("导出的 PNG 应能解码");
         assert_eq!(exported.get_pixel(0, 0), Color::WHITE);
-        assert_eq!(exported.get_pixel(400, 300), Color::BLACK);
+        assert_eq!(exported.get_pixel(64, 64), Color::BLACK);
         assert!(label_text(&view, view.message_label).contains("已导出"));
         let _ = std::fs::remove_file(&path);
     }
@@ -2229,7 +2313,7 @@ mod tests {
         view.update();
 
         let camera = view.canvas_camera();
-        let start = camera.document_to_screen(Vec2::new(400.0, 300.0));
+        let start = camera.document_to_screen(Vec2::new(64.0, 64.0));
         let end = start + Vec2::new(12.0, -8.0);
         let a = camera.screen_to_document(start);
         let b = camera.screen_to_document(end);
@@ -2257,6 +2341,57 @@ mod tests {
     }
 
     #[test]
+    fn painting_after_moving_the_layer_lands_under_the_cursor() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        // 移动工具把当前图层右移 10 个文档像素。
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('v'),
+        });
+        view.update();
+        let camera = view.canvas_camera();
+        let start = camera.document_to_screen(Vec2::new(64.0, 64.0));
+        let end = start + Vec2::new(10.0 * camera.zoom, 0.0);
+        view.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerMove { position: end });
+        view.event(&InputEvent::PointerUp {
+            position: end,
+            button: PointerButton::Left,
+        });
+        view.update();
+        assert_eq!(view.active_layer_position(), Some(Point::new(10, 0)));
+
+        // 切画笔，在文档 (64, 64) 落笔：应落在光标下，而不是被位移顶到 (74, 64)。
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('b'),
+        });
+        view.update();
+        let point = view
+            .canvas_camera()
+            .document_to_screen(Vec2::new(64.0, 64.0));
+        view.event(&InputEvent::PointerDown {
+            position: point,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: point,
+            button: PointerButton::Left,
+        });
+        view.update();
+
+        let state = view.state.borrow();
+        let layer = state.document.active_layer().unwrap();
+        assert_eq!(layer.position, Point::ZERO, "落笔前把位移烘进像素");
+        assert_eq!(layer.pixels.get_pixel(64, 64), Color::BLACK);
+        // 合成后确实在光标下的文档坐标 (64, 64)，而不是被位移顶到 (74, 64)。
+        assert_eq!(sample_pixel(&state.document, 64, 64), Color::BLACK);
+        assert_eq!(sample_pixel(&state.document, 74, 64), Color::WHITE);
+    }
+
+    #[test]
     fn the_eyedropper_picks_the_composited_color_as_the_foreground() {
         let mut view = EditorView::new(Theme::dark(), AppState::default());
         view.layout(viewport());
@@ -2268,7 +2403,7 @@ mod tests {
         view.update();
         let point = view
             .canvas_camera()
-            .document_to_screen(Vec2::new(400.0, 300.0));
+            .document_to_screen(Vec2::new(64.0, 64.0));
         view.event(&InputEvent::PointerDown {
             position: point,
             button: PointerButton::Left,
@@ -2289,13 +2424,13 @@ mod tests {
         view.layout(viewport());
         let camera = view.canvas_camera();
 
-        // 框一块 390..410 × 290..310。
+        // 框一块 54..74 × 54..74。
         view.event(&InputEvent::KeyDown {
             key: Key::Character('m'),
         });
         view.update();
-        let start = camera.document_to_screen(Vec2::new(390.0, 290.0));
-        let end = camera.document_to_screen(Vec2::new(410.0, 310.0));
+        let start = camera.document_to_screen(Vec2::new(54.0, 54.0));
+        let end = camera.document_to_screen(Vec2::new(74.0, 74.0));
         view.event(&InputEvent::PointerDown {
             position: start,
             button: PointerButton::Left,
@@ -2306,7 +2441,7 @@ mod tests {
             button: PointerButton::Left,
         });
         let selection = view.selection().expect("应产生选区");
-        assert!(selection.contains(400, 300));
+        assert!(selection.contains(64, 64));
         assert!(!selection.contains(100, 100));
 
         // 画笔只在选区里落笔。
@@ -2314,7 +2449,7 @@ mod tests {
             key: Key::Character('b'),
         });
         view.update();
-        let inside = camera.document_to_screen(Vec2::new(400.0, 300.0));
+        let inside = camera.document_to_screen(Vec2::new(64.0, 64.0));
         let outside = camera.document_to_screen(Vec2::new(100.0, 100.0));
         for point in [inside, outside] {
             view.event(&InputEvent::PointerDown {
@@ -2330,7 +2465,7 @@ mod tests {
             let state = view.state.borrow();
             let layer = state.document.active_layer().unwrap();
             (
-                layer.pixels.get_pixel(400, 300),
+                layer.pixels.get_pixel(64, 64),
                 layer.pixels.get_pixel(100, 100),
             )
         };

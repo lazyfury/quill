@@ -18,9 +18,9 @@ use super::layer::{clamp_opacity, Layer};
 use super::pixel_buffer::PixelBuffer;
 use super::point::Point;
 
-/// 新建文档的默认尺寸（§29 Phase 2 的验收标准）。
-pub const DEFAULT_WIDTH: u32 = 800;
-pub const DEFAULT_HEIGHT: u32 = 600;
+/// 新建文档的默认尺寸（§29 Phase 2 的验收标准；像素图测试用的小画布）。
+pub const DEFAULT_WIDTH: u32 = 128;
+pub const DEFAULT_HEIGHT: u32 = 128;
 
 /// 一个图像文档。
 #[derive(Debug, Clone, PartialEq)]
@@ -39,7 +39,7 @@ pub struct Document {
 }
 
 impl Document {
-    /// 一个 800×600（或给定尺寸）、带白色背景图层的文档。
+    /// 一个默认尺寸（带白色背景图层）的文档。
     pub fn new(name: impl Into<String>, width: u32, height: u32) -> Self {
         Self::with_background(name, width, height, Color::WHITE)
     }
@@ -200,6 +200,46 @@ impl Document {
         true
     }
 
+    /// 把图层缓冲区扩到至少覆盖整张文档，返回缓冲区内容在 **buffer 索引** 上
+    /// 的平移量 `(dx, dy)`（已覆盖时返回 `(0, 0)`）。
+    ///
+    /// 画笔落笔前调用。扩展是"当前缓冲区范围 ∪ 文档范围"的并集：
+    ///
+    /// - 文档范围内处处可落笔（图层移空、重新露出的区域也变回透明像素）；
+    /// - 移出画布的像素**不裁掉**，留在缓冲区里，还能再移回来；
+    /// - 内容在屏幕上的位置不变，只把 `position` 改成并集左上角。
+    ///
+    /// 补空间只会补在左侧 / 上方，所以内容索引是**非负**平移的；调用方（画笔）
+    /// 需要用返回的 `(dx, dy)` 同步平移历史命令记录的区域。
+    pub fn ensure_layer_covers_document(&mut self, id: LayerId) -> (i32, i32) {
+        let Some(index) = self.layer_index(id) else {
+            return (0, 0);
+        };
+        let layer = &self.layers[index];
+        let old_x = layer.position.x as i64;
+        let old_y = layer.position.y as i64;
+        let left = old_x.min(0);
+        let top = old_y.min(0);
+        let right = (old_x + layer.pixels.width as i64).max(self.width as i64);
+        let bottom = (old_y + layer.pixels.height as i64).max(self.height as i64);
+        let width = (right - left) as u32;
+        let height = (bottom - top) as u32;
+        if left == old_x
+            && top == old_y
+            && width == layer.pixels.width
+            && height == layer.pixels.height
+        {
+            return (0, 0);
+        }
+        let dx = (old_x - left) as i32;
+        let dy = (old_y - top) as i32;
+        let placed = layer.pixels.placed(width, height, dx, dy);
+        self.layers[index].pixels = placed;
+        self.layers[index].position = Point::new(left as i32, top as i32);
+        self.touch();
+        (dx, dy)
+    }
+
     /// 把图层移到 `new_index`（超出范围时夹到末尾）。
     pub fn move_layer(&mut self, id: LayerId, new_index: usize) -> bool {
         let Some(old_index) = self.layer_index(id) else {
@@ -230,7 +270,7 @@ mod tests {
     #[test]
     fn a_new_document_is_the_default_size_with_a_background_layer() {
         let document = Document::new("测试", DEFAULT_WIDTH, DEFAULT_HEIGHT);
-        assert_eq!((document.width, document.height), (800, 600));
+        assert_eq!((document.width, document.height), (128, 128));
         assert_eq!(document.name, "测试");
         assert_eq!(document.layers.len(), 1);
         assert_eq!(document.background, Color::WHITE);
@@ -317,6 +357,56 @@ mod tests {
         assert!(!document.set_layer_opacity(ghost, 0.5));
         assert!(!document.select_layer(ghost));
         assert_eq!(document.active_layer, Some(bottom));
+    }
+
+    #[test]
+    fn expanding_a_layer_to_cover_the_document_keeps_off_canvas_pixels() {
+        let mut document = Document::new("d", 4, 1);
+        let id = document.layers[0].id;
+        document.layers[0].pixels.set_pixel(0, 0, Color::RED);
+
+        // 右移 2：内容索引右移 2 补左侧空间，但红色像素不丢。
+        assert!(document.set_layer_position(id, Point::new(2, 0)));
+        assert_eq!(document.ensure_layer_covers_document(id), (2, 0));
+        let layer = document.layer(id).unwrap();
+        assert_eq!(layer.position, Point::ZERO);
+        assert_eq!(
+            layer.pixels.get_pixel(2, 0),
+            Color::RED,
+            "移到画布外的内容还在"
+        );
+        assert_eq!(
+            layer.pixels.get_pixel(0, 0),
+            Color::TRANSPARENT,
+            "空出的位置透明"
+        );
+
+        // 已覆盖文档 -> no-op。
+        assert_eq!(document.ensure_layer_covers_document(id), (0, 0));
+
+        // 左移 3：`position` 可以变负，内容仍留在缓冲区里。
+        assert!(document.set_layer_position(id, Point::new(-3, 0)));
+        let _ = document.ensure_layer_covers_document(id);
+        let layer = document.layer(id).unwrap();
+        assert_eq!(layer.position, Point::new(-3, 0));
+        assert_eq!(layer.pixels.get_pixel(2, 0), Color::RED, "内容保留在缓冲区");
+    }
+
+    #[test]
+    fn expanding_a_smaller_layer_grows_it_to_the_document() {
+        let mut document = Document::new("d", 4, 4);
+        let id = document.add_layer_with_pixels("small", PixelBuffer::filled(2, 2, Color::RED));
+        assert!(document.set_layer_position(id, Point::new(1, 1)));
+
+        assert_eq!(document.ensure_layer_covers_document(id), (1, 1));
+        let layer = document.layer(id).unwrap();
+        assert_eq!(
+            (layer.pixels.width, layer.pixels.height),
+            (4, 4),
+            "补大到文档"
+        );
+        assert_eq!(layer.pixels.get_pixel(1, 1), Color::RED, "内容按偏移落下");
+        assert_eq!(layer.pixels.get_pixel(0, 0), Color::TRANSPARENT);
     }
 
     #[test]

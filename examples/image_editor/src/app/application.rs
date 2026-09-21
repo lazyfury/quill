@@ -14,7 +14,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use draw_backend_wgpu::{wgpu, FontConfig, FontMetrics, FontMode, WgpuBackend};
+use draw_backend_wgpu::{wgpu, FontConfig, FontMetrics, FontMode, TextureFilter, WgpuBackend};
 use draw_core::{InputEvent, Key, PointerButton, Size, Vec2, ViewportSize};
 use draw_render::{PaintContext, RenderBackend};
 use draw_theme::{SurfaceLevel, Theme};
@@ -152,6 +152,8 @@ impl App {
         self.scale_factor = window.scale_factor();
         backend.set_scale_factor(self.scale_factor as f32);
         backend.set_clear_color(theme_background(self.editor.theme()));
+        // 像素图：文档纹理放大时用最近邻采样，放大后是硬边像素而不是模糊插值。
+        backend.set_texture_filter(crate::canvas::DOCUMENT_TEXTURE, TextureFilter::Nearest);
 
         let font_config = FontConfig {
             mode: self.font_mode,

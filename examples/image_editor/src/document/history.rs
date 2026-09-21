@@ -26,6 +26,9 @@ pub trait Command: fmt::Debug {
     fn undo(&mut self, document: &mut Document);
     /// 状态栏 / 日志里的短名字。
     fn label(&self) -> &'static str;
+    /// 图层缓冲区重新对齐（内容索引整体平移 `(dx, dy)`，非负）时，同步平移
+    /// 这条命令记录的区域。默认 no-op；只有记录像素坐标的命令需要实现。
+    fn translate_for(&mut self, _layer: LayerId, _dx: i32, _dy: i32) {}
 }
 
 /// 撤销 / 重做栈。超过上限时丢弃最旧的命令，内存有界。
@@ -95,6 +98,17 @@ impl History {
 
     pub fn redo_len(&self) -> usize {
         self.redo.len()
+    }
+
+    /// 图层缓冲区重新对齐后，平移该图层上所有命令记录的区域，使它们在新的
+    /// buffer 坐标系里仍指向同一块内容。`dx` / `dy` 非负。
+    pub fn translate_layer(&mut self, layer: LayerId, dx: i32, dy: i32) {
+        if dx == 0 && dy == 0 {
+            return;
+        }
+        for command in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            command.translate_for(layer, dx, dy);
+        }
     }
 
     fn trim(&mut self) {
@@ -191,6 +205,13 @@ impl Command for PaintCommand {
 
     fn label(&self) -> &'static str {
         self.label
+    }
+
+    fn translate_for(&mut self, layer: LayerId, dx: i32, dy: i32) {
+        if self.layer != layer {
+            return;
+        }
+        self.region = self.region.translated(dx.max(0) as u32, dy.max(0) as u32);
     }
 }
 

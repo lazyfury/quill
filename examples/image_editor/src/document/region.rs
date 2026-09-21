@@ -43,6 +43,16 @@ impl PixelRegion {
         x >= self.x && y >= self.y && x < self.right() && y < self.bottom()
     }
 
+    /// 整体平移 `(dx, dy)`（非负：只会在左上补空间时用到）。
+    pub const fn translated(self, dx: u32, dy: u32) -> Self {
+        Self {
+            x: self.x + dx,
+            y: self.y + dy,
+            width: self.width,
+            height: self.height,
+        }
+    }
+
     /// 两张**同尺寸**缓冲之间的差异包围盒；完全相同或尺寸不同返回 `None`。
     ///
     /// 逐 4 字节比较原始数据，只有真正不同的像素才换算坐标，所以一笔的

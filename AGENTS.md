@@ -119,7 +119,18 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   export, zoom/fit, clear-selection and about are wired, the rest
                   are labeled placeholders; the reusable `Menu`/`MenuItem` live
                   in `draw_components`), and a compact custom theme
-                  (`theme::editor_theme`, `Density::COMPACT`). Verified headlessly
+                  (`theme::editor_theme`, `Density::COMPACT`). The default canvas
+                  is a 128×128 pixel-art document with a 1px hard-edged brush,
+                  displayed with nearest-neighbour texture filtering
+                  (`WgpuBackend::set_texture_filter` + `TextureFilter::Nearest`)
+                  and a checkerboard transparency backdrop. The move tool drags a
+                  layer's `position` (its pixel-buffer origin, possibly negative);
+                  the first brush stroke calls
+                  `Document::ensure_layer_covers_document`, which grows the buffer to
+                  the union of its extent and the document, so strokes land under
+                  the cursor, the vacated document area stays drawable, and pixels
+                  moved off-canvas are kept (not cropped) — the history regions are
+                  shifted to match. Verified headlessly
                   with `--selfcheck` (undo/redo, a real export->decode + import
                   round-trip, the three tools, the menu open -> item -> close
                   loop, and an icon/FillCircle check))

@@ -12,7 +12,8 @@ impl Renderer for CpuRenderer {
     fn render(&self, document: &Document, target: &mut RenderTarget) {
         target.resize(document.width, document.height);
         // 画布底是透明的；白色背景由文档里的“背景”图层提供，这样隐藏背景
-        // 图层时能露出透明（以后的棋盘格）。
+        // 图层时能露出透明的棋盘格背景（`canvas::checkerboard`，只在显示用的
+        // 合成结果上生成，不影响导出的 PNG）。
         target.pixels.clear(Color::TRANSPARENT);
 
         // layers 从下到上，直接顺序 source-over 即可。

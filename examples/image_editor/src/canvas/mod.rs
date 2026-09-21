@@ -6,9 +6,11 @@
 //! 不会各算一套。这里只放纯数学，方便无头测试。
 
 mod camera;
+mod checkerboard;
 mod coordinate;
 
 pub use camera::CanvasCamera;
+pub use checkerboard::{color_at, paint_backdrop};
 pub use coordinate::{document_to_pixel, pixel_selection, screen_to_document};
 
 use draw_render::TextureId;

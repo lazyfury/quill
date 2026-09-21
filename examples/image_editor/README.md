@@ -34,7 +34,12 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   `register_texture` 上传，画布是场景里的一个 `Node2D`（`Visual::Image`），
   相机变换挂在它的 `Transform2D` 上，由 `draw_scene` 绘制、UI 覆盖其上。
   `src/canvas/` 提供相机与坐标转换；滚轮缩放（锚定指针）、中键平移、
-  `+`/`-`/`0`/`F` 快捷键，状态栏显示指针下的像素坐标。
+  `+`/`-`/`0`/`F` 快捷键，状态栏显示指针下的像素坐标。画布默认带一层透明
+  棋盘格背景（`src/canvas/checkerboard.rs`）：只在显示用的合成结果上生成，
+  所以隐藏 / 擦除掉不透明的「背景」图层就会露出来，而导出的 PNG 仍保留 alpha。
+  默认文档是 128×128 的像素画画布，宿主用
+  `WgpuBackend::set_texture_filter(.., TextureFilter::Nearest)` 放大时做最近邻
+  采样，像素不会插值模糊。
 - [x] **Phase 4 — 图层管理**：图层面板接真实 `Document`：虚拟化图层列表
   （眼睛 / 名字 / 不透明度、点选当前图层）+ 增删 / 显示隐藏 / 不透明度 ±10% /
   上移下移 / 重命名（键盘内联编辑，Enter 确认・Esc 取消）；任何改动后重新合成
@@ -42,7 +47,9 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
 - [x] **Phase 5 — Brush / Eraser**：`src/tools/` 的 `Tool` 接口 +
   `BrushTool`（`BrushMode::{Paint, Erase}` 共用一个引擎，§11）；在画布上
   左键拖动即在当前图层绘制 / 擦除，落笔为圆头画笔（带 1px 抗锯齿）、
-  按半径插值避免断线，实时重合成。`[`/`]` 调笔刷大小，`,`/`.` 调不透明度。
+  按半径插值避免断线，实时重合成。默认笔刷是 **1px 像素笔**：落点吸附到
+  光标下的那个像素、实心无灰边，适合画像素图；`[`/`]` 调笔刷大小，
+  `,`/`.` 调不透明度。大于 1px 时仍走抗锯齿的圆头笔。
   “一笔 = 一次 Undo”：抬笔时提交成一条 [`PaintCommand`]，由 Phase 6 的历史栈接管。
 - [x] **Phase 6 — History**：`Command` 模式 + 两条栈
   （`src/document/history.rs`），一笔画笔 / 橡皮 = 一步 undo。命令只记录**差异
@@ -57,8 +64,14 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   把图片作为**新图层**放到最上面并选中。winit 没有原生文件对话框，所以用路径
   文本输入而不是系统弹窗；导入不进撤销栈（与「+ 图层」一致）。
 - [x] **Phase 8 — Move / 框选 / 吸管**：补齐三个工具。
-  `tools/move_tool.rs` 在画布上拖动改变**当前图层**的 `position`（不进撤销栈，
-  与图层的增删 / 排序一致）；框选拖出选区（`canvas::pixel_selection` 把两个角点
+  `tools/move_tool.rs` 在画布上拖动改变**当前图层**的 `position`（图层像素
+  缓冲区的原点，可以变负；不进撤销栈，与图层的增删 / 排序一致）。画笔 / 橡皮
+  在**文档坐标**落笔，写入时减去 `position` 换算到缓冲区，所以笔迹始终对着
+  光标；落笔前 `Document::ensure_layer_covers_document` 把缓冲区扩到
+  “当前范围 ∪ 文档范围”，于是拖动画布之后：图层移空、重新露在文档里的区域是
+  透明像素、可以继续画（“画布外／canvas 内也能画”），而**移出画布的像素不裁掉**，
+  留在缓冲区里还能再移回来（补空间是左侧 / 上方，历史命令的区域会跟着平移）。
+  框选拖出选区（`canvas::pixel_selection` 把两个角点
   裁剪成整数 `PixelRegion`，存在 `AppState.selection`），画笔落笔按选区裁剪，
   选中时画一圈描边，Esc 清空；吸管用 `renderer::sample_pixel` 取**合成后**的
   颜色写进前景色。三个工具的纯逻辑分别放在 `canvas` / `renderer` / `tools`，

@@ -167,6 +167,27 @@ impl PixelBuffer {
         out
     }
 
+    /// 把 `self` 以 `(dx, dy)` 为偏移画到一块 `width × height` 的透明缓冲区上，
+    /// 返回新缓冲区；超出目标边界的像素裁掉。
+    ///
+    /// 这是"把图层的 `position` 烘进像素"的底层操作（画笔落笔前调用）：图层
+    /// 小于文档时补大到文档尺寸，大于文档时保留原尺寸，两种情况下都保持内容
+    /// 在屏幕上不动，并让图层重新与文档原点对齐（`position = 0`）。
+    pub fn placed(&self, width: u32, height: u32, dx: i32, dy: i32) -> Self {
+        let mut out = Self::new(width, height);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let nx = x as i64 + dx as i64;
+                let ny = y as i64 + dy as i64;
+                if nx < 0 || ny < 0 || nx >= width as i64 || ny >= height as i64 {
+                    continue;
+                }
+                out.set_pixel(nx as u32, ny as u32, self.get_pixel(x, y));
+            }
+        }
+        out
+    }
+
     fn index(&self, x: u32, y: u32) -> Option<usize> {
         if !self.contains(x, y) {
             return None;
@@ -280,6 +301,22 @@ mod tests {
         let smaller = buffer.resize(1, 1);
         assert_eq!((smaller.width, smaller.height), (1, 1));
         assert_eq!(smaller.get_pixel(0, 0), Color::RED);
+    }
+
+    #[test]
+    fn placed_blits_onto_a_larger_buffer_and_clips_the_edges() {
+        let mut buffer = PixelBuffer::new(3, 1);
+        buffer.set_pixel(0, 0, Color::RED);
+
+        // 向右下放到 4×2：空出的一格透明，内容按偏移落下。
+        let shifted = buffer.placed(4, 2, 1, 1);
+        assert_eq!((shifted.width, shifted.height), (4, 2));
+        assert_eq!(shifted.get_pixel(0, 0), Color::TRANSPARENT);
+        assert_eq!(shifted.get_pixel(1, 1), Color::RED);
+
+        // 向左移：内容被裁到边界。
+        let clipped = buffer.placed(3, 1, -1, 0);
+        assert_eq!(clipped.get_pixel(0, 0), Color::TRANSPARENT);
     }
 
     #[test]
