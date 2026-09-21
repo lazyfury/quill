@@ -40,6 +40,7 @@ pub fn menu_bar(theme: Theme, message: Rc<RefCell<Option<String>>>) -> impl Comp
 /// 菜单项点击后的状态栏提示。“编辑”里的撤销 / 重做已经实现。
 fn menu_message(name: &str) -> String {
     match name {
+        "文件" => "文件：用右侧「文件」面板导入 / 导出 PNG（导入会成为新图层）".to_string(),
         "编辑" => {
             "编辑：撤销 Ctrl/Cmd+Z · 重做 Shift+Ctrl/Cmd+Z（其余编辑项属后续 Phase）".to_string()
         }

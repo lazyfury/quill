@@ -22,25 +22,26 @@ use draw_render::{DrawCommand, PaintContext, RenderBackend};
 use draw_theme::Theme;
 
 use crate::app::state::{ActiveTool, AppState, HistoryAction};
-use crate::document::Color;
-use crate::ui::EditorView;
+use crate::document::{Color, PixelBuffer};
+use crate::ui::{EditorView, IoAction};
 
 /// 自检用的窗口尺寸（跟宿主的初始窗口一致）。
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 800.0;
 
-/// 这个界面显示一整套 Lucide 图标（工具栏 + 图标网格），每个图标按矢量重描边
-/// 成若干 `Line` / `FillCircle`（不走栅格缓存），所以命令数天然高于普通 UI 的
-/// 2048 默认预算；这里把预算抬到 4096 而不是把警告藏掉。
-fn inspection_config() -> InspectionConfig {
-    InspectionConfig {
-        max_draw_commands: 4096,
-        ..InspectionConfig::default()
-    }
-}
-
 fn viewport() -> ViewportSize {
     ViewportSize::new(Size::new(WIDTH, HEIGHT))
+}
+
+/// 自检用的临时 PNG 路径（进程 id + 计数，避免和已有文件冲突）。
+fn temp_png(tag: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "image_editor_selfcheck_{}_{n}_{tag}.png",
+        std::process::id()
+    ))
 }
 
 /// 走一遍真实的帧生命周期：建视图 -> 排布 -> 绘制 -> 录下来。
@@ -155,12 +156,117 @@ pub fn check() -> (usize, String) {
         failures.push("重做没有恢复画笔笔触".to_string());
     }
 
+    // Phase 7：导出当前文档为 PNG，再从磁盘解码回来核对像素。
+    let export_path = temp_png("export");
+    view.set_io_path(export_path.to_string_lossy().into_owned());
+    let export_button = view.file_center(IoAction::Export).expect("导出按钮");
+    click_at(&mut view, export_button);
+    view.update();
+    match crate::io::read_png(&export_path) {
+        Ok(exported) => {
+            if exported.get_pixel(0, 0) != Color::WHITE {
+                failures.push("导出的 PNG 背景不是白色".to_string());
+            }
+            if exported.get_pixel(400, 300) != Color::BLACK {
+                failures.push("导出的 PNG 缺少画笔像素".to_string());
+            }
+        }
+        Err(error) => failures.push(format!("导出的 PNG 无法解码：{error}")),
+    }
+
+    // 导入：独立写一张 4×3 红色 PNG，点「导入 PNG」，应多一个图层，
+    // 合成后左上角变红（红色图层在最上面）。
+    let import_path = temp_png("import");
+    let source = PixelBuffer::filled(4, 3, Color::RED);
+    if let Err(error) = crate::io::write_png(&import_path, &source) {
+        failures.push(format!("测试图写入失败：{error}"));
+    } else {
+        let before = view.layer_count();
+        view.set_io_path(import_path.to_string_lossy().into_owned());
+        let import_button = view.file_center(IoAction::Import).expect("导入按钮");
+        click_at(&mut view, import_button);
+        view.update();
+        if view.layer_count() != before + 1 {
+            failures.push("导入没有新增图层".to_string());
+        }
+        view.mark_texture_dirty();
+        let composite = view.take_texture_upload().expect("导入后应重合成");
+        if composite.get_pixel(0, 0) != Color::RED {
+            failures.push("导入的图层没有进入合成结果".to_string());
+        }
+    }
+    let _ = std::fs::remove_file(&export_path);
+    let _ = std::fs::remove_file(&import_path);
+
+    // Phase 8：吸管取色 -> 框选 -> 移动当前图层。
+    let eyedropper = view.tool_center(ActiveTool::Eyedropper).expect("吸管按钮");
+    click_at(&mut view, eyedropper);
+    view.update();
+    let black = view
+        .canvas_camera()
+        .document_to_screen(Vec2::new(400.0, 300.0));
+    click_at(&mut view, black);
+    view.update();
+    if view.foreground() != Color::BLACK {
+        failures.push("吸管没有取到画笔的黑色像素".to_string());
+    }
+
+    let select = view
+        .tool_center(ActiveTool::RectangleSelect)
+        .expect("框选按钮");
+    click_at(&mut view, select);
+    view.update();
+    let select_start = view
+        .canvas_camera()
+        .document_to_screen(Vec2::new(380.0, 280.0));
+    let select_end = view
+        .canvas_camera()
+        .document_to_screen(Vec2::new(420.0, 320.0));
+    view.event(&InputEvent::PointerDown {
+        position: select_start,
+        button: PointerButton::Left,
+    });
+    view.event(&InputEvent::PointerMove {
+        position: select_end,
+    });
+    view.event(&InputEvent::PointerUp {
+        position: select_end,
+        button: PointerButton::Left,
+    });
+    view.update();
+    let selection = view.selection();
+    if selection.is_none() {
+        failures.push("框选没有产生选区".to_string());
+    }
+
+    let move_button = view.tool_center(ActiveTool::Move).expect("移动按钮");
+    click_at(&mut view, move_button);
+    view.update();
+    let before = view.active_layer_position().unwrap_or_default();
+    let move_start = view
+        .canvas_camera()
+        .document_to_screen(Vec2::new(400.0, 300.0));
+    let move_end = move_start + Vec2::new(10.0, 10.0);
+    view.event(&InputEvent::PointerDown {
+        position: move_start,
+        button: PointerButton::Left,
+    });
+    view.event(&InputEvent::PointerMove { position: move_end });
+    view.event(&InputEvent::PointerUp {
+        position: move_end,
+        button: PointerButton::Left,
+    });
+    view.update();
+    if view.active_layer_position().unwrap_or_default() == before {
+        failures.push("移动工具没有改变图层位置".to_string());
+    }
+
     let (view, frame) = record(view);
     let camera = view.canvas_camera();
 
     let mut stats = FrameStats::new(0);
     stats.counters = FrameCounters::new(0, view.control_count(), frame.command_count(), 1);
-    let report = inspect_with(&frame.draw_list, &stats, &inspection_config());
+    let report = inspect_with(&frame.draw_list, &stats, &InspectionConfig::default());
 
     // 结构体检：Error 级即为失败。
     for finding in report
@@ -184,8 +290,8 @@ pub fn check() -> (usize, String) {
     }
 
     // 语义：每块面板的关键文字都要出现在命令流里。
-    let required: [(&str, &str); 12] = [
-        ("文件", "菜单栏"),
+    let required: [(&str, &str); 14] = [
+        ("文件", "菜单栏 / 文件面板"),
         ("编辑", "菜单栏"),
         ("帮助", "菜单栏"),
         ("画笔", "工具栏"),
@@ -194,9 +300,11 @@ pub fn check() -> (usize, String) {
         ("图层", "图层面板"),
         ("背景", "图层列表"),
         ("100%", "图层不透明度"),
-        ("图标", "图标面板"),
         ("属性", "属性面板"),
-        ("画笔工具", "状态栏（点过画笔后）"),
+        ("导入 PNG", "文件面板按钮"),
+        ("导出 PNG", "文件面板按钮"),
+        ("import", "导入后的图层名"),
+        ("选区", "状态栏（框选结果）"),
     ];
     for (needle, panel) in required {
         if !contains(&frame, needle) {
@@ -215,9 +323,11 @@ pub fn check() -> (usize, String) {
         ));
     }
 
-    // 附加：Lucide 图标包已加载，且图标真的描进了命令流。图标用圆头 / 圆角，
-    // 会产生 FillCircle；普通 UI（圆角矩形 + 线）不画圆，所以这是个干净信号。
-    if view.icon_count() < 20 {
+    // 附加：Lucide 图标包已加载（覆盖工具栏的工具与撤销 / 重做），且图标真的
+    // 描进了命令流。图标用圆头 / 圆角，会产生 FillCircle；普通 UI（圆角矩形 +
+    // 线）不画圆，所以这是个干净信号。
+    let toolbar_icons = ActiveTool::ALL.len() + HistoryAction::ALL.len();
+    if view.icon_count() < toolbar_icons {
         failures.push(format!("图标包只加载了 {} 个图标", view.icon_count()));
     }
     if !frame
@@ -239,8 +349,9 @@ pub fn check() -> (usize, String) {
         texts(&frame).len()
     ));
     out.push_str(&format!(
-        "  历史 undo {undo_len} · redo {redo_len} · 图标 {}\n",
-        view.icon_count()
+        "  历史 undo {undo_len} · redo {redo_len} · 图标 {} · 图层 {}\n",
+        view.icon_count(),
+        view.layer_count()
     ));
     out.push_str(&format!(
         "  体检：Error {} · Warning {}\n",
@@ -251,7 +362,7 @@ pub fn check() -> (usize, String) {
         out.push_str(&format!("  ✗ {failure}\n"));
     }
     if failures.is_empty() {
-        out.push_str("  ✓ 画布合成 + 撤销/重做 + 图标包 + 菜单/工具栏/图层栏/图标栏/属性栏/状态栏 全部就位\n");
+        out.push_str("  ✓ 画布合成 + 撤销/重做 + PNG 导入导出 + 移动/框选/吸管 + 图标包 + 菜单/工具栏/文件栏/图层栏/属性栏/状态栏 全部就位\n");
     }
     (failures.len(), out)
 }
@@ -296,7 +407,7 @@ mod tests {
         let (view, frame) = record(EditorView::new(Theme::dark(), AppState::default()));
         let mut stats = FrameStats::new(0);
         stats.counters = FrameCounters::new(0, view.control_count(), frame.command_count(), 1);
-        let report = inspect_with(&frame.draw_list, &stats, &inspection_config());
+        let report = inspect_with(&frame.draw_list, &stats, &InspectionConfig::default());
         assert_eq!(
             report.count_of(Severity::Error),
             0,

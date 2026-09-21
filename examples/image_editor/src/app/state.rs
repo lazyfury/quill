@@ -6,7 +6,7 @@
 //! 打开多个文件的阶段；现在一个 `document` 就够表达"创建文档"。
 
 use crate::canvas::CanvasCamera;
-use crate::document::{Color, Document, History, DEFAULT_HEIGHT, DEFAULT_WIDTH};
+use crate::document::{Color, Document, History, PixelRegion, DEFAULT_HEIGHT, DEFAULT_WIDTH};
 
 /// 当前激活的工具，与 `AGENTS.md` 的 MVP 列表一致。
 ///
@@ -102,10 +102,12 @@ pub struct AppState {
     pub document: Document,
     /// 撤销 / 重做栈（Phase 6）。属于编辑会话，不属于文档数据。
     pub history: History,
-    /// 前景色（画笔颜色）。
+    /// 前景色（画笔颜色；吸管取色写这里）。
     pub foreground: Color,
     /// 背景色（吸管/填充以后用）。
     pub background: Color,
+    /// 当前矩形选区（Phase 8）。`None` = 无选区；画笔会裁剪到选区里。
+    pub selection: Option<PixelRegion>,
 }
 
 impl AppState {
@@ -143,6 +145,7 @@ impl Default for AppState {
             history: History::new(),
             foreground: Color::BLACK,
             background: Color::WHITE,
+            selection: None,
         }
     }
 }

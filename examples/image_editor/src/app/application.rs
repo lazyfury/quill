@@ -110,7 +110,7 @@ impl App {
             return;
         }
         let title = format!(
-            "{} — quill 图像编辑器（Phase 6）",
+            "{} — quill 图像编辑器（Phase 8）",
             self.editor.document_name()
         );
         let attributes = Window::default_attributes()

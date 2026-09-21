@@ -5,7 +5,8 @@
 不用 `egui`。
 
 这是一个独立包（自己的 workspace），不加入主 workspace，避免 `winit` / `wgpu`
-影响 `cargo check --workspace`。图标用核心的 `draw_svg`（零外部依赖）。
+影响 `cargo check --workspace`。图标用核心的 `draw_svg`（零外部依赖）；PNG
+编解码用 `png` crate（依赖只留在**示例层**，核心 crate 仍然无依赖）。
 
 ## 运行
 
@@ -49,18 +50,30 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   跟笔画大小成正比，不是整层快照；新命令清空 redo 栈，栈有上限（默认 32 步）。
   工具栏加了 `↶ 撤销` / `↷ 重做` 按钮，快捷键 `Ctrl/Cmd+Z` 撤销、
   `Shift+Ctrl/Cmd+Z`（或 `Ctrl+Y`）重做，结果写状态栏。
-- [ ] Phase 7 — 导入导出
-- [ ] Phase 8 — Move / 框选 / 吸管
+- [x] **Phase 7 — 导入导出**：`src/io/` 用 `png` crate 做编码与解码，拆成
+  两个关注点：`codec`（`PixelBuffer <-> PNG 字节`）与 `file`
+  （`路径 <-> PNG 字节` + 默认命名）。右侧「文件」面板可改路径（内联编辑，
+  Enter 确认・Esc 取消）、「导出 PNG」把当前文档**合成后**写盘、「导入 PNG」
+  把图片作为**新图层**放到最上面并选中。winit 没有原生文件对话框，所以用路径
+  文本输入而不是系统弹窗；导入不进撤销栈（与「+ 图层」一致）。
+- [x] **Phase 8 — Move / 框选 / 吸管**：补齐三个工具。
+  `tools/move_tool.rs` 在画布上拖动改变**当前图层**的 `position`（不进撤销栈，
+  与图层的增删 / 排序一致）；框选拖出选区（`canvas::pixel_selection` 把两个角点
+  裁剪成整数 `PixelRegion`，存在 `AppState.selection`），画笔落笔按选区裁剪，
+  选中时画一圈描边，Esc 清空；吸管用 `renderer::sample_pixel` 取**合成后**的
+  颜色写进前景色。三个工具的纯逻辑分别放在 `canvas` / `renderer` / `tools`，
+  视图只做坐标换算与状态同步。
 
 ## 快捷键
 
 | 键 | 作用 |
 |---|---|
-| `V` | 移动（Phase 8） |
+| `V` | 移动当前图层（画布上拖动） |
 | `B` | 画笔 |
 | `E` | 橡皮 |
-| `M` | 矩形选择（Phase 8） |
-| `I` | 吸管（Phase 8） |
+| `M` | 矩形选择 |
+| `I` | 吸管 |
+| `Esc` | 清空选区 |
 | `Ctrl/Cmd+Z` | 撤销 |
 | `Shift+Ctrl/Cmd+Z` / `Ctrl+Y` | 重做 |
 | `[` / `]` | 笔刷直径 ∓2px |
@@ -76,19 +89,19 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
 ## 结构
 
 ```text
-assets/icons/            # vendor 的 20 个 Lucide 图标 + ISC LICENSE（附加）
+assets/icons/            # vendor 的 7 个 Lucide 图标（工具栏用）+ ISC LICENSE
 src/
 ├── main.rs              # 参数解析
 ├── app/
 │   ├── state.rs         # ActiveTool / CanvasCamera / AppState（纯数据）
 │   └── application.rs   # winit + wgpu 宿主（滚轮 -> Wheel、纹理上传）
-├── icons.rs             # 附加：Lucide 图标包加载 + 网格描边（draw_svg）
+├── icons.rs             # 附加：Lucide 图标包加载 + 描边到按钮（draw_svg）
 ├── document/            # Phase 2：后端无关的数据模型
 │   ├── mod.rs
 │   ├── color.rs         # 8-bit RGBA
 │   ├── id.rs            # DocumentId / LayerId
 │   ├── point.rs         # 文档像素坐标
-│   ├── region.rs        # Phase 6：整数像素矩形 + diff
+│   ├── region.rs        # Phase 6：整数像素矩形 + diff + contains（选裁剪）
 │   ├── pixel_buffer.rs  # 行优先 RGBA
 │   ├── layer.rs         # Layer + BlendMode
 │   ├── history.rs       # Phase 6：Command / History / PaintCommand
@@ -96,22 +109,27 @@ src/
 ├── canvas/              # Phase 3：画布相机与坐标转换
 │   ├── mod.rs           # DOCUMENT_TEXTURE 约定
 │   ├── camera.rs        # CanvasCamera（zoom / offset / fit）
-│   └── coordinate.rs    # screen -> document -> pixel
+│   └── coordinate.rs    # screen -> document -> pixel + pixel_selection（框选）
 ├── renderer/            # Phase 3：合成器
 │   ├── mod.rs           # Renderer trait
 │   ├── target.rs        # RenderTarget
-│   └── cpu.rs           # CpuRenderer（Normal + opacity + position）
-├── tools/               # Phase 5：工具系统
+│   └── cpu.rs           # CpuRenderer（Normal + opacity + position）+ sample_pixel
+├── io/                  # Phase 7：导入导出
+│   ├── mod.rs           # IoError
+│   ├── codec.rs         # PixelBuffer <-> PNG 字节（png crate）
+│   └── file.rs          # 路径 <-> PNG 字节 + 默认命名 / 图层名
+├── tools/               # Phase 5/8：工具系统
 │   ├── mod.rs
 │   ├── tool.rs          # Tool trait + PointerEvent + ToolContext（含 History）
-│   └── brush.rs         # BrushTool + BrushMode（画笔 / 橡皮，抬笔提交一笔）
+│   ├── brush.rs         # BrushTool + BrushMode（画笔 / 橡皮，抬笔提交一笔）
+│   └── move_tool.rs     # Phase 8：MoveTool（拖动当前图层）
 ├── ui/
 │   ├── mod.rs           # EditorView：页面 + 文档 Node2D + 相机同步 + undo/redo
 │   ├── menu.rs          # 菜单栏
 │   ├── toolbar.rs       # 工具栏（工具 + 撤销/重做）
 │   ├── canvas.rs        # 透明画布区域（命中 / 定位用）
+│   ├── file_panel.rs    # Phase 7：文件面板（路径 + 导入 / 导出按钮）
 │   ├── layer_panel.rs   # 图层面板（List + 操作按钮）
-│   ├── icon_panel.rs    # 图标面板（附加：固定高度的网格容器）
 │   ├── properties_panel.rs  # 当前图层属性（只读）
 │   └── status_bar.rs
 └── selfcheck.rs         # 无头自检（录制 DrawList + draw_profile 体检）
@@ -137,6 +155,31 @@ src/
 `显示/隐藏`、不透明度 `−` / `+`、`↑` / `↓`、`重命名`（输入后 Enter 确认，
 Esc 取消）。列表第 0 行是最上面的图层。
 
+## 导入导出（Phase 7）
+
+右侧「文件」面板：
+
+1. 点「改路径」内联输入一个 `.png` 路径（Enter 确认，Esc 取消）；
+   默认是当前目录 + 文档名。
+2. 「导出 PNG」把当前文档**合成后**写盘（含透明背景；隐藏的图层不写）。
+3. 「导入 PNG」把该文件解码后作为**新图层**放在最上面并选中。图片尺寸可以与
+   文档不同：合成器按 `Layer.position` 裁剪，超出画布的部分不显示。
+
+没有原生文件对话框（winit 不带），所以用路径文本输入。路径打不开 / 不是 PNG
+只在状态栏报错，不会崩。
+
+## 工具（Phase 8）
+
+| 工具 | 键 | 操作 |
+|---|---|---|
+| 移动 | `V` | 在画布上拖动 → 当前图层按指针位移改 `position`（不进撤销栈） |
+| 框选 | `M` | 拖动出矩形选区；画笔只在选区内落笔；选中有描边；`Esc` 清空 |
+| 吸管 | `I` | 点画布 → 取**合成后**的颜色作为前景色（画笔颜色） |
+
+选区是编辑器状态（`AppState.selection`），不是文档数据；两个角点由
+`canvas::pixel_selection` 归一化并裁剪到画布内。移动只改 `Layer.position`，
+合成器会把偏移算进摆放；和图层增删 / 排序一样**不**占用撤销步数。
+
 ## 验证（无截图）
 
 遵守仓库规则：不截图。`--selfcheck` 把同一棵视图画进
@@ -144,18 +187,20 @@ Esc 取消）。列表第 0 行是最上面的图层。
 体检，并断言菜单 / 工具 / 画布 / 图层 / 图标 / 状态栏的文字都在命令流里。
 Phase 6 起还做一次**真实的撤销 / 重做往返**：画笔一笔 → 点工具栏「撤销」→ 断言
 合成结果回到白底且有 redo → 点「重做」→ 断言又变黑；最后断言历史栈是
-`undo 1 · redo 0`。附加的图标包也会断言：索引到 ≥ 20 个图标，且帧里确实有
-图标描出来的 `FillCircle`。同一套断言在
-`cargo test --manifest-path examples/image_editor/Cargo.toml` 里跑。
+`undo 1 · redo 0`。Phase 7 再加一段**真实的 PNG 往返**：把当前文档导出到临时
+文件、解码回来核对白底与画笔像素；另写一张 4×3 红色 PNG 点「导入 PNG」，断言
+图层数 +1 且合成后左上角变红。Phase 8 再验三个工具：吸管点在黑色笔画上 → 前景色
+变黑；拖出框选 → 选区存在；移动拖动 → 当前图层位置改变。附加的图标包也会断言：
+索引覆盖工具栏的工具与撤销 / 重做，且帧里确实有图标描出来的 `FillCircle`。同一套
+断言在 `cargo test --manifest-path examples/image_editor/Cargo.toml` 里跑。
 
 ## 图标（Lucide，附加）
 
-侧边栏的「图标」面板用核心的 `draw_svg`（backend-neutral：把 SVG 描边成 IR 的
-`Line` / `FillCircle`）把一网格 Lucide 图标直接画出来——**不栅格化成纹理**，也
-不加额外依赖。工具栏的 5 个工具和撤销 / 重做也各挂一枚图标：按钮本身是空的
-点击 / 高亮区，图标由 `foreground_decor` 描边，小字标签在下面（`ui/toolbar.rs`）。
-默认加载仓库自带的 20 个图标（`assets/icons/`，含 Lucide 的 ISC `LICENSE`），
-测试与 `--selfcheck` 因而可复现。
+工具栏的 5 个工具和撤销 / 重做各挂一枚 Lucide 图标：按钮本身是空的点击 / 高亮区，
+图标由 `foreground_decor` 用核心的 `draw_svg` 描边（backend-neutral：把 SVG 描边成
+IR 的 `Line` / `FillCircle`）——**不栅格化成纹理**，也不加额外依赖；小字标签在
+按钮下面（`ui/toolbar.rs`）。默认加载仓库自带的 7 个图标（`assets/icons/`，
+含 Lucide 的 ISC `LICENSE`），测试与 `--selfcheck` 因而可复现。
 
 想看完整图标包（2112 个）：
 
@@ -166,6 +211,5 @@ IMAGE_EDITOR_ICON_DIR=$PWD/package/icons \
   cargo run --manifest-path examples/image_editor/Cargo.toml
 ```
 
-面板展示的仍是 `icons::ICON_NAMES` 这一小组，但 `IconPack` 会索引整包（`icon_count`
-会从 20 变成 2000+）；`--selfcheck` 的图标断言也随之变强。渲染细节见
-`docs/svg.md`。
+工具栏仍只用得到那 7 个名字，但 `IconPack` 会索引整包（`--selfcheck` 报告的图标数
+会从 7 变成 2000+）。渲染细节见 `docs/svg.md`。

@@ -38,6 +38,11 @@ impl PixelRegion {
         self.width as usize * self.height as usize
     }
 
+    /// 像素是否落在区域内（框选裁剪切像素用）。
+    pub const fn contains(self, x: u32, y: u32) -> bool {
+        x >= self.x && y >= self.y && x < self.right() && y < self.bottom()
+    }
+
     /// 两张**同尺寸**缓冲之间的差异包围盒；完全相同或尺寸不同返回 `None`。
     ///
     /// 逐 4 字节比较原始数据，只有真正不同的像素才换算坐标，所以一笔的
@@ -80,6 +85,16 @@ mod tests {
         assert_eq!(PixelRegion::new(2, 3, 4, 5).area(), 20);
         assert_eq!(PixelRegion::new(2, 3, 4, 5).right(), 6);
         assert_eq!(PixelRegion::new(2, 3, 4, 5).bottom(), 8);
+    }
+
+    #[test]
+    fn contains_is_half_open_on_the_right_and_bottom() {
+        let region = PixelRegion::new(2, 3, 4, 5);
+        assert!(region.contains(2, 3));
+        assert!(region.contains(5, 7));
+        assert!(!region.contains(6, 3), "右边界不含");
+        assert!(!region.contains(2, 8), "下边界不含");
+        assert!(!region.contains(1, 3));
     }
 
     #[test]

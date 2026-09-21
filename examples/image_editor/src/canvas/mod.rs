@@ -9,7 +9,7 @@ mod camera;
 mod coordinate;
 
 pub use camera::CanvasCamera;
-pub use coordinate::{document_to_pixel, screen_to_document};
+pub use coordinate::{document_to_pixel, pixel_selection, screen_to_document};
 
 use draw_render::TextureId;
 

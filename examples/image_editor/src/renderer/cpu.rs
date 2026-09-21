@@ -1,6 +1,6 @@
 //! CPU 合成器：`Normal` 混合 + 图层不透明度 + 图层位置偏移。
 
-use crate::document::{Color, Document, PixelBuffer};
+use crate::document::{blend_over, Color, Document, PixelBuffer};
 
 use super::{RenderTarget, Renderer};
 
@@ -78,6 +78,34 @@ fn blend_layer(target: &mut PixelBuffer, layer: &crate::document::Layer) {
             }
         }
     }
+}
+
+/// 合成**单个**像素：按 [`CpuRenderer`] 的同一套规则（可见性、不透明度、
+/// 图层偏移、source-over）把图层叠一遍，只算 `(x, y)`。吸管取色用。
+///
+/// 不分配整张目标图，所以比全量合成便宜得多。
+pub fn sample_pixel(document: &Document, x: u32, y: u32) -> Color {
+    let mut out = [0u8, 0, 0, 0];
+    for layer in &document.layers {
+        if !layer.visible || layer.opacity <= 0.0 {
+            continue;
+        }
+        let source_x = x as i64 - layer.position.x as i64;
+        let source_y = y as i64 - layer.position.y as i64;
+        if source_x < 0 || source_y < 0 {
+            continue;
+        }
+        let (source_x, source_y) = (source_x as u32, source_y as u32);
+        if !layer.pixels.contains(source_x, source_y) {
+            continue;
+        }
+        let source = layer.pixels.get_pixel(source_x, source_y);
+        if source.is_transparent() {
+            continue;
+        }
+        blend_over(&mut out, &source.to_rgba8(), layer.opacity);
+    }
+    Color::from_rgba8(out)
 }
 
 #[cfg(test)]
@@ -197,5 +225,44 @@ mod tests {
         let pixels = render(&document);
         assert_eq!(pixels.get_pixel(0, 0), Color::RED, "右半部分落到 x=0");
         assert_eq!(pixels.get_pixel(1, 0), Color::TRANSPARENT);
+    }
+
+    #[test]
+    fn sample_pixel_matches_the_full_composite() {
+        let mut document = Document::empty("d", 3, 2, Color::BLACK);
+        document
+            .layers
+            .push(Layer::new("bg", PixelBuffer::filled(3, 2, Color::WHITE)));
+        let mut top = Layer::new("top", PixelBuffer::filled(1, 1, Color::RED));
+        top.position = Point::new(1, 1);
+        document.layers.push(top);
+
+        let full = render(&document);
+        for y in 0..2 {
+            for x in 0..3 {
+                assert_eq!(
+                    sample_pixel(&document, x, y),
+                    full.get_pixel(x, y),
+                    "({x}, {y}) 应与全量合成一致"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sample_pixel_respects_visibility_and_position() {
+        let mut document = Document::empty("d", 2, 1, Color::BLACK);
+        let mut hidden = Layer::new("hidden", PixelBuffer::filled(2, 1, Color::RED));
+        hidden.visible = false;
+        document.layers.push(hidden);
+        // 全透明 -> 保持透明（不会误报成背景色）。
+        assert_eq!(sample_pixel(&document, 0, 0), Color::TRANSPARENT);
+
+        // 偏移图层：只有落到画布内才被采样。
+        let mut layer = Layer::new("L", PixelBuffer::filled(1, 1, Color::RED));
+        layer.position = Point::new(1, 0);
+        document.layers.push(layer);
+        assert_eq!(sample_pixel(&document, 0, 0), Color::TRANSPARENT);
+        assert_eq!(sample_pixel(&document, 1, 0), Color::RED);
     }
 }

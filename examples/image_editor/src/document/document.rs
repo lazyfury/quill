@@ -16,6 +16,7 @@ use super::color::Color;
 use super::id::{DocumentId, LayerId};
 use super::layer::{clamp_opacity, Layer};
 use super::pixel_buffer::PixelBuffer;
+use super::point::Point;
 
 /// 新建文档的默认尺寸（§29 Phase 2 的验收标准）。
 pub const DEFAULT_WIDTH: u32 = 800;
@@ -125,7 +126,19 @@ impl Document {
 
     /// 在最上面加一个全透明图层，并设为当前图层。
     pub fn add_layer(&mut self, name: impl Into<String>) -> LayerId {
-        let layer = Layer::new(name, PixelBuffer::new(self.width, self.height));
+        self.add_layer_with_pixels(name, PixelBuffer::new(self.width, self.height))
+    }
+
+    /// 在最上面加一个带指定像素的图层，并设为当前图层。
+    ///
+    /// 像素尺寸不要求等于文档（导入的图片可以更大/更小，合成时按 `position`
+    /// 裁剪）；Phase 7 的导入用它把解码结果放进新图层。
+    pub fn add_layer_with_pixels(
+        &mut self,
+        name: impl Into<String>,
+        pixels: PixelBuffer,
+    ) -> LayerId {
+        let layer = Layer::new(name, pixels);
         let id = layer.id;
         self.layers.push(layer);
         self.active_layer = Some(id);
@@ -169,6 +182,20 @@ impl Document {
             return false;
         };
         self.layers[index].opacity = clamp_opacity(opacity);
+        self.touch();
+        true
+    }
+
+    /// 设置图层相对文档原点的像素偏移（Phase 8 的移动工具）。
+    /// 位置没变时返回 `false`，不前进 `revision`。
+    pub fn set_layer_position(&mut self, id: LayerId, position: Point) -> bool {
+        let Some(index) = self.layer_index(id) else {
+            return false;
+        };
+        if self.layers[index].position == position {
+            return false;
+        }
+        self.layers[index].position = position;
         self.touch();
         true
     }
@@ -230,6 +257,18 @@ mod tests {
         assert_eq!(layer.pixels.get_pixel(0, 0), Color::TRANSPARENT);
         assert_eq!((layer.pixels.width, layer.pixels.height), (4, 3));
         assert_ne!(added, background);
+    }
+
+    #[test]
+    fn add_layer_with_pixels_keeps_the_given_size_and_content() {
+        let mut document = Document::new("d", 4, 3);
+        let pixels = PixelBuffer::filled(2, 5, Color::RED);
+        let id = document.add_layer_with_pixels("导入", pixels);
+
+        let layer = document.layer(id).expect("imported layer");
+        assert_eq!((layer.pixels.width, layer.pixels.height), (2, 5));
+        assert_eq!(layer.pixels.get_pixel(0, 0), Color::RED);
+        assert_eq!(document.active_layer, Some(id));
     }
 
     #[test]

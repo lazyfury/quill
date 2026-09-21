@@ -15,31 +15,36 @@
 //! 持有共享状态，并把 `CanvasCamera` 同步到文档节点的变换。
 
 mod canvas;
-mod icon_panel;
+mod file_panel;
 mod layer_panel;
 mod menu;
 mod properties_panel;
 mod status_bar;
 mod toolbar;
 
+pub use file_panel::IoAction;
+
 use std::cell::{Cell, RefCell};
+use std::path::Path;
 use std::rc::Rc;
 
 use draw_components::{set_text, Component, Flex, ListState, NodeRef};
 use draw_core::{
     Edges, EventResult, InputEvent, Key, NodeId, PointerButton, Rect, Size, Vec2, ViewportSize,
 };
-use draw_render::PaintContext;
+use draw_render::{Paint, PaintContext};
 use draw_scene::{SceneChild, SceneTree, Visual};
 use draw_theme::{space, SurfaceLevel, Theme};
 use draw_ui::{MouseFilter, SizeBasis, TextMeasurer};
 
 use crate::app::state::{ActiveTool, AppState, HistoryAction};
-use crate::canvas::{document_to_pixel, screen_to_document, CanvasCamera, DOCUMENT_TEXTURE};
+use crate::canvas::{
+    document_to_pixel, pixel_selection, screen_to_document, CanvasCamera, DOCUMENT_TEXTURE,
+};
 use crate::document::{LayerId, PixelBuffer};
-use crate::icons::{self, IconSet};
-use crate::renderer::{CpuRenderer, RenderTarget, Renderer};
-use crate::tools::{BrushMode, BrushTool, PointerEvent, Tool, ToolContext};
+use crate::icons::IconSet;
+use crate::renderer::{sample_pixel, CpuRenderer, RenderTarget, Renderer};
+use crate::tools::{BrushMode, BrushTool, MoveTool, PointerEvent, Tool, ToolContext};
 
 /// 工具栏宽度（逻辑像素）。
 const TOOLBAR_WIDTH: f32 = 52.0;
@@ -59,7 +64,7 @@ struct Refs {
     canvas: NodeRef,
     props_name: NodeRef,
     props_detail: NodeRef,
-    icons: NodeRef,
+    path: NodeRef,
 }
 
 /// 正在进行的图层重命名。
@@ -86,6 +91,17 @@ pub struct EditorView {
     tool_nodes: Vec<(ActiveTool, NodeId)>,
     /// 撤销 / 重做按钮节点（Phase 6）。
     history_nodes: Vec<(HistoryAction, NodeId)>,
+    /// 文件面板的按钮节点（Phase 7）。
+    file_nodes: Vec<(IoAction, NodeId)>,
+    /// 导入 / 导出的路径，文件面板与内联编辑共享。
+    path: Rc<RefCell<String>>,
+    /// 文件面板按钮留下的动作请求；`update` 取走执行。
+    io_request: Rc<Cell<Option<IoAction>>>,
+    /// 路径标签节点，以及上一次写入的内容（避免每帧刷文本）。
+    path_label: NodeId,
+    shown_path: Option<String>,
+    /// 路径内联编辑的缓冲区（`Some` = 正在编辑）。
+    path_edit: Option<String>,
     /// 图标包里索引到的图标数量（自检 / 报告用）。
     icon_count: usize,
     /// 上一次同步到状态栏的内容，避免每帧都 `set_text`。
@@ -107,6 +123,10 @@ pub struct EditorView {
     pan_last: Option<Vec2>,
     /// 画笔 / 橡皮引擎（同一个，靠 `mode` 区分）。
     brush: BrushTool,
+    /// 移动工具（Phase 8）。
+    move_tool: MoveTool,
+    /// 框选拖拽起点（文档坐标）；`Some` = 正在框选。
+    select_anchor: Option<Vec2>,
     /// 图层列表的共享行数 / 选中行 / 状态。
     layer_count: Rc<Cell<usize>>,
     layer_selected: Rc<Cell<Option<usize>>>,
@@ -126,8 +146,24 @@ impl EditorView {
     pub fn new(theme: Theme, state: AppState) -> Self {
         let refs = Refs::default();
         let document_size = (state.document.width, state.document.height);
+        let document_name = state.document.name.clone();
         let state = Rc::new(RefCell::new(state));
         let message: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+        // 默认导出到当前目录 + 文档名；用户可在文件面板里改。
+        let path: Rc<RefCell<String>> = Rc::new(RefCell::new(
+            crate::io::default_export_path(&document_name)
+                .to_string_lossy()
+                .into_owned(),
+        ));
+        let io_request: Rc<Cell<Option<IoAction>>> = Rc::new(Cell::new(None));
+        let mut file_refs: Vec<(IoAction, NodeRef)> = Vec::new();
+        let file_panel = file_panel::file_panel(
+            theme,
+            path.clone(),
+            io_request.clone(),
+            &refs.path,
+            &mut file_refs,
+        );
 
         let mut tool_refs: Vec<(ActiveTool, NodeRef)> = Vec::new();
         let mut history_refs: Vec<(HistoryAction, NodeRef)> = Vec::new();
@@ -173,13 +209,13 @@ impl EditorView {
                             .padding(Edges::all(space::SM))
                             .background(theme.surface(SurfaceLevel::Surface))
                             .mouse_filter(MouseFilter::Ignore)
+                            .child(file_panel)
                             .child(layer_panel::layer_panel(
                                 theme,
                                 state.clone(),
                                 layer_list,
                                 rename_request.clone(),
                             ))
-                            .child(icon_panel::icon_panel(theme, &refs.icons))
                             .child(properties_panel::properties_panel(
                                 theme,
                                 &refs.props_name,
@@ -220,6 +256,10 @@ impl EditorView {
             .into_iter()
             .map(|(action, slot)| (action, slot.get().expect("history button mounted")))
             .collect();
+        let file_nodes: Vec<(IoAction, NodeId)> = file_refs
+            .into_iter()
+            .map(|(action, slot)| (action, slot.get().expect("file button mounted")))
+            .collect();
 
         // 图标包 -> 工具栏按钮 + 侧边栏网格。解析结果由 decorator 持有，每帧只重描边。
         let icon_set = IconSet::load();
@@ -229,9 +269,6 @@ impl EditorView {
         }
         for (action, node) in &history_nodes {
             icon_set.attach_icon(&mut tree, *node, action.icon(), icon_color);
-        }
-        if let Some(surface) = refs.icons.get() {
-            icon_set.attach_grid(&mut tree, surface, &icons::ICON_NAMES, icon_color);
         }
         let icon_count = icon_set.len();
 
@@ -245,6 +282,12 @@ impl EditorView {
             message_label: refs.message.get().expect("message label mounted"),
             tool_nodes,
             history_nodes,
+            file_nodes,
+            path,
+            io_request,
+            path_label: refs.path.get().expect("path label mounted"),
+            shown_path: None,
+            path_edit: None,
             icon_count,
             shown: None,
             pointer: None,
@@ -257,6 +300,8 @@ impl EditorView {
             viewport: ViewportSize::new(Size::new(1280.0, 800.0)),
             pan_last: None,
             brush: BrushTool::paint(),
+            move_tool: MoveTool::new(),
+            select_anchor: None,
             layer_count,
             layer_selected,
             layer_state,
@@ -280,7 +325,13 @@ impl EditorView {
 
     /// 宿主每帧调用：同步状态栏、在文档改动后刷新图层列表并标记重合成。
     pub fn update(&mut self) {
+        // 文件面板的请求先执行：导入会改文档，之后的 revision 检查会刷新
+        // 图层列表与合成。
+        if let Some(action) = self.io_request.take() {
+            self.handle_io(action);
+        }
         self.sync_status();
+        self.sync_path();
 
         let (revision, active) = {
             let state = self.state.borrow();
@@ -443,6 +494,128 @@ impl EditorView {
         }
     }
 
+    // -- 文件 / 路径（Phase 7） ------------------------------------------
+
+    /// 路径标签每帧同步：编辑中显示缓冲区 + 光标，否则显示当前路径。
+    fn sync_path(&mut self) {
+        let display = match &self.path_edit {
+            Some(buffer) => format!("{buffer}▌"),
+            None => self.path.borrow().clone(),
+        };
+        if self.shown_path.as_deref() != Some(display.as_str()) {
+            set_text(&mut self.tree, self.path_label, display.clone());
+            self.shown_path = Some(display);
+        }
+    }
+
+    /// 执行一个文件动作（由文件面板按钮请求触发）。
+    fn handle_io(&mut self, action: IoAction) {
+        match action {
+            IoAction::EditPath => {
+                self.renaming = None;
+                self.path_edit = Some(self.path.borrow().clone());
+                *self.message.borrow_mut() = Some("编辑路径：Enter 确认 · Esc 取消".to_string());
+            }
+            IoAction::Export => {
+                let path = self.io_path();
+                if path.trim().is_empty() {
+                    *self.message.borrow_mut() = Some("先点「改路径」设置导出路径".to_string());
+                    return;
+                }
+                let message = match self.export_png_to(&path) {
+                    Ok(()) => {
+                        tracing::info!(target: "image_editor", path = path.as_str(), "png_exported");
+                        format!("已导出 PNG：{path}")
+                    }
+                    Err(error) => format!("导出失败：{error}"),
+                };
+                *self.message.borrow_mut() = Some(message);
+            }
+            IoAction::Import => {
+                let path = self.io_path();
+                if path.trim().is_empty() {
+                    *self.message.borrow_mut() = Some("先点「改路径」设置导入路径".to_string());
+                    return;
+                }
+                let message = match self.import_png_from(&path) {
+                    Ok((width, height)) => {
+                        tracing::info!(
+                            target: "image_editor",
+                            path = path.as_str(),
+                            width,
+                            height,
+                            "png_imported"
+                        );
+                        format!("已导入 PNG：{path}（{width} × {height}）")
+                    }
+                    Err(error) => format!("导入失败：{error}"),
+                };
+                *self.message.borrow_mut() = Some(message);
+            }
+        }
+    }
+
+    /// 路径编辑中的按键 / 文本输入；返回是否消费了事件。
+    fn handle_path_input(&mut self, event: &InputEvent) -> bool {
+        match event {
+            InputEvent::KeyDown { key: Key::Escape } => {
+                self.path_edit = None;
+                true
+            }
+            InputEvent::KeyDown { key: Key::Enter } => {
+                self.commit_path_edit();
+                true
+            }
+            InputEvent::KeyDown {
+                key: Key::Backspace,
+            } => {
+                if let Some(buffer) = &mut self.path_edit {
+                    buffer.pop();
+                }
+                true
+            }
+            InputEvent::TextInput { text } => {
+                if let Some(buffer) = &mut self.path_edit {
+                    buffer.extend(text.chars().filter(|ch| !ch.is_control()));
+                }
+                true
+            }
+            // 其余按键也吞掉：编辑路径时按字母不该触发工具 / 画布快捷键。
+            InputEvent::KeyDown { .. } => true,
+            _ => false,
+        }
+    }
+
+    fn commit_path_edit(&mut self) {
+        if let Some(buffer) = self.path_edit.take() {
+            let path = buffer.trim();
+            if !path.is_empty() {
+                *self.path.borrow_mut() = path.to_string();
+            }
+        }
+    }
+
+    /// 把当前文档合成后写成 PNG。
+    pub fn export_png_to(&self, path: &str) -> Result<(), crate::io::IoError> {
+        let state = self.state.borrow();
+        let mut target = RenderTarget::new(0, 0);
+        self.renderer.render(&state.document, &mut target);
+        crate::io::write_png(Path::new(path), &target.pixels)
+    }
+
+    /// 从 PNG 文件导入一个新图层（放在最上面并选中）。
+    pub fn import_png_from(&mut self, path: &str) -> Result<(u32, u32), crate::io::IoError> {
+        let pixels = crate::io::read_png(Path::new(path))?;
+        let size = (pixels.width, pixels.height);
+        let name = crate::io::file_label(Path::new(path));
+        self.state
+            .borrow_mut()
+            .document
+            .add_layer_with_pixels(name, pixels);
+        self.texture_dirty = true;
+        Ok(size)
+    }
+
     /// 排布整棵树，并把相机同步到文档节点。
     pub fn layout(&mut self, viewport: ViewportSize) {
         self.viewport = viewport;
@@ -461,10 +634,34 @@ impl EditorView {
         self.tree.update();
     }
 
-    /// 发出这一帧的绘制命令：先世界（文档图像），UI 覆盖在上层。
+    /// 发出这一帧的绘制命令：先世界（文档图像），再选区描边，UI 覆盖在上层。
     pub fn paint(&self, ctx: &mut PaintContext) {
         self.tree.paint(ctx);
+        self.paint_selection(ctx);
         draw_ui::paint(&self.tree, ctx);
+    }
+
+    /// 框选选区的描边：把文档像素矩形换算成屏幕坐标，画一圈 1px 线。
+    ///
+    /// 画在场景（文档图像）之上、UI 之下，所以它不会盖住面板，也不受 `tree`
+    /// 里的相机变换影响（这里用的是相机换算后的屏幕坐标）。
+    fn paint_selection(&self, ctx: &mut PaintContext) {
+        let state = self.state.borrow();
+        let Some(selection) = state.selection else {
+            return;
+        };
+        let camera = state.canvas;
+        let min = camera.document_to_screen(Vec2::new(selection.x as f32, selection.y as f32));
+        let max = camera.document_to_screen(Vec2::new(
+            selection.right() as f32,
+            selection.bottom() as f32,
+        ));
+        let rect = Rect::from_min_max(
+            Vec2::new(min.x.min(max.x), min.y.min(max.y)),
+            Vec2::new(min.x.max(max.x), min.y.max(max.y)),
+        );
+        let color = self.theme.palette.selection;
+        ctx.stroke_rect(rect, 1.0, Paint::new(color));
     }
 
     /// 路由一个后端无关的输入事件。
@@ -472,8 +669,11 @@ impl EditorView {
     /// 工具快捷键、画布缩放 / 平移由视图先处理；其余（点击、指针）交给
     /// `draw_ui::handle_input`，由它去找带回调的控件。
     pub fn event(&mut self, event: &InputEvent) -> EventResult {
-        // 重命名进行中：键盘只编辑名字，不触发工具 / 画布快捷键。
+        // 重命名 / 路径编辑进行中：键盘只编辑文本，不触发工具 / 画布快捷键。
         if self.renaming.is_some() && self.handle_rename_input(event) {
+            return EventResult::Handled;
+        }
+        if self.path_edit.is_some() && self.handle_path_input(event) {
             return EventResult::Handled;
         }
         match event {
@@ -493,6 +693,9 @@ impl EditorView {
                 }
                 if let Some(delta) = brush_opacity_shortcut(*key) {
                     self.adjust_brush_opacity(delta);
+                    return EventResult::Handled;
+                }
+                if matches!(key, Key::Escape) && self.clear_selection() {
                     return EventResult::Handled;
                 }
             }
@@ -533,7 +736,7 @@ impl EditorView {
                     self.state.borrow_mut().canvas.pan_by(delta);
                     return EventResult::Handled;
                 }
-                if self.brush.is_drawing() {
+                if self.is_dragging() {
                     self.continue_tool(*position);
                     return EventResult::Handled;
                 }
@@ -545,7 +748,7 @@ impl EditorView {
                 position,
                 button: PointerButton::Left,
             } => {
-                if self.brush.is_drawing() {
+                if self.is_dragging() {
                     self.end_tool(*position);
                     return EventResult::Handled;
                 }
@@ -643,9 +846,15 @@ impl EditorView {
         screen_to_document(camera, screen)
     }
 
+    /// 是否有工具正处在一次拖拽 / 笔画中。
+    fn is_dragging(&self) -> bool {
+        self.brush.is_drawing() || self.move_tool.is_moving() || self.select_anchor.is_some()
+    }
+
     /// 左键落下：把屏幕点换算成文档坐标，交给当前工具。
     fn begin_tool(&mut self, screen: Vec2) {
         let tool = self.state.borrow().active_tool;
+        let position = self.document_position(screen);
         match tool {
             ActiveTool::Brush | ActiveTool::Eraser => {
                 self.brush.mode = if tool == ActiveTool::Eraser {
@@ -653,69 +862,147 @@ impl EditorView {
                 } else {
                     BrushMode::Paint
                 };
-                let foreground = self.state.borrow().foreground;
+                let (foreground, selection) = {
+                    let state = self.state.borrow();
+                    (state.foreground, state.selection)
+                };
                 self.brush.color = foreground;
+                self.brush.clip = selection;
                 tracing::debug!(target: "image_editor", tool = self.brush.name(), "stroke_started");
-                let position = self.document_position(screen);
                 let mut state = self.state.borrow_mut();
                 let AppState {
                     document, history, ..
                 } = &mut *state;
                 let mut ctx = ToolContext { document, history };
-                self.brush.on_pointer_down(
-                    &mut ctx,
-                    PointerEvent {
-                        position,
-                        button: PointerButton::Left,
-                    },
-                );
+                self.brush.on_pointer_down(&mut ctx, left_pointer(position));
                 self.texture_dirty = true;
             }
-            other => {
-                *self.message.borrow_mut() =
-                    Some(format!("「{}」工具将在后续 Phase 实现", other.label()));
+            ActiveTool::Move => {
+                let mut state = self.state.borrow_mut();
+                let AppState {
+                    document, history, ..
+                } = &mut *state;
+                let mut ctx = ToolContext { document, history };
+                self.move_tool
+                    .on_pointer_down(&mut ctx, left_pointer(position));
+                self.texture_dirty = true;
             }
+            ActiveTool::RectangleSelect => {
+                self.select_anchor = Some(position);
+                self.update_selection(position);
+            }
+            ActiveTool::Eyedropper => self.pick_color(position),
         }
     }
 
     fn continue_tool(&mut self, screen: Vec2) {
-        if !self.brush.is_drawing() {
-            return;
-        }
+        let tool = self.state.borrow().active_tool;
         let position = self.document_position(screen);
-        let mut state = self.state.borrow_mut();
-        let AppState {
-            document, history, ..
-        } = &mut *state;
-        let mut ctx = ToolContext { document, history };
-        self.brush.on_pointer_move(
-            &mut ctx,
-            PointerEvent {
-                position,
-                button: PointerButton::Left,
-            },
-        );
-        self.texture_dirty = true;
+        match tool {
+            ActiveTool::Brush | ActiveTool::Eraser if self.brush.is_drawing() => {
+                let mut state = self.state.borrow_mut();
+                let AppState {
+                    document, history, ..
+                } = &mut *state;
+                let mut ctx = ToolContext { document, history };
+                self.brush.on_pointer_move(&mut ctx, left_pointer(position));
+                self.texture_dirty = true;
+            }
+            ActiveTool::Move if self.move_tool.is_moving() => {
+                let mut state = self.state.borrow_mut();
+                let AppState {
+                    document, history, ..
+                } = &mut *state;
+                let mut ctx = ToolContext { document, history };
+                self.move_tool
+                    .on_pointer_move(&mut ctx, left_pointer(position));
+                self.texture_dirty = true;
+            }
+            ActiveTool::RectangleSelect => self.update_selection(position),
+            _ => {}
+        }
     }
 
     fn end_tool(&mut self, screen: Vec2) {
-        if !self.brush.is_drawing() {
-            return;
-        }
+        let tool = self.state.borrow().active_tool;
         let position = self.document_position(screen);
-        let mut state = self.state.borrow_mut();
-        let AppState {
-            document, history, ..
-        } = &mut *state;
-        let mut ctx = ToolContext { document, history };
-        self.brush.on_pointer_up(
-            &mut ctx,
-            PointerEvent {
-                position,
-                button: PointerButton::Left,
-            },
+        match tool {
+            ActiveTool::Brush | ActiveTool::Eraser if self.brush.is_drawing() => {
+                let mut state = self.state.borrow_mut();
+                let AppState {
+                    document, history, ..
+                } = &mut *state;
+                let mut ctx = ToolContext { document, history };
+                self.brush.on_pointer_up(&mut ctx, left_pointer(position));
+                self.texture_dirty = true;
+            }
+            ActiveTool::Move if self.move_tool.is_moving() => {
+                let mut state = self.state.borrow_mut();
+                let AppState {
+                    document, history, ..
+                } = &mut *state;
+                let mut ctx = ToolContext { document, history };
+                self.move_tool
+                    .on_pointer_up(&mut ctx, left_pointer(position));
+            }
+            ActiveTool::RectangleSelect if self.select_anchor.take().is_some() => {
+                self.update_selection(position);
+                let message = match self.state.borrow().selection {
+                    Some(region) => format!(
+                        "选区 {} × {} @ ({}, {})",
+                        region.width, region.height, region.x, region.y
+                    ),
+                    None => "选区已清空".to_string(),
+                };
+                *self.message.borrow_mut() = Some(message);
+            }
+            _ => {}
+        }
+    }
+
+    /// 拖拽框选：起点 + 当前点 -> 裁剪到画布的整数选区。
+    fn update_selection(&mut self, position: Vec2) {
+        let Some(anchor) = self.select_anchor else {
+            return;
+        };
+        let (width, height) = self.document_size();
+        let selection = pixel_selection(anchor, position, width, height);
+        self.state.borrow_mut().selection = selection;
+    }
+
+    /// 吸管：取合成后 `position` 处的颜色作为前景色。
+    fn pick_color(&mut self, position: Vec2) {
+        let (width, height) = self.document_size();
+        let Some((x, y)) = document_to_pixel(position, width, height) else {
+            *self.message.borrow_mut() = Some("吸管：点在画布外".to_string());
+            return;
+        };
+        let color = {
+            let state = self.state.borrow();
+            sample_pixel(&state.document, x, y)
+        };
+        self.state.borrow_mut().foreground = color;
+        tracing::info!(
+            target: "image_editor",
+            r = color.r,
+            g = color.g,
+            b = color.b,
+            "color_picked"
         );
-        self.texture_dirty = true;
+        *self.message.borrow_mut() = Some(format!(
+            "吸管：({x}, {y}) → #{:02X}{:02X}{:02X}",
+            color.r, color.g, color.b
+        ));
+    }
+
+    /// Escape 清空选区；返回是否真的清了。
+    fn clear_selection(&mut self) -> bool {
+        if self.state.borrow().selection.is_none() {
+            return false;
+        }
+        self.state.borrow_mut().selection = None;
+        *self.message.borrow_mut() = Some("已清空选区".to_string());
+        true
     }
 
     fn adjust_brush_size(&mut self, delta: f32) {
@@ -852,9 +1139,64 @@ impl EditorView {
             .map(|(_, id)| *id)
     }
 
+    /// 文件面板按钮的节点 id。
+    pub fn file_node(&self, action: IoAction) -> Option<NodeId> {
+        self.file_nodes
+            .iter()
+            .find(|(candidate, _)| *candidate == action)
+            .map(|(_, id)| *id)
+    }
+
+    /// 文件面板按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
+    pub fn file_center(&self, action: IoAction) -> Option<Vec2> {
+        draw_ui::control(&self.tree, self.file_node(action)?).map(|control| control.rect.center())
+    }
+
+    /// 当前文档的图层数（自检核对导入结果用）。
+    pub fn layer_count(&self) -> usize {
+        self.state.borrow().document.layers.len()
+    }
+
+    /// 当前前景色（吸管取色后测试 / 自检用）。
+    pub fn foreground(&self) -> crate::document::Color {
+        self.state.borrow().foreground
+    }
+
+    /// 当前选区（框选后测试 / 自检用）。
+    pub fn selection(&self) -> Option<crate::document::PixelRegion> {
+        self.state.borrow().selection
+    }
+
+    /// 当前图层的像素偏移（移动工具的效果，测试 / 自检用）。
+    pub fn active_layer_position(&self) -> Option<crate::document::Point> {
+        self.state
+            .borrow()
+            .document
+            .active_layer()
+            .map(|layer| layer.position)
+    }
+
+    /// 当前的导入 / 导出路径。
+    pub fn io_path(&self) -> String {
+        self.path.borrow().clone()
+    }
+
+    /// 设置导入 / 导出路径（测试与自检把它指到临时文件）。
+    pub fn set_io_path(&mut self, path: impl Into<String>) {
+        *self.path.borrow_mut() = path.into();
+    }
+
     /// 控件数（自检的预算检查用）。
     pub fn control_count(&self) -> usize {
         draw_ui::control_count(&self.tree)
+    }
+}
+
+/// 左键指针事件（这些工具只处理左键）。
+fn left_pointer(position: Vec2) -> PointerEvent {
+    PointerEvent {
+        position,
+        button: PointerButton::Left,
     }
 }
 
@@ -911,7 +1253,7 @@ fn brush_opacity_shortcut(key: Key) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::Color;
+    use crate::document::{Color, PixelBuffer, Point};
     use draw_core::{PointerButton, Size};
     use draw_render::DrawCommand;
     use draw_ui::Widget;
@@ -973,8 +1315,8 @@ mod tests {
     fn clicking_a_menu_reports_a_placeholder_message() {
         let mut view = EditorView::new(Theme::dark(), AppState::default());
         view.layout(viewport());
-        // 菜单栏第一项是“文件”，点击它的中心。
-        let text = "文件";
+        // “帮助”仍是占位菜单项；点击它的中心。
+        let text = "帮助";
         let position = view
             .tree
             .iter()
@@ -984,7 +1326,7 @@ mod tests {
                 }
                 _ => None,
             })
-            .expect("file menu label");
+            .expect("help menu label");
         click(&mut view, position);
         view.update();
         assert!(
@@ -1356,12 +1698,10 @@ mod tests {
     }
 
     #[test]
-    fn the_icon_gallery_loads_the_pack() {
+    fn the_icon_pack_covers_the_toolbar_icons() {
         let view = EditorView::new(Theme::dark(), AppState::default());
-        assert!(
-            view.icon_count() >= icons::ICON_NAMES.len(),
-            "图标包应至少包含展示的这组图标"
-        );
+        let needed = ActiveTool::ALL.len() + HistoryAction::ALL.len();
+        assert!(view.icon_count() >= needed, "图标包应覆盖工具栏图标");
     }
 
     #[test]
@@ -1388,5 +1728,217 @@ mod tests {
         let pitch = (last.y - first.y) / (ActiveTool::ALL.len() - 1) as f32;
         // `Flex` 默认带 16px 内边距；忘记清零会让每一项高 32px、间距翻倍。
         assert!(pitch < 60.0, "工具栏每一项的间距应紧凑，实际 {pitch:.1}px");
+    }
+
+    // -- Phase 7：导入导出 --------------------------------------------------
+
+    /// 测试用唯一临时 PNG 路径。
+    fn temp_png(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "image_editor_ui_{}_{n}_{tag}.png",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn exporting_writes_the_composite_to_the_path() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        paint_a_stroke(&mut view);
+
+        let path = temp_png("export");
+        view.set_io_path(path.to_string_lossy().into_owned());
+        let export = view.file_center(IoAction::Export).expect("导出按钮");
+        click(&mut view, export);
+        view.update();
+
+        let exported = crate::io::read_png(&path).expect("导出的 PNG 应能解码");
+        assert_eq!(exported.get_pixel(0, 0), Color::WHITE);
+        assert_eq!(exported.get_pixel(400, 300), Color::BLACK);
+        assert!(label_text(&view, view.message_label).contains("已导出"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn importing_a_png_adds_a_layer_and_shows_a_message() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let path = temp_png("import");
+        crate::io::write_png(&path, &PixelBuffer::filled(2, 2, Color::RED)).unwrap();
+
+        let before = view.state.borrow().document.layers.len();
+        view.set_io_path(path.to_string_lossy().into_owned());
+        let import = view.file_center(IoAction::Import).expect("导入按钮");
+        click(&mut view, import);
+        view.update();
+
+        assert_eq!(view.state.borrow().document.layers.len(), before + 1);
+        assert!(label_text(&view, view.message_label).contains("已导入"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_failed_export_reports_the_error_and_keeps_running() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let missing = std::env::temp_dir()
+            .join("image_editor_definitely_missing_dir")
+            .join("x.png");
+        view.set_io_path(missing.to_string_lossy().into_owned());
+        let export = view.file_center(IoAction::Export).expect("导出按钮");
+        click(&mut view, export);
+        view.update();
+        assert!(label_text(&view, view.message_label).contains("导出失败"));
+    }
+
+    #[test]
+    fn the_path_can_be_edited_inline() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let original = view.io_path();
+        let edit = view.file_center(IoAction::EditPath).expect("改路径按钮");
+
+        click(&mut view, edit);
+        view.update();
+        assert!(view.path_edit.is_some(), "应进入路径编辑");
+        view.event(&InputEvent::TextInput { text: "X".into() });
+        view.event(&InputEvent::KeyDown { key: Key::Enter });
+        assert_eq!(view.io_path(), format!("{original}X"));
+
+        click(&mut view, edit);
+        view.update();
+        view.event(&InputEvent::TextInput { text: "Y".into() });
+        view.event(&InputEvent::KeyDown { key: Key::Escape });
+        assert_eq!(view.io_path(), format!("{original}X"), "Esc 丢弃编辑");
+    }
+
+    // -- Phase 8：移动 / 框选 / 吸管 ---------------------------------------
+
+    #[test]
+    fn the_move_tool_offsets_the_active_layer() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('v'),
+        });
+        view.update();
+
+        let camera = view.canvas_camera();
+        let start = camera.document_to_screen(Vec2::new(400.0, 300.0));
+        let end = start + Vec2::new(12.0, -8.0);
+        let a = camera.screen_to_document(start);
+        let b = camera.screen_to_document(end);
+        let expected = Point::new((b.x - a.x).round() as i32, (b.y - a.y).round() as i32);
+
+        view.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerMove { position: end });
+        view.event(&InputEvent::PointerUp {
+            position: end,
+            button: PointerButton::Left,
+        });
+
+        let position = view
+            .state
+            .borrow()
+            .document
+            .active_layer()
+            .unwrap()
+            .position;
+        assert_eq!(position, expected);
+        assert!(view.take_texture_upload().is_some(), "移动后要重合成");
+    }
+
+    #[test]
+    fn the_eyedropper_picks_the_composited_color_as_the_foreground() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        paint_a_stroke(&mut view);
+
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('i'),
+        });
+        view.update();
+        let point = view
+            .canvas_camera()
+            .document_to_screen(Vec2::new(400.0, 300.0));
+        view.event(&InputEvent::PointerDown {
+            position: point,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: point,
+            button: PointerButton::Left,
+        });
+
+        assert_eq!(view.foreground(), Color::BLACK);
+        view.update();
+        assert!(label_text(&view, view.message_label).contains("吸管"));
+    }
+
+    #[test]
+    fn a_selection_confines_the_brush_and_escape_clears_it() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let camera = view.canvas_camera();
+
+        // 框一块 390..410 × 290..310。
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('m'),
+        });
+        view.update();
+        let start = camera.document_to_screen(Vec2::new(390.0, 290.0));
+        let end = camera.document_to_screen(Vec2::new(410.0, 310.0));
+        view.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerMove { position: end });
+        view.event(&InputEvent::PointerUp {
+            position: end,
+            button: PointerButton::Left,
+        });
+        let selection = view.selection().expect("应产生选区");
+        assert!(selection.contains(400, 300));
+        assert!(!selection.contains(100, 100));
+
+        // 画笔只在选区里落笔。
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('b'),
+        });
+        view.update();
+        let inside = camera.document_to_screen(Vec2::new(400.0, 300.0));
+        let outside = camera.document_to_screen(Vec2::new(100.0, 100.0));
+        for point in [inside, outside] {
+            view.event(&InputEvent::PointerDown {
+                position: point,
+                button: PointerButton::Left,
+            });
+            view.event(&InputEvent::PointerUp {
+                position: point,
+                button: PointerButton::Left,
+            });
+        }
+        let (inside_pixel, outside_pixel) = {
+            let state = view.state.borrow();
+            let layer = state.document.active_layer().unwrap();
+            (
+                layer.pixels.get_pixel(400, 300),
+                layer.pixels.get_pixel(100, 100),
+            )
+        };
+        assert_eq!(inside_pixel, Color::BLACK, "选区内落笔");
+        assert_eq!(outside_pixel, Color::WHITE, "选区外不落笔");
+
+        // Esc 清空选区。
+        assert!(view
+            .event(&InputEvent::KeyDown { key: Key::Escape })
+            .is_handled());
+        assert!(view.selection().is_none());
     }
 }

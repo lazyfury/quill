@@ -1,7 +1,7 @@
 //! quill 图像编辑器 —— 用本仓库自己的 UI 栈代替 `egui` 的桌面示例。
 //!
-//! 当前进度到 Phase 6（History）：窗口 + 菜单/工具栏 + 真实文档 / 图层 +
-//! 画笔 / 橡皮 + 撤销 / 重做。导入导出、Move / 框选 / 吸管在后续 Phase。
+//! 当前进度到 Phase 8（移动 / 框选 / 吸管）：窗口 + 菜单/工具栏 + 真实文档 /
+//! 图层 + 画笔 / 橡皮 + 撤销 / 重做 + PNG 导入 / 导出 + 完整工具集。
 //!
 //! ```bash
 //! cargo run --manifest-path examples/image_editor/Cargo.toml
@@ -12,6 +12,7 @@ mod app;
 mod canvas;
 mod document;
 mod icons;
+mod io;
 mod renderer;
 mod selfcheck;
 mod tools;
@@ -20,7 +21,7 @@ mod ui;
 use app::application::{self, Options};
 
 const HELP: &str = "\
-image_editor — 用 quill 自己画的图像编辑器（Phase 6：History）
+image_editor — 用 quill 自己画的图像编辑器（Phase 8：移动 / 框选 / 吸管）
 
 用法:
   image_editor [选项]
@@ -39,6 +40,15 @@ image_editor — 用 quill 自己画的图像编辑器（Phase 6：History）
   Ctrl/Cmd+Z 撤销 · Shift+Ctrl/Cmd+Z（或 Ctrl+Y）重做
   [ ] 笔刷大小 · , . 笔刷不透明度
   + - 缩放 · 0 100% · F 适配
+
+导入导出（Phase 7）:
+  右侧「文件」面板改路径，再点「导入 PNG」/「导出 PNG」
+  （winit 无原生文件对话框，所以用「改路径」内联输入）
+
+工具（Phase 8）:
+  V 移动当前图层（画布上拖动）
+  M 框选（拖动出选区，画笔只在选区内落笔；Esc 清空）
+  I 吸管（点画布取色为前景色）
 ";
 
 /// 解析后的命令行。

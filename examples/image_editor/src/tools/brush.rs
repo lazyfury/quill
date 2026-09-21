@@ -10,7 +10,7 @@
 use draw_core::Vec2;
 
 use super::tool::{PointerEvent, Tool, ToolContext};
-use crate::document::{Color, Document, LayerId, PaintCommand, PixelBuffer};
+use crate::document::{Color, Document, LayerId, PaintCommand, PixelBuffer, PixelRegion};
 
 /// 画笔模式。擦除复用同一套 stamp / 插值逻辑。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +35,9 @@ pub struct BrushTool {
     pub opacity: f32,
     pub color: Color,
     pub mode: BrushMode,
+    /// 可选选区：只有落在里面的像素会被写（Phase 8 的框选裁剪）。
+    /// 视图在落笔前从编辑器状态同步过来。
+    pub clip: Option<PixelRegion>,
     drawing: bool,
     last: Option<Vec2>,
     /// 当前笔触落笔时的图层快照；不在笔画中时为 `None`。
@@ -52,6 +55,7 @@ impl BrushTool {
             opacity: 1.0,
             color: Color::BLACK,
             mode: BrushMode::Paint,
+            clip: None,
             drawing: false,
             last: None,
             pending: None,
@@ -123,6 +127,11 @@ impl BrushTool {
                 }
                 let alpha = coverage * self.opacity;
                 let (x, y) = (x as u32, y as u32);
+                if let Some(clip) = self.clip {
+                    if !clip.contains(x, y) {
+                        continue;
+                    }
+                }
                 match self.mode {
                     BrushMode::Paint => buffer.blend_pixel(x, y, self.color, alpha),
                     BrushMode::Erase => buffer.erase_pixel(x, y, alpha),
@@ -273,6 +282,16 @@ mod tests {
             .with_color(Color::RED)
             .stroke_to(&mut outside, Vec2::new(-50.0, -50.0));
         assert_eq!(at(&outside, 0, 0), Color::WHITE);
+    }
+
+    #[test]
+    fn a_clip_region_confines_the_stroke() {
+        let mut document = document();
+        let mut brush = BrushTool::paint().with_color(Color::RED);
+        brush.clip = Some(PixelRegion::new(14, 14, 4, 4));
+        brush.stroke_to(&mut document, Vec2::new(16.0, 16.0));
+        assert_eq!(at(&document, 16, 16), Color::RED, "选区内落笔");
+        assert_eq!(at(&document, 20, 16), Color::WHITE, "选区外不落笔");
     }
 
     #[test]

@@ -98,13 +98,19 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   active layer), `history` (`Command`/`History`/
                   `PaintCommand`: one stroke = one undo, toolbar buttons +
                   `Ctrl/Cmd+Z`), and Lucide icons (toolbar tool + undo/redo
-                  buttons, plus a sidebar gallery) stroked straight into the IR
-                  via `draw_svg` (no rasterization, no texture; vendored
-                  20-icon subset + `IMAGE_EDITOR_ICON_DIR` to point at a full
-                  pack). Verified headlessly with `--selfcheck`
-                  (including an undo/redo round-trip and an icon/FillCircle
-                  check). Import/export and the move/select/eyedropper tools
-                  land in later phases, one at a time)
+                  buttons) stroked straight into the IR via `draw_svg` (no
+                  rasterization, no texture; vendored 7-icon subset matching
+                  the toolbar + `IMAGE_EDITOR_ICON_DIR` to point at a full
+                  pack)), and PNG import/export (`io` `codec`/`file` on the
+                  `png` crate — a dependency only in this example, the core
+                  stays dependency-free; a sidebar `file` panel with inline
+                  path editing since winit has no native file dialog), and the
+                  move / rectangle-select / eyedropper tools (`MoveTool` moves a
+                  layer's `position`; selection lives in `AppState` and clips the
+                  brush via `canvas::pixel_selection`; the eyedropper reads the
+                  composite through `renderer::sample_pixel`). Verified headlessly
+                  with `--selfcheck` (undo/redo, a real export->decode + import
+                  round-trip, the three tools, and an icon/FillCircle check))
 ```
 
 Planned (Stage 25, see `docs/godot-migration.md`):

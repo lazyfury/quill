@@ -3,16 +3,16 @@
 //! 渲染走核心的 `draw_svg`（backend-neutral：把 SVG flatten 成 IR 的 `Line` /
 //! `FillCircle`），所以图标**不需要**栅格化成纹理，也不引额外依赖。
 //!
-//! 默认加载仓库里 vendor 的 20 个图标（`assets/icons/`，含 Lucide 的 ISC
-//! `LICENSE`），测试与 `--selfcheck` 因此可复现；把 `IMAGE_EDITOR_ICON_DIR`
-//! 指向完整图标包（例如下载的 lucide-static `icons/`，2112 个）即可换成整包，
-//! 而展示的仍是 [`ICON_NAMES`] 这一小组。
+//! 默认加载仓库里 vendor 的图标（`assets/icons/`，含 Lucide 的 ISC
+//! `LICENSE`）——就是工具栏的工具与撤销 / 重做要用的那几个，测试与
+//! `--selfcheck` 因此可复现；把 `IMAGE_EDITOR_ICON_DIR` 指向完整图标包
+//! （例如下载的 lucide-static `icons/`，2112 个）即可换成整包。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use draw_core::{Color, NodeId, Rect, Size, Vec2};
+use draw_core::{Color, NodeId, Rect, Size};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
 use draw_svg::{IconPack, SvgDocument};
@@ -22,35 +22,6 @@ use draw_ui::{add_decor, foreground_decor, inset, InteractState};
 const VENDORED_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icons");
 /// 可选：指向一个完整的 Lucide `icons/` 目录。
 const ENV_DIR: &str = "IMAGE_EDITOR_ICON_DIR";
-
-/// 画廊里展示的图标（也是工具栏等界面会用到的名字）。
-pub const ICON_NAMES: [&str; 20] = [
-    "mouse-pointer-2",
-    "brush",
-    "eraser",
-    "square-dashed",
-    "pipette",
-    "undo-2",
-    "redo-2",
-    "plus",
-    "minus",
-    "trash-2",
-    "eye",
-    "eye-off",
-    "chevron-up",
-    "chevron-down",
-    "pencil",
-    "save",
-    "folder-open",
-    "image",
-    "zoom-in",
-    "zoom-out",
-];
-
-/// 网格里一个图标的格子边长（逻辑像素）。
-const CELL: f32 = 34.0;
-/// 格子内图标四周的留白。
-const CELL_INSET: f32 = 5.0;
 /// 单个图标按钮里图标四周的留白。
 const ICON_INSET: f32 = 5.0;
 
@@ -107,41 +78,6 @@ impl IconSet {
         );
         add_decor(tree, node, decor);
     }
-
-    /// 在 `node` 的矩形里按网格画一批图标（`node` 必须已在树里）。
-    ///
-    /// 解析好的 [`SvgDocument`] 被 decorator 持有，所以每帧只是把矢量重新
-    /// 描边成命令，不会重复读文件 / 解析。
-    pub fn attach_grid(
-        &self,
-        tree: &mut SceneTree,
-        node: NodeId,
-        names: &[&'static str],
-        color: Color,
-    ) {
-        let documents: Vec<Rc<SvgDocument>> = names
-            .iter()
-            .filter_map(|name| self.document(name))
-            .collect();
-        if documents.is_empty() {
-            return;
-        }
-        let decor = foreground_decor(
-            move |ctx: &mut PaintContext, rect: Rect, _state: InteractState| {
-                let columns = ((rect.size.width / CELL).floor() as usize).max(1);
-                for (index, document) in documents.iter().enumerate() {
-                    let column = index % columns;
-                    let row = index / columns;
-                    let cell = Rect::from_min_size(
-                        rect.origin + Vec2::new(column as f32 * CELL, row as f32 * CELL),
-                        Size::splat(CELL),
-                    );
-                    document.draw(ctx, inset(cell, CELL_INSET), color);
-                }
-            },
-        );
-        add_decor(tree, node, decor);
-    }
 }
 
 #[cfg(test)]
@@ -150,14 +86,19 @@ mod tests {
     use draw_render::PaintContext;
 
     #[test]
-    fn the_vendored_pack_indexes_every_listed_icon() {
+    fn the_vendored_pack_indexes_every_ui_icon() {
         let icons = IconSet::load();
-        assert!(
-            icons.len() >= ICON_NAMES.len(),
-            "expected at least the vendored subset, got {}",
-            icons.len()
-        );
-        for name in ICON_NAMES {
+        let names: Vec<&str> = crate::app::state::ActiveTool::ALL
+            .iter()
+            .map(|tool| tool.icon())
+            .chain(
+                crate::app::state::HistoryAction::ALL
+                    .iter()
+                    .map(|a| a.icon()),
+            )
+            .collect();
+        assert!(icons.len() >= names.len(), "indexed {}", icons.len());
+        for name in names {
             assert!(icons.document(name).is_some(), "missing icon `{name}`");
         }
     }
@@ -169,7 +110,7 @@ mod tests {
         let mut ctx = PaintContext::new();
         document.draw(
             &mut ctx,
-            Rect::from_min_size(Vec2::ZERO, Size::splat(24.0)),
+            Rect::from_min_size(draw_core::Vec2::ZERO, Size::splat(24.0)),
             Color::BLACK,
         );
         assert!(!ctx.into_draw_list().is_empty(), "icon drew no commands");

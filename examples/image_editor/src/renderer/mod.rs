@@ -12,7 +12,7 @@
 mod cpu;
 mod target;
 
-pub use cpu::CpuRenderer;
+pub use cpu::{sample_pixel, CpuRenderer};
 pub use target::RenderTarget;
 
 use crate::document::Document;
