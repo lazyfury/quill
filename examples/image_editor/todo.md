@@ -42,12 +42,13 @@
 
 ## 2. 紧接着
 
-- **CPU 合成脏矩形**（性能，优先）：`src/renderer/cpu.rs` 每次全量合成；图层缓冲
-  现在可能比文档大，成本随缓冲尺寸走。加 `DirtyRegion`，或至少只合成文档范围。
+- [x] **CPU 合成成本收口**（`src/renderer/cpu.rs`）：图层缓冲现在可能比文档大，
+  之前的慢路会遍历整块缓冲。改成只遍历「落在渲染目标里的那部分」，合成成本
+  只跟文档尺寸有关，不再随缓冲增长（`DirtyRegion` 留给文档变大时再说）。
 - **棋盘格屏幕空间恒定大小**：现在 8 文档像素/格，随缩放变大；可改成屏幕空间恒定
   格子或加开关。文件：`src/canvas/checkerboard.rs`、`src/ui/mod.rs`。
-- **最近邻只在 wgpu**：给 `draw_backend_canvas` 加 `imageSmoothingEnabled` 等价
-  开关。文件：`crates/draw_backend_canvas`（quill 主仓）。
+- **最近邻只在 wgpu**（**暂不做，canvas 先不管**）：给 `draw_backend_canvas` 加
+  `imageSmoothingEnabled` 等价开关。文件：`crates/draw_backend_canvas`（quill 主仓）。
 - **图层缓冲只增不减**：加上限 / 回收，或提供「裁到文档」的命令。
 - **`--selfcheck` 覆盖**：棋盘格 / 最近邻 / 移动映射目前只有单元测试。
 - **UI 暴露**：属性面板显示图层 `position` / 缓冲尺寸；棋盘格 / 最近邻开关。
@@ -67,6 +68,8 @@
 
 ## Done（近期）
 
+- **CPU 合成只遍历可见范围**（`src/renderer/cpu.rs`）：合成成本不再随图层缓冲尺寸
+  增长（`a_layer_larger_than_the_document_composites_only_the_visible_part`）。
 - **像素模式 P1–P4**：`BrushShape { Round, Square }` + `BrushTool { hard, shape }`
   （默认硬边方形，任意尺寸圆心吸附像素网格、`coverage` 二值）；选项栏加「像素」
   「方形」两个开关（`Rc<Cell>` + `dynamic_background`，`update` 同步进画笔）；

@@ -32,10 +32,13 @@ fn blend_layer(target: &mut PixelBuffer, layer: &crate::document::Layer) {
     // 不透明度拉满时，alpha=255 的源像素可以直接覆盖目标（source-over 的
     // 特例），省掉每像素的浮点混合。背景层与画笔实心部分都走这条路。
     let opaque = opacity >= 1.0;
-    let aligned = layer.position == crate::document::Point::ZERO
+    let dx = layer.position.x as i64;
+    let dy = layer.position.y as i64;
+
+    let aligned = dx == 0
+        && dy == 0
         && layer.pixels.width == target.width
         && layer.pixels.height == target.height;
-
     if aligned {
         // 快路：同尺寸对齐，逐 4 字节块处理，省掉每像素的坐标与边界检查。
         for (dst, src) in target
@@ -56,22 +59,23 @@ fn blend_layer(target: &mut PixelBuffer, layer: &crate::document::Layer) {
         return;
     }
 
-    let dx = layer.position.x as i64;
-    let dy = layer.position.y as i64;
-    let width = target.width as i64;
-    let height = target.height as i64;
-    for y in 0..layer.pixels.height {
-        for x in 0..layer.pixels.width {
+    // 只遍历**落在渲染目标里的**那部分：图层缓冲区可能比文档大很多（移动画布
+    // 外内容后），合成成本不应该随缓冲区尺寸增长。
+    let x_start = (-dx).max(0);
+    let x_end = (target.width as i64 - dx).min(layer.pixels.width as i64);
+    let y_start = (-dy).max(0);
+    let y_end = (target.height as i64 - dy).min(layer.pixels.height as i64);
+    if x_start >= x_end || y_start >= y_end {
+        return;
+    }
+    for y in y_start as u32..y_end as u32 {
+        for x in x_start as u32..x_end as u32 {
             let src = layer.pixels.get_pixel(x, y);
             if src.is_transparent() {
                 continue;
             }
-            let dest_x = x as i64 + dx;
-            let dest_y = y as i64 + dy;
-            if dest_x < 0 || dest_y < 0 || dest_x >= width || dest_y >= height {
-                continue;
-            }
-            let (dest_x, dest_y) = (dest_x as u32, dest_y as u32);
+            let dest_x = (x as i64 + dx) as u32;
+            let dest_y = (y as i64 + dy) as u32;
             if opaque && src.a == 255 {
                 target.set_pixel(dest_x, dest_y, src);
             } else {
@@ -226,6 +230,25 @@ mod tests {
         let pixels = render(&document);
         assert_eq!(pixels.get_pixel(0, 0), Color::RED, "右半部分落到 x=0");
         assert_eq!(pixels.get_pixel(1, 0), Color::TRANSPARENT);
+    }
+
+    #[test]
+    fn a_layer_larger_than_the_document_composites_only_the_visible_part() {
+        // 3×3 图层超出 2×2 文档，放在 (-1,-1)：超出部分被裁掉，可见部分正常。
+        let mut document = Document::empty("d", 2, 2, Color::BLACK);
+        let mut pixels = PixelBuffer::filled(3, 3, Color::rgb(0, 0, 255));
+        pixels.set_pixel(1, 1, Color::RED);
+        let mut layer = Layer::new("L", pixels);
+        layer.position = Point::new(-1, -1);
+        document.layers.push(layer);
+
+        let rendered = render(&document);
+        assert_eq!(
+            rendered.get_pixel(0, 0),
+            Color::RED,
+            "图层(1,1) -> 文档(0,0)"
+        );
+        assert_eq!(rendered.get_pixel(1, 1), Color::rgb(0, 0, 255));
     }
 
     #[test]
