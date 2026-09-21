@@ -7,7 +7,7 @@ use super::*;
 use crate::go;
 
 /// The tab bar: the two page tabs, always visible.
-pub(super) fn tab_bar(theme: Theme, refs: &Refs, feed: &Feed) -> Row {
+pub(super) fn tab_bar(theme: &'static dyn Theme, refs: &Refs, feed: &Feed) -> Row {
     Row::new()
         .align(Align::Center)
         .gap(space::XS)
@@ -20,7 +20,7 @@ pub(super) fn tab_bar(theme: Theme, refs: &Refs, feed: &Feed) -> Row {
 /// The highlight is resolved each frame from the shared tab cell, so switching
 /// pages never rebuilds the tree; the click only queues the choice for
 /// [`BalanceApp::update`] to drain.
-pub(super) fn tab_button(theme: Theme, tab: Tab, feed: &Feed) -> Flex {
+pub(super) fn tab_button(theme: &'static dyn Theme, tab: Tab, feed: &Feed) -> Flex {
     let clicked = feed.tab_request.clone();
     let active = feed.tab.clone();
     Flex::row()
@@ -41,7 +41,7 @@ pub(super) fn tab_button(theme: Theme, tab: Tab, feed: &Feed) -> Flex {
 ///
 /// Zero padding: the tabbed container already insets everything, and `Flex`'s
 /// own default (16px) would double it.
-pub(super) fn deepseek_page(theme: Theme, endpoint: &str, refs: &Refs, feed: &Feed) -> Flex {
+pub(super) fn deepseek_page(theme: &'static dyn Theme, endpoint: &str, refs: &Refs, feed: &Feed) -> Flex {
     Flex::column()
         .mouse_filter(MouseFilter::Ignore)
         .gap(space::LG)
@@ -51,7 +51,7 @@ pub(super) fn deepseek_page(theme: Theme, endpoint: &str, refs: &Refs, feed: &Fe
         .child(status_row(theme, refs))
         .child(
             Text::small("", theme)
-                .color(theme.palette.error)
+                .color(theme.palette().error)
                 .max_lines(2)
                 .wrap(true)
                 .ellipsis(true)
@@ -63,7 +63,7 @@ pub(super) fn deepseek_page(theme: Theme, endpoint: &str, refs: &Refs, feed: &Fe
 }
 
 /// The OpenCode Go page: endpoint header, status, error, the three quota rows.
-pub(super) fn go_page(theme: Theme, refs: &Refs, feed: &Feed) -> Flex {
+pub(super) fn go_page(theme: &'static dyn Theme, refs: &Refs, feed: &Feed) -> Flex {
     let rows = WindowKind::ALL
         .iter()
         .enumerate()
@@ -82,7 +82,7 @@ pub(super) fn go_page(theme: Theme, refs: &Refs, feed: &Feed) -> Flex {
         )
         .child(
             Text::small("", theme)
-                .color(theme.palette.error)
+                .color(theme.palette().error)
                 .max_lines(2)
                 .wrap(true)
                 .ellipsis(true)
@@ -106,7 +106,7 @@ pub(super) fn go_page(theme: Theme, refs: &Refs, feed: &Feed) -> Flex {
 }
 
 /// The Go page's footer: the key hint, then the refresh button.
-pub(super) fn go_footer(theme: Theme, refs: &Refs, feed: &Feed) -> Column {
+pub(super) fn go_footer(theme: &'static dyn Theme, refs: &Refs, feed: &Feed) -> Column {
     Column::new()
         .gap(space::SM)
         .child(Text::caption(GO_HINT, theme).tone(Tone::Subtle))
@@ -114,7 +114,7 @@ pub(super) fn go_footer(theme: Theme, refs: &Refs, feed: &Feed) -> Column {
 }
 
 /// A "window … value" row inside the Go card.
-pub(super) fn go_window_row(theme: Theme, kind: WindowKind, value: &NodeRef) -> Row {
+pub(super) fn go_window_row(theme: &'static dyn Theme, kind: WindowKind, value: &NodeRef) -> Row {
     Row::new()
         .align(Align::Center)
         .justify(Justify::SpaceBetween)
@@ -128,7 +128,7 @@ pub(super) fn go_window_row(theme: Theme, kind: WindowKind, value: &NodeRef) -> 
 /// A press is an intent, not a command: whether it goes out is decided in
 /// `update`, which owns the clock and therefore the throttle. Both pages build
 /// one and share [`Feed`], so their labels and dimming agree.
-pub(super) fn refresh_button(theme: Theme, slot: &NodeRef, feed: &Feed) -> Ref<Button> {
+pub(super) fn refresh_button(theme: &'static dyn Theme, slot: &NodeRef, feed: &Feed) -> Ref<Button> {
     let requested = feed.requested.clone();
     Button::primary(REFRESH_LABEL, theme)
         .on_click(move || requested.set(true))
@@ -161,7 +161,7 @@ pub(super) fn dim_while_busy(tree: &mut SceneTree, button: NodeId, state: Rc<Cel
 ///
 /// The page title lives on the tab above it, so this is only the endpoint the
 /// environment can override.
-pub(super) fn endpoint_line(theme: Theme, endpoint: &str) -> Row {
+pub(super) fn endpoint_line(theme: &'static dyn Theme, endpoint: &str) -> Row {
     Row::new().align(Align::Center).child(
         Text::caption(endpoint_label(endpoint), theme)
             .tone(Tone::Subtle)
@@ -182,18 +182,18 @@ pub(super) fn endpoint_label(endpoint: &str) -> String {
 }
 
 /// The status line: availability mark plus "refreshed at" text.
-pub(super) fn status_row(theme: Theme, refs: &Refs) -> Row {
+pub(super) fn status_row(theme: &'static dyn Theme, refs: &Refs) -> Row {
     Row::new()
         .align(Align::Center)
         .gap(space::MD)
         .child(
             Text::small("账户可用", theme)
-                .color(theme.palette.success)
+                .color(theme.palette().success)
                 .ref_(&refs.available_ok),
         )
         .child(
             Text::small("账户不可用", theme)
-                .color(theme.palette.error)
+                .color(theme.palette().error)
                 .ref_(&refs.available_bad),
         )
         .child(
@@ -204,7 +204,7 @@ pub(super) fn status_row(theme: Theme, refs: &Refs) -> Row {
 }
 
 /// The card column: one card per currency, filling the remaining height.
-pub(super) fn currencies(theme: Theme, refs: &Refs) -> Column {
+pub(super) fn currencies(theme: &'static dyn Theme, refs: &Refs) -> Column {
     let cards = refs.slots.iter().map(|slot| currency_card(theme, slot));
 
     Column::new()
@@ -220,7 +220,7 @@ pub(super) fn currencies(theme: Theme, refs: &Refs) -> Column {
 /// The countdown and the debug button share a row so the footer still fits a
 /// short panel once the button moves here. The countdown node is hidden unless
 /// the host starts a timer, which leaves the row to the debug button.
-pub(super) fn footer(theme: Theme, refs: &Refs, feed: &Feed) -> Column {
+pub(super) fn footer(theme: &'static dyn Theme, refs: &Refs, feed: &Feed) -> Column {
     let test_error = feed.test_error.clone();
 
     Column::new()
@@ -254,7 +254,7 @@ pub(super) fn footer(theme: Theme, refs: &Refs, feed: &Feed) -> Column {
 }
 
 /// One currency card: total on top, then the granted / topped-up breakdown.
-pub(super) fn currency_card(theme: Theme, refs: &SlotRefs) -> Ref<Card> {
+pub(super) fn currency_card(theme: &'static dyn Theme, refs: &SlotRefs) -> Ref<Card> {
     Card::new(theme)
         .gap(space::SM)
         .child(
@@ -272,7 +272,7 @@ pub(super) fn currency_card(theme: Theme, refs: &SlotRefs) -> Ref<Card> {
 }
 
 /// A "label … value" row inside a currency card.
-pub(super) fn stat_row(theme: Theme, label: &str, value: &NodeRef) -> Row {
+pub(super) fn stat_row(theme: &'static dyn Theme, label: &str, value: &NodeRef) -> Row {
     Row::new()
         .align(Align::Center)
         .justify(Justify::SpaceBetween)

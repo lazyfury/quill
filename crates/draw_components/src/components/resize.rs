@@ -28,7 +28,7 @@ use draw_ui::{DragPhase, MouseFilter, SizeBasis, Widget};
 /// ```
 pub struct ResizeHandle {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     vertical: bool,
     size: f32,
     target: Option<NodeRef>,
@@ -43,7 +43,7 @@ pub struct ResizeHandle {
 
 impl ResizeHandle {
     /// A vertical line that resizes the pane to its left/right.
-    pub fn vertical(theme: Theme) -> Self {
+    pub fn vertical(theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::default(),
             theme,
@@ -59,7 +59,7 @@ impl ResizeHandle {
     }
 
     /// A horizontal line that resizes the pane above/below it.
-    pub fn horizontal(theme: Theme) -> Self {
+    pub fn horizontal(theme: &'static dyn Theme) -> Self {
         Self {
             vertical: false,
             ..Self::vertical(theme)
@@ -125,7 +125,7 @@ impl Component for ResizeHandle {
 
     fn prepare(&mut self) {
         let theme = self.theme;
-        let base = self.color.unwrap_or(theme.palette.border_subtle);
+        let base = self.color.unwrap_or(theme.palette().border_subtle);
         let vertical = self.vertical;
         let size = self.size;
         let resize_cursor = if vertical {
@@ -157,7 +157,7 @@ impl Component for ResizeHandle {
         };
         self.spec.foreground = Some(Box::new(move |ctx, rect, state| {
             let color = if state.hovered || state.pressed {
-                theme.palette.accent
+                theme.palette().accent
             } else {
                 base
             };
@@ -214,11 +214,12 @@ mod tests {
     use crate::base::Flex;
     use draw_core::{InputEvent, PointerButton, ViewportSize};
     use draw_scene::SceneTree;
+    use draw_theme::{default_theme, Mode};
     use draw_ui::control;
 
     /// Drags the handle 50px right and returns the target width it drove.
     fn dragged_width(invert: bool) -> f32 {
-        let theme = Theme::dark();
+        let theme = default_theme(Mode::Dark);
         let width = Rc::new(Cell::new(200.0));
         let target = NodeRef::new();
         let mut tree = SceneTree::new();

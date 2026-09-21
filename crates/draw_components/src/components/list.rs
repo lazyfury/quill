@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use draw_core::{Color, Edges, NodeId, Vec2};
 use draw_scene::SceneTree;
-use draw_theme::{Space, TextSize, Theme, Tone};
+use draw_theme::{default_theme, Mode, Space, TextSize, Theme, Tone};
 use draw_ui::{dynamic_surface_decor, Control, MouseFilter, SizeBasis, SurfaceStyle, Widget};
 
 use crate::base::{
@@ -70,7 +70,7 @@ pub struct ListState {
 
 struct ListInner {
     container: Option<NodeId>,
-    theme: Theme,
+    theme: &'static dyn Theme,
     columns: Vec<ListColumn>,
     source: RowSource,
     on_activate: Option<Rc<dyn Fn(usize)>>,
@@ -103,7 +103,7 @@ struct Slot {
 
 impl ListState {
     pub fn new() -> Self {
-        let theme = Theme::dark();
+        let theme = default_theme(Mode::Dark);
         Self {
             inner: Rc::new(RefCell::new(ListInner {
                 container: None,
@@ -352,9 +352,9 @@ impl ListInner {
             dynamic_surface_decor(move |state| {
                 let index = paint_first.get() + slot_index;
                 if paint_selected.get() == Some(index) {
-                    SurfaceStyle::new(theme.palette.selection)
+                    SurfaceStyle::new(theme.palette().selection)
                 } else if state.hovered {
-                    SurfaceStyle::new(theme.palette.surface_hover)
+                    SurfaceStyle::new(theme.palette().surface_hover)
                 } else {
                     SurfaceStyle::new(Color::TRANSPARENT)
                 }
@@ -418,7 +418,7 @@ impl ListInner {
 pub struct List {
     spec: Spec,
     state: ListState,
-    theme: Theme,
+    theme: &'static dyn Theme,
     row_height: f32,
     padding: f32,
     gap: f32,
@@ -432,7 +432,7 @@ pub struct List {
 impl List {
     /// A list of `row_height`-tall rows pulling their cells from `source`.
     pub fn new(
-        theme: Theme,
+        theme: &'static dyn Theme,
         row_height: f32,
         source: impl Fn(usize) -> Vec<String> + 'static,
     ) -> Self {
@@ -508,7 +508,7 @@ impl Component for List {
 
     fn widget(&self) -> Widget {
         Widget::Panel {
-            color: self.theme.palette.surface,
+            color: self.theme.palette().surface,
             border: None,
         }
     }
@@ -551,6 +551,7 @@ crate::impl_scene_child!(List);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use draw_theme::{default_theme, Mode};
     use std::cell::RefCell;
 
     use draw_core::{EventResult, InputEvent, Rect, Size, ViewportSize};
@@ -597,7 +598,7 @@ mod tests {
             let count_cell = Rc::new(Cell::new(count));
             let selected = Rc::new(Cell::new(None));
             let source = data.clone();
-            let list = List::new(Theme::light(), ROW, move |index| {
+            let list = List::new(default_theme(Mode::Light), ROW, move |index| {
                 source.borrow().get(index).cloned().unwrap_or_default()
             })
             .count(count_cell.clone())

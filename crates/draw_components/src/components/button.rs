@@ -22,7 +22,7 @@ pub enum ButtonVariant {
 /// A compact, themed button.
 pub struct Button {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     text: String,
     variant: ButtonVariant,
     size: ControlSize,
@@ -31,7 +31,7 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn new(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn new(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             theme,
@@ -43,19 +43,19 @@ impl Button {
         }
     }
 
-    pub fn primary(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn primary(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).variant(ButtonVariant::Primary)
     }
 
-    pub fn secondary(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn secondary(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).variant(ButtonVariant::Secondary)
     }
 
-    pub fn ghost(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn ghost(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).variant(ButtonVariant::Ghost)
     }
 
-    pub fn destructive(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn destructive(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).variant(ButtonVariant::Destructive)
     }
 
@@ -126,7 +126,7 @@ impl Component for Button {
         // highlight) wins.
         if self.spec.background.is_none() {
             self.spec.background = Some(Box::new(move |st| {
-                let palette = &theme.palette;
+                let palette = theme.palette();
                 match variant {
                     ButtonVariant::Primary => {
                         let fill = if st.pressed {
@@ -171,8 +171,8 @@ impl Component for Button {
         }
 
         let color = match self.variant {
-            ButtonVariant::Primary | ButtonVariant::Destructive => theme.palette.on_accent,
-            _ => theme.palette.foreground,
+            ButtonVariant::Primary | ButtonVariant::Destructive => theme.palette().on_accent,
+            _ => theme.palette().foreground,
         };
         let text = self.text.clone();
         let font_size = self.font_size;
@@ -195,6 +195,7 @@ mod tests {
     use draw_core::{Size, ViewportSize};
     use draw_render::{DrawCommand, PaintContext};
     use draw_scene::SceneTree;
+    use draw_theme::{compact_theme, default_theme, Mode};
     use draw_ui::{control, MouseFilter};
 
     fn column(tree: &mut SceneTree, button: Button) -> draw_core::NodeId {
@@ -213,8 +214,8 @@ mod tests {
     #[test]
     fn a_compact_theme_makes_the_default_button_mini() {
         let mut tree = SceneTree::new();
-        let comfortable = column(&mut tree, Button::new("A", Theme::dark()));
-        let compact = column(&mut tree, Button::new("B", Theme::dark().compact()));
+        let comfortable = column(&mut tree, Button::new("A", default_theme(Mode::Dark)));
+        let compact = column(&mut tree, Button::new("B", compact_theme(Mode::Dark)));
         draw_ui::layout(&mut tree, ViewportSize::new(Size::new(400.0, 300.0)));
 
         let tall = control(&tree, comfortable).unwrap().rect.size.height;
@@ -233,7 +234,7 @@ mod tests {
                 .gap(0.0)
                 .padding(Edges::ZERO)
                 .mouse_filter(MouseFilter::Ignore)
-                .child(Button::ghost("A", Theme::dark()).background(Color::RED)),
+                .child(Button::ghost("A", default_theme(Mode::Dark)).background(Color::RED)),
         );
         let _ = page;
         draw_ui::layout(&mut tree, ViewportSize::new(Size::new(400.0, 300.0)));
@@ -256,7 +257,7 @@ mod tests {
         let mut tree = SceneTree::new();
         let id = column(
             &mut tree,
-            Button::new("A", Theme::dark().compact()).min_size(32.0, 28.0),
+            Button::new("A", compact_theme(Mode::Dark)).min_size(32.0, 28.0),
         );
         draw_ui::layout(&mut tree, ViewportSize::new(Size::new(400.0, 300.0)));
         let rect = control(&tree, id).unwrap().rect;
@@ -266,7 +267,7 @@ mod tests {
     #[test]
     fn regular_overrides_the_compact_default() {
         let mut tree = SceneTree::new();
-        let compact = Theme::dark().compact();
+        let compact = compact_theme(Mode::Dark);
         let forced = column(&mut tree, Button::new("A", compact).regular());
         draw_ui::layout(&mut tree, ViewportSize::new(Size::new(400.0, 300.0)));
         let height = control(&tree, forced).unwrap().rect.size.height;

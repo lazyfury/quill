@@ -21,12 +21,12 @@ pub struct Text {
     tone: Tone,
     color: Option<Color>,
     options: TextOptions,
-    theme: Theme,
+    theme: &'static dyn Theme,
 }
 
 impl Text {
     /// Body text in the default foreground.
-    pub fn new(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn new(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             text: text.into(),
@@ -39,32 +39,32 @@ impl Text {
     }
 
     /// 48–64px hero text.
-    pub fn display(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn display(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).size(TextSize::Display)
     }
 
     /// 28–40px page title.
-    pub fn title(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn title(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).size(TextSize::Title)
     }
 
     /// 20–24px section heading.
-    pub fn heading(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn heading(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).size(TextSize::Heading)
     }
 
     /// 16–18px subsection heading.
-    pub fn subheading(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn subheading(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).size(TextSize::Subheading)
     }
 
     /// 12–14px secondary text.
-    pub fn small(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn small(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).size(TextSize::Small)
     }
 
     /// 11–12px metadata.
-    pub fn caption(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn caption(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).size(TextSize::Caption)
     }
 
@@ -129,7 +129,7 @@ impl Component for Text {
         Widget::Label {
             text: self.text.clone(),
             font_size: self.size.px(),
-            color: self.color.unwrap_or_else(|| self.tone.color(&self.theme)),
+            color: self.color.unwrap_or_else(|| self.tone.color(self.theme)),
             options: self.options,
         }
     }

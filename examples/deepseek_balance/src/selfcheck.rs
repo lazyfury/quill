@@ -23,7 +23,7 @@ use draw_backend_recording::{RecordedFrame, RecordingBackend};
 use draw_core::{Color, Rect, Size, Vec2, ViewportSize};
 use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Severity};
 use draw_render::{CornerRadii, DrawCommand, PaintContext, RenderBackend};
-use draw_theme::Theme;
+use draw_theme::{default_theme, Mode, Theme};
 
 use crate::api::{Balance, BalanceInfo};
 use crate::badge::{self, BadgeApp};
@@ -600,7 +600,7 @@ fn badge_checks(frame: &RecordedFrame) -> Vec<String> {
 fn run_badge(dump: Dump) -> Vec<String> {
     let (width, height) = (badge::BADGE_WIDTH, badge::BADGE_HEIGHT);
     println!("self-check: badge ({width}x{height})");
-    let (app, frame) = record_badge_frame(BadgeApp::new(Theme::dark()));
+    let (app, frame) = record_badge_frame(BadgeApp::new(default_theme(Mode::Dark)));
     println!(
         "  frame: {} commands, 余额行 {:?}",
         frame.command_count(),
@@ -641,7 +641,7 @@ pub fn run(dump: Dump) -> i32 {
     failed += run_one(
         "window",
         BalanceApp::new(
-            Theme::dark(),
+            default_theme(Mode::Dark),
             "https://api.deepseek.com/user/balance".to_string(),
         ),
         WINDOW_WIDTH,
@@ -655,7 +655,7 @@ pub fn run(dump: Dump) -> i32 {
     failed += run_one(
         "panel",
         BalanceApp::new_panel(
-            Theme::dark(),
+            default_theme(Mode::Dark),
             "https://api.deepseek.com/user/balance".to_string(),
         ),
         PANEL_BODY_WIDTH,
@@ -672,7 +672,7 @@ pub fn run(dump: Dump) -> i32 {
     failed += run_one(
         "window/go",
         BalanceApp::new(
-            Theme::dark(),
+            default_theme(Mode::Dark),
             "https://api.deepseek.com/user/balance".to_string(),
         ),
         WINDOW_WIDTH,
@@ -686,7 +686,7 @@ pub fn run(dump: Dump) -> i32 {
     failed += run_one(
         "panel/go",
         BalanceApp::new_panel(
-            Theme::dark(),
+            default_theme(Mode::Dark),
             "https://api.deepseek.com/user/balance".to_string(),
         ),
         PANEL_BODY_WIDTH,
@@ -715,14 +715,14 @@ mod tests {
 
     fn window_app() -> BalanceApp {
         BalanceApp::new(
-            Theme::dark(),
+            default_theme(Mode::Dark),
             "https://api.deepseek.com/user/balance".to_string(),
         )
     }
 
     fn panel_app() -> BalanceApp {
         BalanceApp::new_panel(
-            Theme::dark(),
+            default_theme(Mode::Dark),
             "https://api.deepseek.com/user/balance".to_string(),
         )
     }
@@ -778,7 +778,7 @@ mod tests {
     /// own frame check: nothing but text on it, and both lines land on screen.
     #[test]
     fn the_badge_frame_passes_every_check() {
-        let (app, frame) = record_badge_frame(BadgeApp::new(Theme::dark()));
+        let (app, frame) = record_badge_frame(BadgeApp::new(default_theme(Mode::Dark)));
         assert!(
             badge_checks(&frame).is_empty(),
             "badge semantic checks failed"

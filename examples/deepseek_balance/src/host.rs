@@ -46,7 +46,7 @@ use std::time::{Duration, Instant};
 use draw_backend_wgpu::{wgpu, FontConfig, FontMetrics, FontMode, WgpuBackend};
 use draw_core::{InputEvent, Key, PointerButton, Rect, Size, Vec2, ViewportSize};
 use draw_render::{PaintContext, RenderBackend};
-use draw_theme::Theme;
+use draw_theme::{default_theme, Mode, Theme};
 use draw_ui::TextMeasurer;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -462,9 +462,9 @@ struct Badge {
 impl App {
     fn new(options: Options, proxy: EventLoopProxy<UserEvent>) -> Self {
         let theme = if options.light {
-            Theme::light()
+            default_theme(Mode::Light)
         } else {
-            Theme::dark()
+            default_theme(Mode::Dark)
         };
         let mode = Mode::default_for(options.window);
 

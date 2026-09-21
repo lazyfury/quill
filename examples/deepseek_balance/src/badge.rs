@@ -23,7 +23,7 @@ use draw_components::{Column, Component, Flex, NodeRef, Text};
 use draw_core::{Color, Edges, NodeId, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{space, TextSize, Theme};
+use draw_theme::{default_theme, space, Mode, TextSize, Theme};
 use draw_ui::{self, MouseFilter, TextMeasurer};
 
 use crate::api::Balance;
@@ -101,7 +101,7 @@ impl State {
 /// 徽章视图：一棵「一列 + 两行字」的组件树。没有底色、没有边框，整窗只有字。
 pub struct BadgeApp {
     tree: SceneTree,
-    theme: Theme,
+    theme: &'static dyn Theme,
     /// 标题行节点：切标签页时改写它。
     title: NodeId,
     /// 数值行节点：换数据就是往它写一次文本。
@@ -114,7 +114,7 @@ impl BadgeApp {
     /// starts one level down. Nothing in here paints a backdrop, which is what
     /// leaves the window's transparent clear colour showing through as the
     /// badge's background.
-    pub fn new(theme: Theme) -> Self {
+    pub fn new(theme: &'static dyn Theme) -> Self {
         let title = NodeRef::new();
         let balance = NodeRef::new();
         let content = Column::new()
@@ -141,7 +141,7 @@ impl BadgeApp {
     }
 
     /// The theme this view was built with (a value, so it is `Copy`).
-    pub fn theme(&self) -> Theme {
+    pub fn theme(&self) -> &'static dyn Theme {
         self.theme
     }
 
@@ -221,7 +221,7 @@ mod tests {
     }
 
     /// [`frame_of`] for a freshly mounted view.
-    fn frame(theme: Theme) -> Vec<DrawCommand> {
+    fn frame(theme: &'static dyn Theme) -> Vec<DrawCommand> {
         frame_of(&mut BadgeApp::new(theme))
     }
 
@@ -248,7 +248,7 @@ mod tests {
     /// from the window's alpha, so it would hug whatever is opaque).
     #[test]
     fn nothing_but_the_text_is_painted() {
-        let commands = frame(Theme::dark());
+        let commands = frame(default_theme(Mode::Dark));
         assert_eq!(commands.len(), 2, "two lines of text and nothing else");
         assert!(
             commands
@@ -261,7 +261,7 @@ mod tests {
     /// Two lines, in order, sharing the content padding.
     #[test]
     fn the_two_lines_stack_inside_the_window() {
-        let commands = frame(Theme::dark());
+        let commands = frame(default_theme(Mode::Dark));
         let lines = lines(&commands);
         assert_eq!(lines.len(), 2, "one line per text node");
         assert_eq!(lines[0].0, TITLE);
@@ -285,7 +285,7 @@ mod tests {
     /// above against a type-scale change.
     #[test]
     fn the_text_stays_inside_the_window() {
-        let mut app = BadgeApp::new(Theme::dark());
+        let mut app = BadgeApp::new(default_theme(Mode::Dark));
         app.layout(ViewportSize::new(Size::new(BADGE_WIDTH, BADGE_HEIGHT)));
         let tree = app.tree();
 
@@ -326,7 +326,7 @@ mod tests {
     /// every state has a line of its own.
     #[test]
     fn the_balance_line_follows_the_state() {
-        let mut app = BadgeApp::new(Theme::dark());
+        let mut app = BadgeApp::new(default_theme(Mode::Dark));
         assert_eq!(
             app.balance_text(),
             Some(State::Idle.line(BALANCE_PREFIX).as_str())
@@ -354,7 +354,7 @@ mod tests {
     /// the second window follows whichever page is active.
     #[test]
     fn the_badge_can_show_the_go_tab() {
-        let mut app = BadgeApp::new(Theme::dark());
+        let mut app = BadgeApp::new(default_theme(Mode::Dark));
         app.show(GO_TITLE, GO_PREFIX, &State::Ready("Go 88%".to_string()));
         assert_eq!(app.title_text(), Some(GO_TITLE));
         assert_eq!(app.balance_text(), Some("余量：Go 88%"));
@@ -364,7 +364,7 @@ mod tests {
     /// A re-paint carries the new line, not the placeholder.
     #[test]
     fn an_applied_result_reaches_the_frame() {
-        let mut app = BadgeApp::new(Theme::dark());
+        let mut app = BadgeApp::new(default_theme(Mode::Dark));
         let ready = State::from_result(&Ok(reply()));
         app.show(TITLE, BALANCE_PREFIX, &ready);
         assert_eq!(lines(&frame_of(&mut app))[1].0, "余额：¥110.00");
@@ -375,7 +375,7 @@ mod tests {
     /// instead of being baked into a hand-issued command sequence.
     #[test]
     fn the_tree_is_one_column_with_two_labels() {
-        let app = BadgeApp::new(Theme::dark());
+        let app = BadgeApp::new(default_theme(Mode::Dark));
         let tree = app.tree();
         let ids: Vec<_> = tree.iter_visible().collect();
         // The scene tree's own root, our root flex, the column, the two lines.
@@ -397,8 +397,8 @@ mod tests {
     /// Dark is a token swap, not a second code path: same tree, same commands.
     #[test]
     fn both_themes_paint_the_same_shape() {
-        let dark = frame(Theme::dark());
-        let light = frame(Theme::light());
+        let dark = frame(default_theme(Mode::Dark));
+        let light = frame(default_theme(Mode::Light));
         assert_eq!(dark.len(), light.len());
         assert_eq!(lines(&dark), lines(&light));
     }

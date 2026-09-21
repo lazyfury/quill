@@ -149,7 +149,7 @@ impl Entry {
 
 /// The overlay layer.
 pub struct Overlays {
-    theme: Theme,
+    theme: &'static dyn Theme,
     tree: SceneTree,
     root: NodeId,
     entries: Vec<Entry>,
@@ -161,7 +161,7 @@ pub struct Overlays {
 }
 
 impl Overlays {
-    pub fn new(theme: Theme) -> Self {
+    pub fn new(theme: &'static dyn Theme) -> Self {
         let (tree, root) = overlay_tree(None);
         Self {
             theme,
@@ -176,12 +176,12 @@ impl Overlays {
         }
     }
 
-    pub fn theme(&self) -> &Theme {
-        &self.theme
+    pub fn theme(&self) -> &'static dyn Theme {
+        self.theme
     }
 
     /// Swaps the theme and rebuilds the overlay tree.
-    pub fn set_theme(&mut self, theme: Theme) {
+    pub fn set_theme(&mut self, theme: &'static dyn Theme) {
         self.theme = theme;
         self.dirty = true;
     }
@@ -643,10 +643,10 @@ fn build_entry(
     entry: &Entry,
     tree: &mut SceneTree,
     root: NodeId,
-    theme: Theme,
+    theme: &'static dyn Theme,
     actions: Rc<RefCell<Vec<Action>>>,
 ) -> NodeId {
-    let palette = theme.palette;
+    let palette = theme.palette();
     let surface = SurfaceStyle::new(theme.surface(SurfaceLevel::Floating))
         .border(palette.border)
         .radius(radius::LG);
@@ -788,7 +788,7 @@ fn build_entry(
                 node,
                 Label::new(text.clone())
                     .font_size(TextSize::Small.px())
-                    .color(tone.color(&theme))
+                    .color(tone.color(theme))
                     .mouse_filter(MouseFilter::Ignore),
             );
             node

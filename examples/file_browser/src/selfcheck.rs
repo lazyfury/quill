@@ -20,7 +20,7 @@ use draw_backend_recording::{RecordedFrame, RecordingBackend};
 use draw_core::{InputEvent, PointerButton, Size, Vec2, ViewportSize};
 use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Severity};
 use draw_render::{DrawCommand, PaintContext, RenderBackend};
-use draw_theme::Theme;
+use draw_theme::{default_theme, Mode, Theme};
 
 use crate::preview::{self, Preview};
 use crate::scan::{Entry, Listing};
@@ -67,7 +67,7 @@ fn record(mut app: Browser) -> (Browser, RecordedFrame) {
 }
 
 fn browser(rows: usize) -> Browser {
-    let mut app = Browser::new(Theme::dark(), std::path::PathBuf::from("/tmp"), false);
+    let mut app = Browser::new(default_theme(Mode::Dark), std::path::PathBuf::from("/tmp"), false);
     app.apply_listing(fixture(rows));
     app.layout(ViewportSize::new(Size::new(WIDTH, HEIGHT)));
     app

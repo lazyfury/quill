@@ -20,7 +20,7 @@ use crate::Text;
 /// ```
 pub struct Card {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     tone: SurfaceTone,
     fill: Option<Color>,
     hairline: bool,
@@ -31,7 +31,7 @@ pub struct Card {
 
 impl Card {
     /// A raised card with a hairline border.
-    pub fn new(theme: Theme) -> Self {
+    pub fn new(theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::default(),
             theme,
@@ -45,7 +45,7 @@ impl Card {
     }
 
     /// A borderless card.
-    pub fn flat(theme: Theme) -> Self {
+    pub fn flat(theme: &'static dyn Theme) -> Self {
         Self::new(theme).bordered(false)
     }
 
@@ -100,8 +100,8 @@ impl Component for Card {
     }
 
     fn prepare(&mut self) {
-        let fill = self.fill.unwrap_or_else(|| self.tone.color(&self.theme));
-        let border = self.hairline.then(|| self.theme.palette.border);
+        let fill = self.fill.unwrap_or_else(|| self.tone.color(self.theme));
+        let border = self.hairline.then(|| self.theme.palette().border);
         let style = SurfaceStyle::new(fill)
             .radius(self.radius)
             .border_opt(border);
@@ -112,14 +112,14 @@ impl Component for Card {
 /// A 1px grouping divider.
 pub struct Divider {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     vertical: bool,
     color: Option<Color>,
 }
 
 impl Divider {
     /// A horizontal rule (stretches across a column).
-    pub fn horizontal(theme: Theme) -> Self {
+    pub fn horizontal(theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             theme,
@@ -129,7 +129,7 @@ impl Divider {
     }
 
     /// A vertical rule (stretches down a row).
-    pub fn vertical(theme: Theme) -> Self {
+    pub fn vertical(theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             theme,
@@ -158,7 +158,7 @@ impl Component for Divider {
     }
 
     fn prepare(&mut self) {
-        let color = self.color.unwrap_or(self.theme.palette.border_subtle);
+        let color = self.color.unwrap_or(self.theme.palette().border_subtle);
         let vertical = self.vertical;
         // A fixed rule: never grow or shrink along the main axis.
         self.spec.data.layout.grow = 0.0;
@@ -193,7 +193,7 @@ impl Component for Divider {
 /// A compact metadata tag.
 pub struct Badge {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     text: String,
     tone: Tone,
     solid: bool,
@@ -203,7 +203,7 @@ pub struct Badge {
 }
 
 impl Badge {
-    pub fn new(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn new(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             theme,
@@ -217,7 +217,7 @@ impl Badge {
     }
 
     /// A fully rounded (pill) badge.
-    pub fn pill(text: impl Into<String>, theme: Theme) -> Self {
+    pub fn pill(text: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self::new(text, theme).radius(radius::FULL)
     }
 
@@ -271,7 +271,7 @@ impl Component for Badge {
     }
 
     fn prepare(&mut self) {
-        let accent = self.fill.unwrap_or_else(|| self.tone.color(&self.theme));
+        let accent = self.fill.unwrap_or_else(|| self.tone.color(self.theme));
         let style = if self.solid {
             SurfaceStyle::new(accent).radius(self.radius)
         } else {
@@ -282,7 +282,7 @@ impl Component for Badge {
         self.spec.background = Some(Box::new(move |_| style));
 
         let text_color = self.text_color.unwrap_or(if self.solid {
-            self.theme.palette.on_accent
+            self.theme.palette().on_accent
         } else {
             accent
         });
@@ -296,14 +296,14 @@ impl Component for Badge {
 /// A code block: monospace content on a dedicated surface.
 pub struct CodeBlock {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     code: String,
     filename: Option<String>,
     language: Option<String>,
 }
 
 impl CodeBlock {
-    pub fn new(code: impl Into<String>, theme: Theme) -> Self {
+    pub fn new(code: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::default(),
             theme,
@@ -343,8 +343,8 @@ impl Component for CodeBlock {
 
     fn prepare(&mut self) {
         let theme = self.theme;
-        let style = SurfaceStyle::new(theme.palette.code_surface)
-            .border(theme.palette.border)
+        let style = SurfaceStyle::new(theme.palette().code_surface)
+            .border(theme.palette().border)
             .radius(radius::LG);
         self.spec.background = Some(Box::new(move |_| style));
 
@@ -365,7 +365,7 @@ impl Component for CodeBlock {
         self.spec.child(
             Label::new(self.code.clone())
                 .font_size(TextSize::Small.px())
-                .color(theme.palette.foreground)
+                .color(theme.palette().foreground)
                 .text_options(TextOptions::no_wrap())
                 .anchors(Edges::ZERO)
                 .offsets(Edges::ZERO),
@@ -376,13 +376,13 @@ impl Component for CodeBlock {
 /// A terminal window: header dots, a command and its output.
 pub struct Terminal {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     command: Option<String>,
     output: Vec<String>,
 }
 
 impl Terminal {
-    pub fn new(theme: Theme) -> Self {
+    pub fn new(theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::default(),
             theme,
@@ -432,15 +432,15 @@ impl Component for Terminal {
 
     fn prepare(&mut self) {
         let theme = self.theme;
-        let style = SurfaceStyle::new(theme.palette.code_surface)
-            .border(theme.palette.border)
+        let style = SurfaceStyle::new(theme.palette().code_surface)
+            .border(theme.palette().border)
             .radius(radius::LG);
         self.spec.background = Some(Box::new(move |_| style));
 
         let dots = [
-            theme.palette.error,
-            theme.palette.warning,
-            theme.palette.success,
+            theme.palette().error,
+            theme.palette().warning,
+            theme.palette().success,
         ];
         self.spec.child(
             Flex::row()
@@ -466,7 +466,7 @@ impl Component for Terminal {
             self.spec.child(
                 Label::new(format!("$ {command}"))
                     .font_size(TextSize::Small.px())
-                    .color(theme.palette.foreground)
+                    .color(theme.palette().foreground)
                     .text_options(TextOptions::no_wrap())
                     .anchors(Edges::ZERO)
                     .offsets(Edges::ZERO),
@@ -477,7 +477,7 @@ impl Component for Terminal {
             self.spec.child(
                 Label::new(output)
                     .font_size(TextSize::Small.px())
-                    .color(theme.palette.muted)
+                    .color(theme.palette().muted)
                     .text_options(TextOptions::no_wrap())
                     .anchors(Edges::ZERO)
                     .offsets(Edges::ZERO),
@@ -489,13 +489,13 @@ impl Component for Terminal {
 /// An informational empty state: small icon, title, description.
 pub struct EmptyState {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     title: String,
     description: Option<String>,
 }
 
 impl EmptyState {
-    pub fn new(title: impl Into<String>, theme: Theme) -> Self {
+    pub fn new(title: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::default(),
             theme,
@@ -540,8 +540,8 @@ impl Component for EmptyState {
                     draw_ui::surface(
                         ctx,
                         rect,
-                        &SurfaceStyle::new(theme.palette.background)
-                            .border(theme.palette.border)
+                        &SurfaceStyle::new(theme.palette().background)
+                            .border(theme.palette().border)
                             .radius(radius::MD),
                     );
                 }),

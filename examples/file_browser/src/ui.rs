@@ -55,7 +55,7 @@ use draw_components::{
 use draw_core::{Edges, EventResult, InputEvent, Key, NodeId, Vec2, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{space, SurfaceLevel, Theme, Tone};
+use draw_theme::{default_theme, space, Mode, SurfaceLevel, Theme, Tone};
 use draw_ui::{MouseFilter, SizeBasis, SurfaceStyle, TextMeasurer};
 
 use crate::preview::{Preview, PreviewMode};
@@ -121,7 +121,7 @@ enum Status {
 /// 文件浏览器视图。
 pub struct Browser {
     tree: SceneTree,
-    theme: Theme,
+    theme: &'static dyn Theme,
     /// 当前清单的行。列表的 `source` 闭包按需读它，所以数据不必变成控件。
     entries: Rc<RefCell<Vec<Entry>>>,
     /// 行数。列表每次 sync 都读它 —— 换目录只要 `set` 一下。
@@ -172,7 +172,7 @@ impl Browser {
     ///
     /// 目录的内容和选中文件的字节都由宿主稍后送进来；这里只把结构建好，所以
     /// 构造不碰磁盘。
-    pub fn new(theme: Theme, path: PathBuf, hidden: bool) -> Self {
+    pub fn new(theme: &'static dyn Theme, path: PathBuf, hidden: bool) -> Self {
         let refs = Refs::default();
         let path_clone = path.clone();
         let entries: Rc<RefCell<Vec<Entry>>> = Rc::new(RefCell::new(Vec::new()));
@@ -802,7 +802,7 @@ impl Browser {
         draw_ui::control_count(&self.tree)
     }
 
-    pub fn theme(&self) -> Theme {
+    pub fn theme(&self) -> &'static dyn Theme {
         self.theme
     }
 }
@@ -813,7 +813,7 @@ impl Browser {
 /// 只往共享格子里写一个请求，由 [`Browser::update`] 取走（`on_click` 的回调
 /// 拿不到 `&mut Browser`）。
 fn mode_tab(
-    theme: Theme,
+    theme: &'static dyn Theme,
     mode: PreviewMode,
     active: &Rc<Cell<PreviewMode>>,
     request: &Rc<Cell<Option<PreviewMode>>>,
@@ -857,7 +857,7 @@ mod tests {
     }
 
     fn browser_with(count: usize) -> Browser {
-        let mut app = Browser::new(Theme::dark(), PathBuf::from("/tmp"), false);
+        let mut app = Browser::new(default_theme(Mode::Dark), PathBuf::from("/tmp"), false);
         // 起始目录的那一次读请求：这些测试不关心它（宿主会取走），丢掉。
         let _ = app.take_navigation();
         app.apply_listing(fixture(count));
@@ -903,7 +903,7 @@ mod tests {
 
     #[test]
     fn a_failed_listing_shows_why() {
-        let mut app = Browser::new(Theme::dark(), PathBuf::from("/nope"), false);
+        let mut app = Browser::new(default_theme(Mode::Dark), PathBuf::from("/nope"), false);
         app.apply_listing(Listing::failed("/nope", "目录不存在：/nope"));
         assert_eq!(app.status_text(), "目录不存在：/nope");
         assert_eq!(app.selected_index(), None);
@@ -911,7 +911,7 @@ mod tests {
 
     #[test]
     fn an_empty_directory_says_so() {
-        let mut app = Browser::new(Theme::dark(), PathBuf::from("/tmp"), false);
+        let mut app = Browser::new(default_theme(Mode::Dark), PathBuf::from("/tmp"), false);
         app.apply_listing(Listing::fixture("/tmp/empty", Vec::new()));
         assert_eq!(app.status_text(), "空目录");
         assert_eq!(app.selected_index(), None);

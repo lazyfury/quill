@@ -5,10 +5,10 @@
 //! `draw_ui` or any backend, so it is usable from every layer.
 //!
 //! ```rust
-//! use draw_theme::{space, Mode, Space, TextSize, Theme};
+//! use draw_theme::{space, DefaultTheme, Mode, Space, TextSize, Theme};
 //!
-//! let theme = Theme::dark();
-//! assert_eq!(theme.mode, Mode::Dark);
+//! let theme = DefaultTheme::dark();
+//! assert_eq!(theme.mode(), Mode::Dark);
 //! assert_eq!(space::MD, 12.0);
 //! assert_eq!(theme.spacing(Space::MD), 12.0);
 //! assert_eq!(theme.compact().spacing(Space::MD), 9.0);
@@ -33,5 +33,5 @@ pub use palette::{Palette, Semantic};
 pub use scale::{
     border, control, motion, radius, space, Border, Control, Motion, Radius, Space, TextSize,
 };
-pub use theme::{Mode, SurfaceLevel, Theme};
+pub use theme::{compact_theme, default_theme, DefaultTheme, Mode, SurfaceLevel, Theme};
 pub use tone::{SurfaceTone, Tone};

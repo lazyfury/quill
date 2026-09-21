@@ -31,8 +31,8 @@ pub enum Tone {
 
 impl Tone {
     /// Resolves this tone to a concrete color.
-    pub fn color(self, theme: &Theme) -> Color {
-        let palette = &theme.palette;
+    pub fn color(self, theme: &dyn Theme) -> Color {
+        let palette = theme.palette();
         match self {
             Tone::Default => palette.foreground,
             Tone::Muted => palette.muted,
@@ -75,7 +75,7 @@ pub enum SurfaceTone {
 }
 
 impl SurfaceTone {
-    pub fn color(self, theme: &Theme) -> Color {
+    pub fn color(self, theme: &dyn Theme) -> Color {
         theme.surface(match self {
             SurfaceTone::Base => SurfaceLevel::Base,
             SurfaceTone::Surface => SurfaceLevel::Surface,
@@ -88,10 +88,11 @@ impl SurfaceTone {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DefaultTheme;
 
     #[test]
     fn tones_resolve_against_palette() {
-        let theme = Theme::dark();
+        let theme = DefaultTheme::dark();
         assert_eq!(Tone::Default.color(&theme), theme.palette.foreground);
         assert_eq!(Tone::Error.color(&theme), theme.palette.error);
         assert!(Tone::Transparent.color(&theme).is_transparent());
@@ -99,7 +100,7 @@ mod tests {
 
     #[test]
     fn surface_tones_match_levels() {
-        let theme = Theme::light();
+        let theme = DefaultTheme::light();
         assert_eq!(SurfaceTone::Base.color(&theme), theme.palette.background);
         assert_eq!(
             SurfaceTone::Raised.color(&theme),

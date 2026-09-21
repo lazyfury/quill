@@ -18,7 +18,7 @@ use std::time::Instant;
 use draw_backend_wgpu::{wgpu, FontConfig, FontMetrics, FontMode, WgpuBackend};
 use draw_core::{InputEvent, Key, PointerButton, Size, Vec2, ViewportSize};
 use draw_render::{PaintContext, RenderBackend};
-use draw_theme::{SurfaceLevel, Theme};
+use draw_theme::{default_theme, Mode, SurfaceLevel, Theme};
 use draw_ui::TextMeasurer;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -97,9 +97,9 @@ struct App {
 impl App {
     fn new(options: Options, proxy: EventLoopProxy<UserEvent>) -> Self {
         let theme = if options.light {
-            Theme::light()
+            default_theme(Mode::Light)
         } else {
-            Theme::dark()
+            default_theme(Mode::Dark)
         };
         Self {
             instance: wgpu::Instance::default(),
@@ -437,7 +437,7 @@ fn wheel_pixels(delta: MouseScrollDelta, scale: f32) -> f32 {
 }
 
 /// 窗口清屏色 = 主题的底层背景（`draw_ui` 之外的地方由后端填）。
-fn theme_background(theme: Theme) -> draw_core::Color {
+fn theme_background(theme: &'static dyn Theme) -> draw_core::Color {
     theme.surface(SurfaceLevel::Base)
 }
 

@@ -8,7 +8,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use draw_components::theme::{space, TextSize};
+use draw_components::theme::{default_theme, space, Mode, TextSize};
 use draw_components::{
     update_control, Component, Flex, Label, List, ListColumn, ListState, Panel, Row, Text, Theme,
     VBox,
@@ -207,7 +207,7 @@ fn row_columns() -> Vec<ListColumn> {
 /// rows are mounted and nothing else. The row carries no background: the
 /// virtualizer's rows add hover/selection chrome on top of this, which makes the
 /// naive baseline deliberately the cheaper of the two.
-fn row_component(theme: Theme, cells: &[String]) -> Row {
+fn row_component(theme: &'static dyn Theme, cells: &[String]) -> Row {
     let mut row = Row::new()
         .gap(space::MD)
         .padding(Edges::new(space::SM, 0.0, space::SM, 0.0));
@@ -259,7 +259,7 @@ pub struct ListFullFixture {
 impl ListFullFixture {
     /// Builds a panel > content > `n` rows UI, lays it out and mounts every row.
     pub fn new(n: usize) -> Self {
-        let theme = Theme::dark();
+        let theme = default_theme(Mode::Dark);
         let viewport = ViewportSize::new(VIEWPORT_SIZE);
         let mut tree = SceneTree::new();
         let root = tree.add_child(
@@ -369,7 +369,7 @@ pub struct ListVirtualFixture {
 impl ListVirtualFixture {
     /// Builds a panel-sized list over `n` rows and mounts its pool.
     pub fn new(n: usize) -> Self {
-        let theme = Theme::dark();
+        let theme = default_theme(Mode::Dark);
         let viewport = ViewportSize::new(VIEWPORT_SIZE);
         let mut tree = SceneTree::new();
         let root = tree.add_child(

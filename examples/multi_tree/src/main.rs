@@ -9,9 +9,9 @@ use draw_components::{set_text, Column, Component, NodeRef, Text};
 use draw_core::{Size, ViewportSize};
 use draw_render::RenderBackend;
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{Theme, Tone};
+use draw_theme::{default_theme, Mode, Theme, Tone};
 
-fn build(theme: Theme, label: &str) -> (SceneTree, NodeRef) {
+fn build(theme: &'static dyn Theme, label: &str) -> (SceneTree, NodeRef) {
     let title = NodeRef::new();
     let tree = Column::new()
         .child(Text::heading(label, theme).ref_(&title))
@@ -21,7 +21,7 @@ fn build(theme: Theme, label: &str) -> (SceneTree, NodeRef) {
 }
 
 fn main() {
-    let theme = Theme::dark();
+    let theme = default_theme(Mode::Dark);
     let viewport = ViewportSize::new(Size::new(400.0, 300.0));
 
     // 1. Each `into_tree()` returns a fresh, independent tree.

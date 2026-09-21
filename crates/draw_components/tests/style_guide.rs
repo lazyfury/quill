@@ -8,9 +8,9 @@ use draw_components::{
 use draw_core::{Edges, Size, ViewportSize};
 use draw_render::{DrawCommand, PaintContext, RenderBackend};
 use draw_scene::SceneTree;
-use draw_theme::{Theme, Tone};
+use draw_theme::{default_theme, Mode, Theme, Tone};
 
-fn build(theme: Theme) -> SceneTree {
+fn build(theme: &'static dyn Theme) -> SceneTree {
     let mut tree = SceneTree::new();
     let tree_root = tree.root();
     let root = tree.add_child(
@@ -46,7 +46,7 @@ fn build(theme: Theme) -> SceneTree {
     tree
 }
 
-fn render(theme: Theme) -> Vec<DrawCommand> {
+fn render(theme: &'static dyn Theme) -> Vec<DrawCommand> {
     let mut tree = build(theme);
     let viewport = ViewportSize::new(Size::new(560.0, 1000.0));
     draw_ui::layout(&mut tree, viewport);
@@ -69,7 +69,7 @@ fn render(theme: Theme) -> Vec<DrawCommand> {
 
 #[test]
 fn style_guide_renders_surfaces_borders_text_and_indicators() {
-    let commands = render(Theme::dark());
+    let commands = render(default_theme(Mode::Dark));
 
     assert!(commands
         .iter()
@@ -94,7 +94,7 @@ fn style_guide_renders_surfaces_borders_text_and_indicators() {
 
 #[test]
 fn light_and_dark_render_the_same_structure() {
-    let light = render(Theme::light());
-    let dark = render(Theme::dark());
+    let light = render(default_theme(Mode::Light));
+    let dark = render(default_theme(Mode::Dark));
     assert_eq!(light.len(), dark.len());
 }

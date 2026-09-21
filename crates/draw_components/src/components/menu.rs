@@ -29,7 +29,7 @@ pub const MENU_MIN_WIDTH: f32 = 200.0;
 /// One clickable row in a [`Menu`].
 pub struct MenuItem {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     label: String,
     shortcut: Option<String>,
     tone: Tone,
@@ -39,7 +39,7 @@ pub struct MenuItem {
 
 impl MenuItem {
     /// A row with the default (foreground) tone.
-    pub fn new(label: impl Into<String>, theme: Theme) -> Self {
+    pub fn new(label: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             theme,
@@ -52,7 +52,11 @@ impl MenuItem {
     }
 
     /// A row with a right-aligned shortcut hint (e.g. `"Ctrl+Z"`).
-    pub fn action(label: impl Into<String>, shortcut: impl Into<String>, theme: Theme) -> Self {
+    pub fn action(
+        label: impl Into<String>,
+        shortcut: impl Into<String>,
+        theme: &'static dyn Theme,
+    ) -> Self {
         Self::new(label, theme).shortcut(shortcut)
     }
 
@@ -116,7 +120,7 @@ impl Component for MenuItem {
             let fill = if disabled || !(st.hovered || st.pressed) {
                 draw_core::Color::TRANSPARENT
             } else {
-                theme.palette.surface_hover
+                theme.palette().surface_hover
             };
             SurfaceStyle::new(fill).radius(radius::SM)
         }));
@@ -125,9 +129,9 @@ impl Component for MenuItem {
         }
 
         let color = if disabled {
-            theme.palette.subtle
+            theme.palette().subtle
         } else {
-            self.tone.color(&theme)
+            self.tone.color(theme)
         };
         self.spec.child(
             Label::new(self.label.clone())
@@ -137,9 +141,9 @@ impl Component for MenuItem {
         );
         if let Some(shortcut) = self.shortcut.clone() {
             let shortcut_color = if disabled {
-                theme.palette.subtle
+                theme.palette().subtle
             } else {
-                theme.palette.muted
+                theme.palette().muted
             };
             self.spec.child(
                 Label::new(shortcut)
@@ -167,13 +171,13 @@ enum Row {
 /// Use it standalone or as the content of [`Overlays::menu`](crate::Overlays::menu).
 pub struct Menu {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     rows: Vec<Row>,
     min_width: f32,
 }
 
 impl Menu {
-    pub fn new(theme: Theme) -> Self {
+    pub fn new(theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             theme,
@@ -229,7 +233,7 @@ impl Component for Menu {
     fn prepare(&mut self) {
         let theme = self.theme;
         let style = SurfaceStyle::new(theme.surface(SurfaceLevel::Floating))
-            .border(theme.palette.border)
+            .border(theme.palette().border)
             .radius(radius::LG);
         self.spec.data.min_size = Size::new(self.min_width, 0.0);
         self.spec.background = Some(Box::new(move |_| style));
@@ -251,6 +255,7 @@ mod tests {
     use crate::base::Flex;
     use draw_core::{InputEvent, PointerButton, Vec2, ViewportSize};
     use draw_scene::SceneTree;
+    use draw_theme::{default_theme, Mode};
     use draw_ui::{control, MouseFilter};
     use std::cell::Cell;
     use std::rc::Rc;
@@ -292,7 +297,7 @@ mod tests {
 
     #[test]
     fn menu_items_stack_and_the_surface_is_at_least_min_width() {
-        let theme = Theme::dark();
+        let theme = default_theme(Mode::Dark);
         let mut tree = SceneTree::new();
         let menu = mount_menu(
             &mut tree,
@@ -311,7 +316,7 @@ mod tests {
 
     #[test]
     fn clicking_a_row_runs_its_callback() {
-        let theme = Theme::dark();
+        let theme = default_theme(Mode::Dark);
         let clicked = Rc::new(Cell::new(false));
         let flag = clicked.clone();
         let mut tree = SceneTree::new();
@@ -327,7 +332,7 @@ mod tests {
 
     #[test]
     fn a_disabled_row_ignores_clicks_and_keeps_the_default_cursor() {
-        let theme = Theme::dark();
+        let theme = default_theme(Mode::Dark);
         let clicked = Rc::new(Cell::new(false));
         let flag = clicked.clone();
         let mut tree = SceneTree::new();
@@ -345,7 +350,7 @@ mod tests {
 
     #[test]
     fn an_enabled_row_shows_a_pointer_cursor() {
-        let theme = Theme::dark();
+        let theme = default_theme(Mode::Dark);
         let mut tree = SceneTree::new();
         let root = tree.root();
         let id = MenuItem::new("Undo", theme).build(&mut tree, root);

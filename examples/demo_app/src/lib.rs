@@ -38,7 +38,7 @@ use draw_core::{
 };
 use draw_render::{CornerRadii, PaintContext};
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{radius, space, TextSize, Theme, Tone};
+use draw_theme::{default_theme, radius, space, Mode, TextSize, Theme, Tone};
 use draw_ui::{
     fill_rounded_rect, fill_rounded_rect_corners, inset, Align, Control, Justify, MouseFilter,
     SizeBasis, SurfaceStyle, TextMeasurer, TextOptions, Widget,
@@ -193,7 +193,7 @@ struct NoteList {
 /// The right-hand routed detail pane: note / settings views.
 struct DetailPane {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     route: Rc<Cell<usize>>,
     note_view: Column,
     settings: Column,
@@ -203,7 +203,7 @@ struct DetailPane {
 /// Application state shared by every demo host.
 pub struct DemoApp {
     tree: SceneTree,
-    theme: Theme,
+    theme: &'static dyn Theme,
     state: DemoState,
     sidebar: NodeId,
     list: NodeId,
@@ -233,11 +233,11 @@ impl Default for DemoApp {
 impl DemoApp {
     /// Builds the app with the dark theme.
     pub fn new() -> Self {
-        Self::with_theme(Theme::dark())
+        Self::with_theme(default_theme(Mode::Dark))
     }
 
     /// Builds the app with an explicit theme.
-    pub fn with_theme(theme: Theme) -> Self {
+    pub fn with_theme(theme: &'static dyn Theme) -> Self {
         // Shared state and node handles are created here and passed into the
         // panes; the panes report their internal node ids back via `ref_`.
         let state = DemoState::new();
@@ -345,8 +345,8 @@ impl DemoApp {
         &self.overlays
     }
 
-    pub fn theme(&self) -> &Theme {
-        &self.theme
+    pub fn theme(&self) -> &'static dyn Theme {
+        self.theme
     }
 
     pub fn viewport(&self) -> ViewportSize {
@@ -480,7 +480,7 @@ impl DemoApp {
         let size = self.viewport.logical_size();
         ctx.fill_rect(
             Rect::from_min_size(Vec2::ZERO, size),
-            self.theme.palette.background,
+            self.theme.palette().background,
         );
 
         draw_ui::paint(&self.tree, ctx);
@@ -513,14 +513,14 @@ impl DemoApp {
 }
 
 /// A compact square placeholder: hover surface + a small inner mark.
-fn icon_box(theme: Theme, size: f32) -> Panel {
+fn icon_box(theme: &'static dyn Theme, size: f32) -> Panel {
     Panel::new()
         .color(Color::TRANSPARENT)
         .flat()
         .min_size(size, size)
         .dynamic_background(move |state| {
             let fill = if state.hovered || state.pressed {
-                theme.palette.surface_hover
+                theme.palette().surface_hover
             } else {
                 Color::TRANSPARENT
             };
@@ -528,31 +528,31 @@ fn icon_box(theme: Theme, size: f32) -> Panel {
         })
         .foreground(move |ctx, rect, _| {
             let inner = inset(rect, rect.size.width * 0.32);
-            fill_rounded_rect(ctx, inner, 1.5, theme.palette.subtle);
+            fill_rounded_rect(ctx, inner, 1.5, theme.palette().subtle);
         })
 }
 
 /// The app icon: accent square with a light inner mark.
-fn app_icon(size: f32, theme: Theme) -> Panel {
+fn app_icon(size: f32, theme: &'static dyn Theme) -> Panel {
     Panel::new()
         .color(Color::TRANSPARENT)
         .flat()
         .min_size(size, size)
-        .surface(SurfaceStyle::new(theme.palette.accent).radius(radius::SM))
+        .surface(SurfaceStyle::new(theme.palette().accent).radius(radius::SM))
         .foreground(move |ctx, rect, _| {
-            fill_rounded_rect(ctx, inset(rect, 6.0), 1.0, theme.palette.on_accent);
+            fill_rounded_rect(ctx, inset(rect, 6.0), 1.0, theme.palette().on_accent);
         })
 }
 
 /// A note thumbnail: bordered surface with a shaded inner rectangle.
-fn thumb(size: f32, theme: Theme, shade: f32) -> Panel {
+fn thumb(size: f32, theme: &'static dyn Theme, shade: f32) -> Panel {
     Panel::new()
         .color(Color::TRANSPARENT)
         .flat()
         .min_size(size, size)
         .surface(
-            SurfaceStyle::new(theme.palette.surface_raised)
-                .border(theme.palette.border)
+            SurfaceStyle::new(theme.palette().surface_raised)
+                .border(theme.palette().border)
                 .radius(radius::MD),
         )
         .foreground(move |ctx, rect, _| {
@@ -560,12 +560,17 @@ fn thumb(size: f32, theme: Theme, shade: f32) -> Panel {
                 ctx,
                 inset(rect, 12.0),
                 2.0,
-                theme.palette.subtle.with_alpha(shade),
+                theme.palette().subtle.with_alpha(shade),
             );
         })
 }
 
-fn nav_row_view(theme: Theme, label: &str, index: usize, selected: &Rc<Cell<usize>>) -> Row {
+fn nav_row_view(
+    theme: &'static dyn Theme,
+    label: &str,
+    index: usize,
+    selected: &Rc<Cell<usize>>,
+) -> Row {
     let held = selected.clone();
     let click = selected.clone();
     Row::new()
@@ -577,9 +582,9 @@ fn nav_row_view(theme: Theme, label: &str, index: usize, selected: &Rc<Cell<usiz
         .min_size(0.0, 28.0)
         .dynamic_background(move |interact| {
             let fill = if held.get() == index {
-                theme.palette.selection
+                theme.palette().selection
             } else if interact.hovered {
-                theme.palette.surface_hover
+                theme.palette().surface_hover
             } else {
                 Color::TRANSPARENT
             };
@@ -593,7 +598,7 @@ impl Sidebar {
     ///
     /// Leaf components are built first, then the column composes them once at
     /// the end.
-    fn new(theme: Theme, state: &DemoState, handles: &Handles) -> Self {
+    fn new(theme: &'static dyn Theme, state: &DemoState, handles: &Handles) -> Self {
         let header = Row::new()
             .align(Align::Center)
             .gap(space::SM)
@@ -605,14 +610,14 @@ impl Sidebar {
             .flat()
             .min_size(0.0, 30.0)
             .surface(
-                SurfaceStyle::new(theme.palette.surface_raised)
-                    .border(theme.palette.border)
+                SurfaceStyle::new(theme.palette().surface_raised)
+                    .border(theme.palette().border)
                     .radius(radius::MD),
             )
             .child(
                 Label::new("Search")
                     .font_size(TextSize::Small.px())
-                    .color(theme.palette.muted)
+                    .color(theme.palette().muted)
                     .text_options(TextOptions::no_wrap())
                     .anchors(Edges::new(0.0, 0.5, 1.0, 0.5))
                     .offsets(Edges::new(space::SM, -8.0, -space::SM, 8.0)),
@@ -649,7 +654,7 @@ impl Sidebar {
             ))
             .basis(SizeBasis::Px(state.sidebar_width.get()))
             .shrink(0.0)
-            .surface(SurfaceStyle::new(theme.palette.surface))
+            .surface(SurfaceStyle::new(theme.palette().surface))
             .child(header)
             .child(search)
             .child(library)
@@ -681,7 +686,12 @@ impl Component for Sidebar {
     }
 }
 
-fn note_row_view(theme: Theme, note: &Note, index: usize, selected: &Rc<Cell<usize>>) -> Row {
+fn note_row_view(
+    theme: &'static dyn Theme,
+    note: &Note,
+    index: usize,
+    selected: &Rc<Cell<usize>>,
+) -> Row {
     let held = selected.clone();
     let click = selected.clone();
     let bar = selected.clone();
@@ -707,9 +717,9 @@ fn note_row_view(theme: Theme, note: &Note, index: usize, selected: &Rc<Cell<usi
         .min_size(0.0, 60.0)
         .dynamic_background(move |interact| {
             let fill = if held.get() == index {
-                theme.palette.selection
+                theme.palette().selection
             } else if interact.hovered {
-                theme.palette.surface_hover
+                theme.palette().surface_hover
             } else {
                 Color::TRANSPARENT
             };
@@ -725,7 +735,7 @@ fn note_row_view(theme: Theme, note: &Note, index: usize, selected: &Rc<Cell<usi
                     ctx,
                     bar,
                     CornerRadii::new(0.0, 1.5, 1.5, 0.0),
-                    theme.palette.accent,
+                    theme.palette().accent,
                 );
             }
         })
@@ -737,7 +747,7 @@ impl NoteList {
     ///
     /// Leaf components are built first, then the column composes them once at
     /// the end.
-    fn new(theme: Theme, state: &DemoState, handles: &Handles) -> Self {
+    fn new(theme: &'static dyn Theme, state: &DemoState, handles: &Handles) -> Self {
         let header = Row::new()
             .align(Align::Center)
             .justify(Justify::SpaceBetween)
@@ -760,7 +770,7 @@ impl NoteList {
             .padding(Edges::new(space::MD, space::MD, space::MD, space::MD))
             .basis(SizeBasis::Px(state.list_width.get()))
             .shrink(0.0)
-            .surface(SurfaceStyle::new(theme.palette.background))
+            .surface(SurfaceStyle::new(theme.palette().background))
             .child(header)
             .child(divider)
             .children(rows);
@@ -789,7 +799,7 @@ impl Component for NoteList {
 
 impl DetailPane {
     /// Composes the right-hand pane declaratively; no tree here.
-    fn new(theme: Theme, state: &DemoState, handles: &Handles) -> Self {
+    fn new(theme: &'static dyn Theme, state: &DemoState, handles: &Handles) -> Self {
         // Shared route for the right-hand pane: 0 = note detail, 1 = settings.
         let route = Rc::new(Cell::new(0));
 
@@ -838,8 +848,8 @@ impl DetailPane {
             .padding(Edges::ZERO)
             .min_size(0.0, 220.0)
             .surface(
-                SurfaceStyle::new(theme.palette.surface_raised)
-                    .border(theme.palette.border)
+                SurfaceStyle::new(theme.palette().surface_raised)
+                    .border(theme.palette().border)
                     .radius(radius::LG),
             )
             .foreground(move |ctx, rect, _| {
@@ -853,7 +863,7 @@ impl DetailPane {
                         ctx,
                         inner,
                         radius::MD,
-                        theme.palette.subtle.with_alpha(0.18),
+                        theme.palette().subtle.with_alpha(0.18),
                     );
                 }
             })
@@ -919,7 +929,7 @@ impl DetailPane {
             .child(Text::heading("hello", theme))
             .gap(space::LG)
             .padding(Edges::all(space::XXL))
-            .surface(SurfaceStyle::new(theme.palette.background))
+            .surface(SurfaceStyle::new(theme.palette().background))
             .child(Text::heading("Settings", theme))
             .child(
                 Text::new(
@@ -959,7 +969,7 @@ impl Component for DetailPane {
 
     fn widget(&self) -> Widget {
         Widget::Panel {
-            color: self.theme.palette.background,
+            color: self.theme.palette().background,
             border: None,
         }
     }
@@ -1374,7 +1384,7 @@ mod tests {
                     rect,
                     corners,
                     paint,
-                } if paint.color == app.theme.palette.accent
+                } if paint.color == app.theme.palette().accent
                     && (rect.size.height - row_rect.size.height).abs() < 1e-3
                     && row_rect.contains_rect(*rect) =>
                 {

@@ -14,7 +14,7 @@ use draw_ui::{Align, SurfaceStyle, TextOptions, Widget};
 /// remounting. Pass an external handle with [`Checkbox::state`] to read it.
 pub struct Checkbox {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     label: String,
     initial: bool,
     state: Option<Rc<Cell<bool>>>,
@@ -22,7 +22,7 @@ pub struct Checkbox {
 }
 
 impl Checkbox {
-    pub fn new(label: impl Into<String>, theme: Theme) -> Self {
+    pub fn new(label: impl Into<String>, theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             theme,
@@ -85,14 +85,14 @@ impl Component for Checkbox {
                 .foreground(move |ctx, rect, st| {
                     let checked = paint_state.get();
                     let fill = if checked {
-                        theme.palette.accent
+                        theme.palette().accent
                     } else {
-                        theme.palette.background
+                        theme.palette().background
                     };
                     let border = if checked || st.hovered {
-                        theme.palette.accent
+                        theme.palette().accent
                     } else {
-                        theme.palette.border
+                        theme.palette().border
                     };
                     draw_ui::surface(
                         ctx,
@@ -104,7 +104,7 @@ impl Component for Checkbox {
                             ctx,
                             draw_ui::inset(rect, 4.0),
                             1.5,
-                            theme.palette.on_accent,
+                            theme.palette().on_accent,
                         );
                     }
                 }),
@@ -112,7 +112,7 @@ impl Component for Checkbox {
 
         let label = self.label.clone();
         let body = TextSize::Body.px();
-        let foreground = theme.palette.foreground;
+        let foreground = theme.palette().foreground;
         self.spec.child(
             Label::new(label)
                 .font_size(body)
@@ -135,7 +135,7 @@ impl Component for Checkbox {
 /// A compact on/off switch.
 pub struct Switch {
     spec: Spec,
-    theme: Theme,
+    theme: &'static dyn Theme,
     label: Option<String>,
     initial: bool,
     state: Option<Rc<Cell<bool>>>,
@@ -143,7 +143,7 @@ pub struct Switch {
 }
 
 impl Switch {
-    pub fn new(theme: Theme) -> Self {
+    pub fn new(theme: &'static dyn Theme) -> Self {
         Self {
             spec: Spec::leaf(),
             theme,
@@ -210,16 +210,16 @@ impl Component for Switch {
                 .foreground(move |ctx, rect, st| {
                     let on = paint_state.get();
                     let track_color = if on {
-                        theme.palette.accent
+                        theme.palette().accent
                     } else if st.hovered {
-                        theme.palette.surface_hover
+                        theme.palette().surface_hover
                     } else {
-                        theme.palette.surface_raised
+                        theme.palette().surface_raised
                     };
                     let border = if on {
-                        theme.palette.accent
+                        theme.palette().accent
                     } else {
-                        theme.palette.border
+                        theme.palette().border
                     };
                     draw_ui::surface(
                         ctx,
@@ -240,9 +240,9 @@ impl Component for Switch {
                         Vec2::new(cx, rect.center().y),
                         r,
                         if on {
-                            theme.palette.on_accent
+                            theme.palette().on_accent
                         } else {
-                            theme.palette.muted
+                            theme.palette().muted
                         },
                     );
                 }),
@@ -250,7 +250,7 @@ impl Component for Switch {
 
         if let Some(label) = self.label.clone() {
             let body = TextSize::Body.px();
-            let foreground = theme.palette.foreground;
+            let foreground = theme.palette().foreground;
             self.spec.child(
                 Label::new(label)
                     .font_size(body)

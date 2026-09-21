@@ -56,7 +56,7 @@ use draw_core::{
 };
 use draw_render::PaintContext;
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{radius, space, SurfaceLevel, Theme, Tone};
+use draw_theme::{default_theme, radius, space, Mode, SurfaceLevel, Theme, Tone};
 use draw_ui::{fill_rounded_rect, Align, Justify, MouseFilter, SurfaceStyle, TextMeasurer};
 
 use crate::api::Balance;
@@ -268,7 +268,7 @@ struct CurrencySlot {
 /// The balance view: a header, a status line and one card per currency.
 pub struct BalanceApp {
     tree: SceneTree,
-    theme: Theme,
+    theme: &'static dyn Theme,
     feed: Feed,
     /// Whether the view is the menu-bar panel, i.e. paints the popover arrow
     /// above its body.
@@ -327,17 +327,17 @@ pub struct BalanceApp {
 
 impl BalanceApp {
     /// Builds the view for `theme`, showing `endpoint` in the header.
-    pub fn new(theme: Theme, endpoint: String) -> Self {
+    pub fn new(theme: &'static dyn Theme, endpoint: String) -> Self {
         Self::build(theme, endpoint, false)
     }
 
     /// Builds the view as the menu-bar panel: the same content, plus the
     /// popover arrow above its body (see [`ARROW_HEIGHT`]).
-    pub fn new_panel(theme: Theme, endpoint: String) -> Self {
+    pub fn new_panel(theme: &'static dyn Theme, endpoint: String) -> Self {
         Self::build(theme, endpoint, true)
     }
 
-    fn build(theme: Theme, endpoint: String, arrow: bool) -> Self {
+    fn build(theme: &'static dyn Theme, endpoint: String, arrow: bool) -> Self {
         let feed = Feed::new();
         let refs = Refs::with_slots();
 
@@ -692,7 +692,7 @@ impl BalanceApp {
     pub fn paint(&self, ctx: &mut PaintContext) {
         let window = Rect::from_min_size(Vec2::ZERO, self.viewport.logical_size());
         let body = self.body(window);
-        let fill = self.theme.palette.background;
+        let fill = self.theme.palette().background;
 
         // The arrow first, so the body hides the half of the rotated square
         // that would stick back down into it.
@@ -750,7 +750,7 @@ impl BalanceApp {
 
     /// The theme the view was built with. The host reads it to match its own
     /// clear colour to the panel backdrop.
-    pub fn theme(&self) -> &Theme {
+    pub fn theme(&self) -> &'static dyn Theme {
         &self.theme
     }
 

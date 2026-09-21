@@ -53,7 +53,7 @@ fn sample_go() -> GoUsage {
 /// A view laid out at `width` x `height`, with the on-open refresh still
 /// pending (the state the first frame sees).
 fn laid_out(width: f32, height: f32) -> BalanceApp {
-    let mut app = BalanceApp::new(Theme::dark(), TEST_ENDPOINT.to_string());
+    let mut app = BalanceApp::new(default_theme(Mode::Dark), TEST_ENDPOINT.to_string());
     let viewport = viewport(width, height);
     app.update(viewport, 0.016);
     app.layout(viewport);
@@ -116,7 +116,7 @@ fn click(app: &mut BalanceApp, position: Vec2) {
 #[test]
 fn the_view_mounts_with_placeholders() {
     // Before the first frame: idle status, dashes, one card on screen.
-    let app = BalanceApp::new(Theme::dark(), TEST_ENDPOINT.to_string());
+    let app = BalanceApp::new(default_theme(Mode::Dark), TEST_ENDPOINT.to_string());
     assert_eq!(app.total_text(0), Some(PLACEHOLDER));
     assert_eq!(app.card_visible(0), Some(true));
     assert_eq!(app.card_visible(1), Some(false));
@@ -276,7 +276,7 @@ fn a_failure_lifts_the_throttle() {
 /// flight. The gap has to be set before the refresh that arms it.
 #[test]
 fn a_zero_gap_turns_the_throttle_off() {
-    let mut app = BalanceApp::new(Theme::dark(), TEST_ENDPOINT.to_string());
+    let mut app = BalanceApp::new(default_theme(Mode::Dark), TEST_ENDPOINT.to_string());
     app.set_min_refresh_gap(Duration::ZERO);
     let viewport = viewport(520.0, 460.0);
     app.update(viewport, 0.016);
@@ -673,11 +673,11 @@ fn the_backdrop_is_a_rounded_fill_the_size_of_the_panel() {
         assert_eq!(corners.bottom_left, PANEL_RADIUS);
         assert_eq!(corners.bottom_right, PANEL_RADIUS);
         assert_eq!(
-            paint.color, app.theme.palette.background,
+            paint.color, app.theme.palette().background,
             "the fill is the theme's backdrop token"
         );
         // Opaque: only the four corners outside the radius may be see-through.
-        assert_eq!(app.theme.palette.background.a, 1.0);
+        assert_eq!(app.theme.palette().background.a, 1.0);
 
         // Nothing may square those corners off again further down the list.
         assert!(
@@ -692,7 +692,7 @@ fn the_backdrop_is_a_rounded_fill_the_size_of_the_panel() {
 
 /// A panel view laid out at its real size: body plus arrow.
 fn panel() -> BalanceApp {
-    let mut app = BalanceApp::new_panel(Theme::dark(), TEST_ENDPOINT.to_string());
+    let mut app = BalanceApp::new_panel(default_theme(Mode::Dark), TEST_ENDPOINT.to_string());
     let viewport = viewport(PANEL_WIDTH_TEST, PANEL_HEIGHT_TEST + ARROW_HEIGHT);
     app.update(viewport, 0.016);
     app.layout(viewport);
@@ -731,7 +731,7 @@ fn the_panel_arrow_points_up_at_the_status_item() {
     else {
         panic!("the arrow should be a scoped rotated fill: {commands:?}");
     };
-    assert_eq!(paint.color, app.theme.palette.background);
+    assert_eq!(paint.color, app.theme.palette().background);
 
     // Where the square's corners land in window space.
     let corners = [
