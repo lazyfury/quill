@@ -1,0 +1,11 @@
+[package]
+name = "deepseek_util"
+version = "0.1.0"
+edition = "2021"
+publish = false
+# 与 deepseek_balance 同属一个小项目：通用小工具单独一个 crate，按关注点分文件，
+# 既不出现在主工作区的 cargo 关卡里，也不把格式化/解析代码塞进 API 或 UI 模块。
+
+[lib]
+name = "deepseek_util"
+path = "src/lib.rs"

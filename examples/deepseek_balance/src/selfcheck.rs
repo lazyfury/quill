@@ -27,49 +27,74 @@ use draw_theme::Theme;
 
 use crate::api::{Balance, BalanceInfo};
 use crate::badge::{self, BadgeApp};
-use crate::ui::BalanceApp;
+use crate::go::{GoUsage, Usage, UsageWindow};
+use crate::ui::{BalanceApp, Tab};
 
-/// Window-layout size the self-check renders (matches `ui.rs`'s tests).
+/// Window-layout size the self-check renders (matches `ui.rs`'s tests), tall
+/// enough for the usual one-currency body plus the footer's refresh button.
 const WINDOW_WIDTH: f32 = 520.0;
 const WINDOW_HEIGHT: f32 = 460.0;
 
 /// Panel body size plus the popover arrow, mirroring the host's panel window.
 const PANEL_BODY_WIDTH: f32 = 300.0;
-const PANEL_BODY_HEIGHT: f32 = 420.0;
+const PANEL_BODY_HEIGHT: f32 = 470.0;
 const ARROW_HEIGHT: f32 = crate::ui::ARROW_HEIGHT;
 
-/// Canned reply the self-check feeds the view instead of hitting the endpoint:
-/// two currencies, so both cards are on screen.
+/// Canned reply the self-check feeds the view instead of hitting the endpoint.
+///
+/// One currency, which is the usual reply and the size the panel is built for;
+/// the two-card layout is covered by `ui.rs`'s tests (visibility and values,
+/// which need no frame).
 fn sample_balance() -> Balance {
     Balance {
         is_available: true,
-        balance_infos: vec![
-            BalanceInfo {
-                currency: "CNY".to_string(),
-                total_balance: "110.00".to_string(),
-                granted_balance: "10.00".to_string(),
-                topped_up_balance: "100.00".to_string(),
-            },
-            BalanceInfo {
-                currency: "USD".to_string(),
-                total_balance: "7.00".to_string(),
-                granted_balance: "0.00".to_string(),
-                topped_up_balance: "7.00".to_string(),
-            },
-        ],
+        balance_infos: vec![BalanceInfo {
+            currency: "CNY".to_string(),
+            total_balance: "110.00".to_string(),
+            granted_balance: "10.00".to_string(),
+            topped_up_balance: "100.00".to_string(),
+        }],
+    }
+}
+
+/// Canned OpenCode Go reply: all three windows healthy, no reset stamps so the
+/// rows are stable to assert against.
+fn sample_go() -> GoUsage {
+    let window = |percent| UsageWindow {
+        status: "ok".to_string(),
+        percent,
+        resets_at: None,
+    };
+    GoUsage {
+        usage: Usage {
+            rolling: Some(window(12.0)),
+            weekly: Some(window(40.0)),
+            monthly: Some(window(100.0)),
+        },
     }
 }
 
 /// Drives one view through the real frame lifecycle and records the result:
 /// update -> (canned reply) -> update -> layout -> paint -> backend.
-fn record_frame(mut app: BalanceApp, width: f32, height: f32) -> (BalanceApp, RecordedFrame) {
+///
+/// The on-open refresh queries both sources, so both canned replies are applied
+/// — the button only leaves `Busy` when the last one lands. `tab` selects the
+/// page to record after the replies.
+fn record_frame(
+    mut app: BalanceApp,
+    width: f32,
+    height: f32,
+    tab: Tab,
+) -> (BalanceApp, RecordedFrame) {
     let viewport = ViewportSize::new(Size::new(width, height));
     app.update(viewport, 0.016);
     // The on-open refresh is the host's to answer; the self-check answers it
     // with canned data, so nothing here ever touches the network.
     if app.take_refresh_request() {
         app.apply_result(Ok(sample_balance()));
+        app.apply_go_result(Ok(sample_go()));
     }
+    app.select_tab(tab);
     app.update(viewport, 0.016);
     app.layout(viewport);
 
@@ -380,6 +405,42 @@ fn semantic_checks(app: &BalanceApp, frame: &RecordedFrame, panel: bool) -> Vec<
     failures
 }
 
+/// Semantic checks for the OpenCode Go page: the tab, the three window rows and
+/// the remainders the canned reply implies.
+fn go_semantic_checks(app: &BalanceApp, frame: &RecordedFrame) -> Vec<String> {
+    let mut failures = Vec::new();
+    let width = frame.viewport.logical_size().width;
+    let height = frame.viewport.logical_size().height;
+
+    if frame.command_count() == 0 {
+        failures.push("the Go frame recorded no draw commands".to_string());
+        return failures;
+    }
+
+    for (what, needle) in [
+        ("tab", "OpenCode Go"),
+        ("rolling row", "5 小时"),
+        ("rolling value", "剩余 88%"),
+        ("weekly value", "剩余 60%"),
+        ("monthly value", "已用尽"),
+        ("refresh button", "刷新 ("),
+    ] {
+        match text_commands(frame, needle).first() {
+            Some((_, position)) if on_screen(*position, width, height) => {}
+            Some((_, position)) => failures.push(format!(
+                "go {what}: `{needle}` is drawn at {position:?}, outside the {width}x{height} viewport"
+            )),
+            None => failures.push(format!("go {what}: `{needle}` is not in the draw list")),
+        }
+    }
+
+    if app.last_go().is_none() {
+        failures.push("the canned Go usage was never applied".to_string());
+    }
+
+    failures
+}
+
 /// Counts an inspection report: prints each finding and turns every Error into
 /// a failure line. Shared by the main view's layouts and the badge window.
 fn report_findings(report: &InspectionReport, failures: &mut Vec<String>) {
@@ -404,29 +465,57 @@ fn report_findings(report: &InspectionReport, failures: &mut Vec<String>) {
     }
 }
 
+/// What, if anything, a self-check run prints for the frame.
+///
+/// Split so a run can ask for just the UI tree or just the draw commands: the
+/// two together are the most context any command here produces, and usually
+/// only one of them is being read.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Dump {
+    None,
+    All,
+    Tree,
+    Commands,
+}
+
+impl Dump {
+    fn wants_tree(self) -> bool {
+        matches!(self, Self::All | Self::Tree)
+    }
+
+    fn wants_commands(self) -> bool {
+        matches!(self, Self::All | Self::Commands)
+    }
+}
+
 /// One self-check run: record, inspect, report. Returns the failure lines
-/// (empty = pass); findings are printed as they are seen. With `dump` the
-/// whole UI tree and every draw command are printed, so a frame can be read
-/// end to end without a screen.
+/// (empty = pass); findings are printed as they are seen. `dump` selects which
+/// parts of the frame are printed, so a frame can be read without a screen.
 fn run_one(
     name: &str,
     app: BalanceApp,
     width: f32,
     height: f32,
     panel: bool,
-    dump: bool,
+    tab: Tab,
+    dump: Dump,
 ) -> Vec<String> {
     println!("self-check: {name} ({width}x{height})");
-    let (app, frame) = record_frame(app, width, height);
+    let (app, frame) = record_frame(app, width, height, tab);
     println!("  frame: {} commands", frame.command_count());
 
-    if dump {
+    if dump.wants_tree() {
         dump_tree(app.tree(), app.control_count());
+    }
+    if dump.wants_commands() {
         dump_frame(&frame);
     }
 
     let report = inspect_frame(&app, &frame);
-    let mut failures = semantic_checks(&app, &frame, panel);
+    let mut failures = match tab {
+        Tab::DeepSeek => semantic_checks(&app, &frame, panel),
+        Tab::Go => go_semantic_checks(&app, &frame),
+    };
     report_findings(&report, &mut failures);
 
     for line in &failures {
@@ -447,7 +536,8 @@ fn record_badge_frame(mut app: BadgeApp) -> (BadgeApp, RecordedFrame) {
     let viewport = ViewportSize::new(Size::new(badge::BADGE_WIDTH, badge::BADGE_HEIGHT));
     // One fetch, two windows: this is the same canned reply [`record_frame`]
     // feeds the main view, handed over exactly as the host would.
-    app.apply_result(&Ok(sample_balance()));
+    let state = badge::State::from_result(&Ok(sample_balance()));
+    app.show(badge::TITLE, badge::BALANCE_PREFIX, &state);
     app.layout(viewport);
 
     let mut backend = RecordingBackend::new();
@@ -490,7 +580,7 @@ fn badge_checks(frame: &RecordedFrame) -> Vec<String> {
     // the host handed it — not merely some text. The canned reply is CNY
     // 110.00, so that is its headline and that is what should be on screen.
     let headline = sample_balance().headline();
-    let expected = badge::State::Ready(headline).line();
+    let expected = badge::State::Ready(headline).line(badge::BALANCE_PREFIX);
     let needles: [(&str, String); 2] = [("title", badge::TITLE.to_string()), ("balance", expected)];
     for (what, needle) in needles {
         match text_commands(frame, &needle).first() {
@@ -507,7 +597,7 @@ fn badge_checks(frame: &RecordedFrame) -> Vec<String> {
 
 /// The badge window's self-check: the second window gets the same treatment as
 /// the first, so both are verified without a screen.
-fn run_badge(dump: bool) -> Vec<String> {
+fn run_badge(dump: Dump) -> Vec<String> {
     let (width, height) = (badge::BADGE_WIDTH, badge::BADGE_HEIGHT);
     println!("self-check: badge ({width}x{height})");
     let (app, frame) = record_badge_frame(BadgeApp::new(Theme::dark()));
@@ -517,8 +607,10 @@ fn run_badge(dump: bool) -> Vec<String> {
         app.balance_text().unwrap_or("（无）")
     );
 
-    if dump {
+    if dump.wants_tree() {
         dump_tree(app.tree(), draw_ui::control_count(app.tree()));
+    }
+    if dump.wants_commands() {
         dump_frame(&frame);
     }
 
@@ -543,7 +635,7 @@ fn run_badge(dump: bool) -> Vec<String> {
 }
 
 /// Runs every self-check layout; returns the process exit code.
-pub fn run(dump: bool) -> i32 {
+pub fn run(dump: Dump) -> i32 {
     let mut failed = 0;
 
     failed += run_one(
@@ -555,6 +647,7 @@ pub fn run(dump: bool) -> i32 {
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         false,
+        Tab::DeepSeek,
         dump,
     )
     .len();
@@ -568,6 +661,38 @@ pub fn run(dump: bool) -> i32 {
         PANEL_BODY_WIDTH,
         PANEL_BODY_HEIGHT + ARROW_HEIGHT,
         true,
+        Tab::DeepSeek,
+        dump,
+    )
+    .len();
+
+    // The Go tab is a second page in the same tree, so it gets its own recorded
+    // frame in both shapes — otherwise a Go-only layout regression would never
+    // be seen without a screen.
+    failed += run_one(
+        "window/go",
+        BalanceApp::new(
+            Theme::dark(),
+            "https://api.deepseek.com/user/balance".to_string(),
+        ),
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        false,
+        Tab::Go,
+        dump,
+    )
+    .len();
+
+    failed += run_one(
+        "panel/go",
+        BalanceApp::new_panel(
+            Theme::dark(),
+            "https://api.deepseek.com/user/balance".to_string(),
+        ),
+        PANEL_BODY_WIDTH,
+        PANEL_BODY_HEIGHT + ARROW_HEIGHT,
+        true,
+        Tab::Go,
         dump,
     )
     .len();
@@ -602,38 +727,51 @@ mod tests {
         )
     }
 
+    /// Both surfaces and both tabs get the same treatment: every recorded frame
+    /// must pass the structural audit and its own semantic checks.
     #[test]
-    fn the_window_frame_passes_every_check() {
-        let (app, frame) = record_frame(window_app(), WINDOW_WIDTH, WINDOW_HEIGHT);
-        let report = inspect_frame(&app, &frame);
-        assert!(
-            report.max_severity() < Some(Severity::Error),
-            "structural findings: {:?}",
-            report.findings()
-        );
-        assert!(
-            semantic_checks(&app, &frame, false).is_empty(),
-            "semantic checks failed"
-        );
-    }
+    fn every_app_frame_passes_its_checks() {
+        let cases = [
+            (
+                "window",
+                window_app(),
+                WINDOW_WIDTH,
+                WINDOW_HEIGHT,
+                Tab::DeepSeek,
+                false,
+            ),
+            (
+                "panel",
+                panel_app(),
+                PANEL_BODY_WIDTH,
+                PANEL_BODY_HEIGHT + ARROW_HEIGHT,
+                Tab::DeepSeek,
+                true,
+            ),
+            (
+                "panel/go",
+                panel_app(),
+                PANEL_BODY_WIDTH,
+                PANEL_BODY_HEIGHT + ARROW_HEIGHT,
+                Tab::Go,
+                true,
+            ),
+        ];
 
-    #[test]
-    fn the_panel_frame_passes_every_check() {
-        let (app, frame) = record_frame(
-            panel_app(),
-            PANEL_BODY_WIDTH,
-            PANEL_BODY_HEIGHT + ARROW_HEIGHT,
-        );
-        let report = inspect_frame(&app, &frame);
-        assert!(
-            report.max_severity() < Some(Severity::Error),
-            "structural findings: {:?}",
-            report.findings()
-        );
-        assert!(
-            semantic_checks(&app, &frame, true).is_empty(),
-            "semantic checks failed"
-        );
+        for (name, app, width, height, tab, panel) in cases {
+            let (app, frame) = record_frame(app, width, height, tab);
+            let report = inspect_frame(&app, &frame);
+            assert!(
+                report.max_severity() < Some(Severity::Error),
+                "{name}: structural findings: {:?}",
+                report.findings()
+            );
+            let failures = match tab {
+                Tab::DeepSeek => semantic_checks(&app, &frame, panel),
+                Tab::Go => go_semantic_checks(&app, &frame),
+            };
+            assert!(failures.is_empty(), "{name}: {failures:?}");
+        }
     }
 
     /// The badge window is a second surface with its own view, so it gets its

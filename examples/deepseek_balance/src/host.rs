@@ -59,7 +59,9 @@ use winit::window::{CursorIcon, Window, WindowId, WindowLevel};
 
 use crate::api::{self, Balance};
 use crate::badge::{self, BadgeApp};
-use crate::ui::{BalanceApp, ARROW_HEIGHT};
+use crate::go::{self, GoUsage};
+use crate::settings;
+use crate::ui::{BalanceApp, Tab, ARROW_HEIGHT};
 
 #[cfg(target_os = "macos")]
 use crate::menubar;
@@ -73,10 +75,11 @@ const WINDOW_HEIGHT: f32 = 500.0;
 /// purpose: a panel hangs off a status item rather than sitting in the middle of
 /// a screen.
 const PANEL_WIDTH: f32 = 300.0;
-/// The body's height for the current content: header, status line, error line,
-/// the currency cards and the footer (hint plus the countdown row). The cards
-/// keep their own height, so this is what decides how much room the footer has.
-const PANEL_HEIGHT: f32 = 450.0;
+/// The body's height for the usual content: endpoint, status line, one currency
+/// card and the footer (hint, countdown/debug row and the refresh button). A
+/// second card is rare and taller than the panel — it was always clipped — so
+/// the footer is kept compact to leave the button on screen.
+const PANEL_HEIGHT: f32 = 470.0;
 /// Gap between the status item and the top of the panel window, in logical
 /// pixels. Zero: the window's top edge *is* the arrow's tip, so the wedge
 /// touches the menu bar the way a system popover's does.
@@ -176,6 +179,8 @@ pub struct Options {
 pub enum UserEvent {
     /// A finished balance query.
     Balance(Result<Balance, String>),
+    /// A finished OpenCode Go usage query.
+    GoUsage(Result<GoUsage, String>),
     /// A click on the status item (macOS menu-bar mode).
     #[cfg(target_os = "macos")]
     Tray(tray_icon::TrayIconEvent),
@@ -388,6 +393,20 @@ impl TextMeasurer for BackendTextMeasurer {
     }
 }
 
+/// Whether a text slot holds anything (the view's error lines start empty).
+fn has_text(text: Option<&str>) -> bool {
+    text.is_some_and(|text| !text.is_empty())
+}
+
+/// The badge title and value prefix for `tab`: the two surfaces that echo the
+/// active page must agree on which one it is.
+fn badge_labels(tab: Tab) -> (&'static str, &'static str) {
+    match tab {
+        Tab::DeepSeek => (badge::TITLE, badge::BALANCE_PREFIX),
+        Tab::Go => (badge::GO_TITLE, badge::GO_PREFIX),
+    }
+}
+
 /// Owns the window, surface, backend and view state.
 struct App {
     instance: wgpu::Instance,
@@ -466,6 +485,10 @@ impl App {
         if let Some(seconds) = options.min_gap {
             view.set_min_refresh_gap(Duration::from_secs(seconds));
         }
+        // Open on whichever tab was last used; a missing or bad settings file
+        // just leaves the view's own default (DeepSeek).
+        let last_tab = settings::load().unwrap_or(Tab::DeepSeek);
+        view.select_tab(last_tab);
 
         Self {
             instance: wgpu::Instance::default(),
@@ -761,11 +784,15 @@ impl App {
         }));
         // In menu-bar mode the on-open refresh is already in flight by the time
         // this window exists, so the badge shows what the view is already doing
-        // instead of an idle that was never true.
+        // instead of an idle that was never true. It starts on the active tab,
+        // which is the one the settings file remembered.
+        let (title, prefix) = badge_labels(self.view.tab());
         if self.view.is_loading() {
-            let line = badge::State::Loading.line();
-            view.set_state(badge::State::Loading);
-            self.trace(&format!("徽章初始行 {line}"));
+            let line = badge::State::Loading.line(prefix);
+            view.show(title, prefix, &badge::State::Loading);
+            self.trace(&format!("徽章初始 {title} → {line}"));
+        } else {
+            view.show(title, prefix, &badge::State::Idle);
         }
 
         // Bottom-left corner of the primary monitor, flush with both edges.
@@ -1109,20 +1136,28 @@ impl App {
         self.trace(&format!("状态栏项报告 {tray:?}{ready}"));
     }
 
-    /// Mirrors the view into the status item: the total as the title, the state
-    /// line as the tooltip.
+    /// Mirrors the view into the status item: the active tab's headline as the
+    /// title, its state line as the tooltip.
     #[cfg(target_os = "macos")]
     fn sync_menubar(&self) {
         let Some(item) = self.menu.item.as_ref() else {
             return;
         };
-        let title = match self.view.last_balance() {
-            Some(balance) => balance.headline(),
-            None => menubar::TITLE_IDLE.to_string(),
-        };
+        let title = self
+            .active_headline()
+            .unwrap_or_else(|| menubar::TITLE_IDLE.to_string());
         item.set_title(&title);
         item.set_tooltip(&self.view.summary());
         self.trace(&format!("状态栏标题 → {title}"));
+    }
+
+    /// The compact value for the menu-bar item, from the active tab: the
+    /// DeepSeek total (`¥110.00`) or the Go rolling remainder (`Go 88%`).
+    fn active_headline(&self) -> Option<String> {
+        match self.view.tab() {
+            Tab::DeepSeek => self.view.last_balance().map(Balance::headline),
+            Tab::Go => self.view.last_go().map(GoUsage::headline),
+        }
     }
 
     // -- frame -------------------------------------------------------------
@@ -1164,6 +1199,7 @@ impl App {
     fn tick(&mut self) {
         let dt = self.frame_delta();
         let viewport = self.viewport();
+        let tab = self.view.tab();
         if self.view.update(viewport, dt) {
             // The button's label is the throttle made visible, and the menu item
             // carries the same state — narrating both is how a run without
@@ -1177,39 +1213,83 @@ impl App {
             // still there is nothing else guaranteed to schedule one.
             self.request_redraw();
         }
+        if self.view.tab() != tab {
+            self.on_tab_changed();
+        }
         if self.view.take_refresh_request() {
             // The badge narrates the same request: it flips to "刷新中…" now and
             // back to a value when *this* request comes home.
-            self.show_badge(badge::State::Loading);
-            self.spawn_fetch();
+            self.refresh_badge();
+            self.spawn_fetches();
         }
     }
 
-    /// Hands a finished request to every window that shows it.
+    /// A tab switch: remember it, and move the surfaces that echo the active
+    /// page — the status item and the badge.
+    fn on_tab_changed(&mut self) {
+        let tab = self.view.tab();
+        settings::save(tab);
+        #[cfg(target_os = "macos")]
+        self.sync_menubar();
+        self.refresh_badge();
+        self.trace(&format!("标签页 → {}", tab.label()));
+    }
+
+    /// Hands a finished DeepSeek request to every window that shows it.
     ///
     /// The refresh itself stays where it was — the main view asks for it and
-    /// [`App::tick`] spawns the one fetch — so this is only about the *result*:
+    /// [`App::tick`] spawns the fetches — so this is only about the *result*:
     /// the main view and the badge read the same one, which is why the two
     /// windows can never disagree and why the badge needs no endpoint, no
     /// worker and no timer of its own.
     fn apply_result(&mut self, result: Result<Balance, String>) {
-        self.view.apply_result(result.clone());
-        self.show_badge(badge::State::from_result(&result));
+        self.view.apply_result(result);
+        self.refresh_badge();
     }
 
-    /// Pushes a state onto the badge window: rewrite its view, then ask for its
-    /// frame — the badge, like everything else here, only redraws when told. A
-    /// no-op when the run has no badge.
-    fn show_badge(&mut self, state: badge::State) {
+    /// The state the badge should show for the active tab.
+    ///
+    /// Ordered like the menu-bar title: a value already in hand wins over a
+    /// refresh in flight (the badge, like the panel, keeps the last good number
+    /// while the next one is fetched), then a failure before there was ever a
+    /// value, then loading, then idle.
+    fn active_badge_state(&self) -> badge::State {
+        // `(headline, error, loading)` for the active tab.
+        let value = match self.view.tab() {
+            Tab::DeepSeek => self.view.last_balance().map(Balance::headline),
+            Tab::Go => self.view.last_go().map(GoUsage::headline),
+        };
+        if let Some(headline) = value {
+            return badge::State::Ready(headline);
+        }
+        let error = match self.view.tab() {
+            Tab::DeepSeek => self.view.error_text(),
+            Tab::Go => self.view.go_error_text(),
+        };
+        if has_text(error) {
+            badge::State::Failed
+        } else if self.view.is_loading() {
+            badge::State::Loading
+        } else {
+            badge::State::Idle
+        }
+    }
+
+    /// Pushes the active tab onto the badge window: rewrite its view, then ask
+    /// for its frame — the badge, like everything else here, only redraws when
+    /// told. A no-op when the run has no badge.
+    fn refresh_badge(&mut self) {
+        let (title, prefix) = badge_labels(self.view.tab());
+        let state = self.active_badge_state();
         // The line first: `trace` needs `&self` and the badge borrow below needs
         // `&mut self`.
-        let line = state.line();
+        let line = state.line(prefix);
         let Some(badge) = self.badge.as_mut() else {
             return;
         };
-        badge.view.set_state(state);
+        badge.view.show(title, prefix, &state);
         badge.window.request_redraw();
-        self.trace(&format!("徽章余额行 → {line}"));
+        self.trace(&format!("徽章 {title} → {line}"));
     }
 
     /// Mirrors the throttle onto the status item's `刷新余额`, and returns a
@@ -1324,13 +1404,23 @@ impl App {
         }
     }
 
-    /// Queries the endpoint on a worker thread and posts the result back.
+    /// Queries every source on worker threads and posts the results back.
+    ///
+    /// One refresh means one query per source, each on its own thread, so a slow
+    /// endpoint cannot hold up the other. They post distinct events and the view
+    /// leaves `Busy` only when the last one lands.
+    fn spawn_fetches(&self) {
+        self.spawn_balance_fetch();
+        self.spawn_go_fetch();
+    }
+
+    /// Queries the DeepSeek balance endpoint on a worker thread.
     ///
     /// Both the endpoint and the API key are re-read per request, so a variable
     /// configured after launch (e.g. written to `~/.zshrc`) is picked up by the
     /// next refresh instead of requiring a restart. An unconfigured key never
     /// touches the network: the view gets the "未配置" error instead.
-    fn spawn_fetch(&self) {
+    fn spawn_balance_fetch(&self) {
         let proxy = self.proxy.clone();
         let endpoint = api::endpoint();
         self.trace(&format!("发起请求 {endpoint}"));
@@ -1343,6 +1433,23 @@ impl App {
             };
             // A closed loop (window gone) just drops the result.
             let _ = proxy.send_event(UserEvent::Balance(result));
+        });
+    }
+
+    /// Queries the OpenCode Go usage endpoint on a worker thread.
+    ///
+    /// Same shape as [`App::spawn_balance_fetch`], with the key coming from the
+    /// opencode `auth.json` first (see [`crate::go::resolve_api_key`]).
+    fn spawn_go_fetch(&self) {
+        let proxy = self.proxy.clone();
+        let endpoint = go::endpoint();
+        self.trace(&format!("发起请求 {endpoint}"));
+        std::thread::spawn(move || {
+            let result = match go::resolve_api_key() {
+                Ok(api_key) => go::fetch(&endpoint, &api_key),
+                Err(message) => Err(message),
+            };
+            let _ = proxy.send_event(UserEvent::GoUsage(result));
         });
     }
 
@@ -1561,6 +1668,12 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 self.apply_result(result);
+                #[cfg(target_os = "macos")]
+                self.sync_menubar();
+            }
+            UserEvent::GoUsage(result) => {
+                self.view.apply_go_result(result);
+                self.refresh_badge();
                 #[cfg(target_os = "macos")]
                 self.sync_menubar();
             }

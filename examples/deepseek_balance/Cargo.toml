@@ -15,6 +15,8 @@ path = "src/main.rs"
 ureq = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 时间/货币这类与网络、UI 无关的小工具，单独成 crate（见 util/）。
+deepseek_util = { path = "util" }
 
 # The window UI is built with the workspace's own layers (see AGENTS.md).
 draw_core = { path = "../../crates/draw_core" }
@@ -37,5 +39,7 @@ winit = "0.30"
 tray-icon = "0.24"
 
 # 独立的小工具：不加入主 workspace，避免影响 cargo check --workspace 关卡。
-# 它只以 path 依赖引用工作区的 crate，工作区本身看不到这个包。
+# 它只以 path 依赖引用工作区的 crate，工作区本身看不到这个包。`util` 是它自己的
+# 子 crate（时间/货币等通用小工具），只跟随这个小项目。
 [workspace]
+members = ["util"]

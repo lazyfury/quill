@@ -1,6 +1,9 @@
-//! 查询 DeepSeek 账户余额的小工具。
+//! 查询 DeepSeek 账户余额与 OpenCode Go 配额的小工具。
 //!
-//! 三个前端，同一份数据层（[`api`]）：
+//! 面板是两个标签页：`DeepSeek 余额` 和 `OpenCode Go`（滚动 5 小时 / 本周 /
+//! 本月的剩余百分比与重置倒计时）。一次刷新同时查询两个来源。
+//!
+//! 三个前端，同一份数据层（[`api`] / [`go`]）：
 //!
 //! - 默认（macOS）：**菜单栏应用** —— 状态栏显示余额，左键弹出面板，右键菜单。
 //!   用本仓库自己的 UI 栈（`draw_theme` / `draw_components` / `draw_ui`
@@ -27,10 +30,12 @@
 
 mod api;
 mod badge;
+mod go;
 mod host;
 #[cfg(target_os = "macos")]
 mod menubar;
 mod selfcheck;
+mod settings;
 mod ui;
 
 use host::Options;
@@ -49,6 +54,8 @@ deepseek_balance — 查询 DeepSeek 账户余额
       --selfcheck      无头自检：同一套 UI 绘制进 RecordingBackend，
                        用 draw_profile 体检 + 断言关键内容，失败退出码 1
       --dump           同 --selfcheck，并打印完整 UI 树与每条绘制命令
+      --dump-tree      同 --selfcheck，只打印 UI 树
+      --dump-commands  同 --selfcheck，只打印每条绘制命令
       --light          使用浅色主题（默认深色）
       --pixel-font     使用内置点阵字体（默认系统字体；点阵字体不含中文）
       --every <秒>     自动刷新间隔，0 表示不自动刷新（菜单栏默认 300 秒）
@@ -58,19 +65,28 @@ deepseek_balance — 查询 DeepSeek 账户余额
   -h, --help           显示本帮助
 
 环境变量:
-  DEEPSEEK_API_KEY       API key（不设默认值；未配置时提示，刷新时重新读取，
-                         包括向登录 shell 询问，配置后无需重启）
+  DEEPSEEK_API_KEY       DeepSeek API key（不设默认值；未配置时提示，刷新时
+                         重新读取，包括向登录 shell 询问，配置后无需重启）
   DEEPSEEK_BALANCE_URL   覆盖默认的 https://api.deepseek.com/user/balance
+  OPENCODE_GO_API_KEY    OpenCode Go 密钥；未设置时读
+                         ~/.local/share/opencode/auth.json 的 opencode-go 项
+  OPENCODE_GO_USAGE_URL  覆盖默认的 https://opencode.ai/zen/go/v1/usage
 
 用法（macOS 菜单栏）:
   左键状态栏项            打开 / 收起余额面板
-  右键状态栏项            刷新余额 / 暂停·继续自动刷新 / 打开面板 / 退出
-  面板内 R / F5           刷新余额
+  右键状态栏项            刷新 / 暂停·继续自动刷新 / 打开面板 / 退出
+  面板内 标签             在 DeepSeek 余额与 OpenCode Go 之间切换
+  面板内 R / F5           刷新（两个来源一起查）
   面板内 Esc              收起面板
 
 用法（--window）:
-  R / F5                 刷新余额
+  标签                   切换 DeepSeek / OpenCode Go
+  R / F5                 刷新（两个来源一起查）
   关闭按钮                退出
+
+设置:
+  上次打开的标签页记在 ~/.config/deepseek_balance/settings.json
+  （可用 DEEPSEEK_BALANCE_SETTINGS 改路径），下次启动回到该标签页
 ";
 
 /// 解析后的命令行。
@@ -80,8 +96,8 @@ enum Command {
     /// 打印文本结果。
     Cli,
     /// 无头自检：绘制进 RecordingBackend 并检查，不联网、不开窗。
-    /// `dump` 额外打印完整 UI 树与全部绘制命令。
-    SelfCheck { dump: bool },
+    /// `dump` 选择额外打印 UI 树、绘制命令，或两者。
+    SelfCheck { dump: selfcheck::Dump },
     /// 打印帮助。
     Help,
 }
@@ -120,8 +136,26 @@ fn parse(args: &[String]) -> Result<Command, String> {
         index += 1;
         match arg {
             "--cli" => cli = true,
-            "--selfcheck" => return Ok(Command::SelfCheck { dump: false }),
-            "--dump" => return Ok(Command::SelfCheck { dump: true }),
+            "--selfcheck" => {
+                return Ok(Command::SelfCheck {
+                    dump: selfcheck::Dump::None,
+                })
+            }
+            "--dump" => {
+                return Ok(Command::SelfCheck {
+                    dump: selfcheck::Dump::All,
+                })
+            }
+            "--dump-tree" => {
+                return Ok(Command::SelfCheck {
+                    dump: selfcheck::Dump::Tree,
+                })
+            }
+            "--dump-commands" => {
+                return Ok(Command::SelfCheck {
+                    dump: selfcheck::Dump::Commands,
+                })
+            }
             "--window" => options.window = true,
             "--badge" => options.badge = true,
             "--light" => options.light = true,
@@ -178,7 +212,7 @@ fn run_cli() {
     match result {
         Ok(balance) => {
             println!("DeepSeek 余额查询结果");
-            println!("更新于 {}", api::timestamp());
+            println!("更新于 {}", deepseek_util::time::timestamp());
             println!("is_available: {}", balance.is_available);
             for info in &balance.balance_infos {
                 println!("currency: {}", info.currency);
@@ -213,6 +247,7 @@ mod tests {
                 assert!(!options.window, "the menu bar is the default on macOS");
                 assert_eq!(options.every, None);
                 assert_eq!(options.min_gap, None, "the view's own default applies");
+                assert!(options.badge, "the second (badge) window is on by default");
             }
             _ => panic!("expected a window run"),
         }
@@ -224,19 +259,23 @@ mod tests {
     }
 
     #[test]
-    fn selfcheck_flag_selects_the_headless_check() {
+    fn selfcheck_and_dump_flags_select_the_headless_check() {
         assert!(matches!(
             parse(&args(&["--selfcheck"])),
-            Ok(Command::SelfCheck { dump: false })
+            Ok(Command::SelfCheck {
+                dump: selfcheck::Dump::None
+            })
         ));
-    }
-
-    #[test]
-    fn dump_flag_selects_the_headless_check_with_a_full_dump() {
-        assert!(matches!(
-            parse(&args(&["--dump"])),
-            Ok(Command::SelfCheck { dump: true })
-        ));
+        for (flag, dump) in [
+            ("--dump", selfcheck::Dump::All),
+            ("--dump-tree", selfcheck::Dump::Tree),
+            ("--dump-commands", selfcheck::Dump::Commands),
+        ] {
+            assert!(
+                matches!(parse(&args(&[flag])), Ok(Command::SelfCheck { dump: d }) if d == dump),
+                "{flag}"
+            );
+        }
     }
 
     #[test]
@@ -266,22 +305,6 @@ mod tests {
         }
     }
 
-    /// The badge rides along by default: the multi-window path is what this tool
-    /// is a test bed for, so an ordinary run opens both windows. `--badge` is
-    /// kept as an explicit way to say the same thing (a script can pass it and
-    /// not care whether the default ever changes back).
-    #[test]
-    fn the_badge_window_is_on_by_default() {
-        match parse(&args(&[])) {
-            Ok(Command::Run(options)) => assert!(options.badge, "badge on by default"),
-            _ => panic!("expected a window run"),
-        }
-        match parse(&args(&["--badge"])) {
-            Ok(Command::Run(options)) => assert!(options.badge),
-            _ => panic!("expected a window run"),
-        }
-    }
-
     #[test]
     fn help_wins() {
         assert!(matches!(parse(&args(&["--help"])), Ok(Command::Help)));
@@ -299,18 +322,15 @@ mod tests {
         assert!(parse(&args(&["--min-gap", "-1"])).is_err());
     }
 
+    /// A zero second value is accepted and means "off", not "unset":
+    /// `--every 0` turns the timer off, `--min-gap 0` turns the throttle off (so
+    /// a scripted run really sends every request).
     #[test]
-    fn every_zero_is_accepted_as_off() {
+    fn zero_seconds_mean_off_not_unset() {
         match parse(&args(&["--every", "0"])) {
             Ok(Command::Run(options)) => assert_eq!(options.every, Some(0)),
             _ => panic!("expected a window run"),
         }
-    }
-
-    /// `--min-gap 0` is not the same as leaving it out: it means "no throttle",
-    /// which a scripted run needs so every request really goes out.
-    #[test]
-    fn min_gap_zero_is_accepted_as_no_throttle() {
         match parse(&args(&["--min-gap", "0"])) {
             Ok(Command::Run(options)) => assert_eq!(options.min_gap, Some(0)),
             _ => panic!("expected a window run"),

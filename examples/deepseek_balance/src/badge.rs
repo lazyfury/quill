@@ -10,8 +10,9 @@
 //! # 数据从哪来
 //!
 //! 徽章**不是第二个数据源**：它没有定时器、没有 worker，也不会自己发请求。宿主把
-//! 主视图拿到的那**一份** `Result` 同时交给它（`host.rs::App::apply_result`），所以
-//! 一次刷新仍然只有一个请求在飞，两个窗口也不可能各说各话。
+//! 主视图拿到的那**一份**状态交给它（`host.rs::App::refresh_badge`），标题、前缀和
+//! 数值随当前标签页（DeepSeek 余额 / OpenCode Go 余量）切换，所以两个窗口不可能
+//! 各说各话。
 //!
 //! 与主窗口/面板一样，它不碰窗口、不碰网络 —— 自己的 window / surface /
 //! backend 由宿主 `host.rs` 提供；拿到后端的真实字体度量后，布局引擎负责排版。
@@ -40,10 +41,14 @@ pub const CONTENT_PADDING: f32 = space::LG;
 /// 两行之间的间距。
 pub const LINE_GAP: f32 = space::XXXS;
 
-/// 标题行。
+/// DeepSeek 标签页的标题行。
 pub const TITLE: &str = "Deepseek";
-/// 余额行的前缀。
+/// DeepSeek 余额行的前缀。
 pub const BALANCE_PREFIX: &str = "余额：";
+/// OpenCode Go 标签页的标题行。
+pub const GO_TITLE: &str = "OpenCode Go";
+/// OpenCode Go 余量行的前缀。
+pub const GO_PREFIX: &str = "余量：";
 /// 还没拿到第一份回复时的占位值（与主视图同一套文案）。
 pub const IDLE: &str = "—";
 /// 请求在途。
@@ -51,36 +56,40 @@ pub const LOADING: &str = "刷新中…";
 /// 上一次请求失败。
 pub const FAILED: &str = "刷新失败";
 
-/// 余额行显示什么。
+/// 数值行显示什么（不含前缀）。
 ///
-/// 这是**视图状态**，不是数据源：宿主把同一个请求结果同时喂给主视图和这里
-/// （`host.rs::App::apply_result`），也用它标记「请求已发出」，所以徽章自己
-/// 不取数、不排期。
+/// 这是**视图状态**，不是数据源：宿主把同一个请求结果同时喂给主视图和这里，
+/// 也用它标记「请求已发出」，所以徽章自己不取数、不排期。标题和前缀由宿主按
+/// 当前标签页给（`show`），同一份状态因此能画成 DeepSeek 余额或 Go 余量。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum State {
     /// 还没刷新过。
     Idle,
     /// 请求在途。
     Loading,
-    /// 拿到回复，值是 [`Balance::headline`] —— 和状态栏同一串字。
+    /// 拿到回复，值是 [`Balance::headline`] / [`crate::go::GoUsage::headline`]。
     Ready(String),
     /// 上一次请求失败。
     Failed,
 }
 
 impl State {
-    /// 整行文案，例如 `余额：¥110.00`。
-    pub fn line(&self) -> String {
-        let value = match self {
+    /// 数值本身，例如 `¥110.00`。
+    pub fn value(&self) -> &str {
+        match self {
             State::Idle => IDLE,
             State::Loading => LOADING,
             State::Ready(headline) => headline.as_str(),
             State::Failed => FAILED,
-        };
-        format!("{BALANCE_PREFIX}{value}")
+        }
     }
 
-    /// 从一个已经完成的请求取状态 —— 宿主拿到什么就传什么。
+    /// 整行文案，例如 `余额：¥110.00`。
+    pub fn line(&self, prefix: &str) -> String {
+        format!("{prefix}{}", self.value())
+    }
+
+    /// 从一个已经完成的 DeepSeek 请求取状态 —— 宿主拿到什么就传什么。
     pub fn from_result(result: &Result<Balance, String>) -> Self {
         match result {
             Ok(balance) => State::Ready(balance.headline()),
@@ -93,7 +102,9 @@ impl State {
 pub struct BadgeApp {
     tree: SceneTree,
     theme: Theme,
-    /// 余额行节点：换数据就是往它写一次文本。
+    /// 标题行节点：切标签页时改写它。
+    title: NodeId,
+    /// 数值行节点：换数据就是往它写一次文本。
     balance: NodeId,
 }
 
@@ -104,14 +115,15 @@ impl BadgeApp {
     /// leaves the window's transparent clear colour showing through as the
     /// badge's background.
     pub fn new(theme: Theme) -> Self {
+        let title = NodeRef::new();
         let balance = NodeRef::new();
         let content = Column::new()
             .padding(Edges::all(CONTENT_PADDING))
             .gap(LINE_GAP)
             .mouse_filter(MouseFilter::Ignore)
-            .child(Text::heading(TITLE, theme).color(Color::WHITE))
+            .child(Text::heading(TITLE, theme).color(Color::WHITE).ref_(&title))
             .child(
-                Text::new(State::Idle.line(), theme)
+                Text::new(State::Idle.line(BALANCE_PREFIX), theme)
                     .size(TextSize::Subheading)
                     .color(Color::WHITE)
                     .ref_(&balance),
@@ -123,6 +135,7 @@ impl BadgeApp {
         Self {
             tree,
             theme,
+            title: title.get().expect("the title line is mounted"),
             balance: balance.get().expect("the balance line is mounted"),
         }
     }
@@ -137,21 +150,25 @@ impl BadgeApp {
         &self.tree
     }
 
-    /// The balance line as it stands (what the next frame would paint).
+    /// The title line as it stands.
+    #[cfg(test)]
+    pub fn title_text(&self) -> Option<&str> {
+        draw_ui::widget(&self.tree, self.title).and_then(|widget| widget.text())
+    }
+
+    /// The value line as it stands (what the next frame would paint).
     pub fn balance_text(&self) -> Option<&str> {
         draw_ui::widget(&self.tree, self.balance).and_then(|widget| widget.text())
     }
 
-    /// Mirrors a finished request onto the badge. The host calls this with the
-    /// very same `Result` it hands the main view, from the same one fetch.
-    pub fn apply_result(&mut self, result: &Result<Balance, String>) {
-        self.set_state(State::from_result(result));
-    }
-
-    /// Shows `state` — the other half of the same handshake, for a request that
-    /// is still in flight.
-    pub fn set_state(&mut self, state: State) {
-        draw_components::set_text(&mut self.tree, self.balance, state.line());
+    /// Shows the active tab: its title, its value prefix and the state.
+    ///
+    /// The host calls this with the very same `Result` it hands the main view,
+    /// so the two windows cannot disagree, and with the loading/failed states
+    /// around it.
+    pub fn show(&mut self, title: &str, prefix: &str, state: &State) {
+        draw_components::set_text(&mut self.tree, self.title, title);
+        draw_components::set_text(&mut self.tree, self.balance, state.line(prefix));
     }
 
     /// Installs the backend's real font metrics so measured text matches
@@ -248,7 +265,7 @@ mod tests {
         let lines = lines(&commands);
         assert_eq!(lines.len(), 2, "one line per text node");
         assert_eq!(lines[0].0, TITLE);
-        assert_eq!(lines[1].0, State::Idle.line());
+        assert_eq!(lines[1].0, State::Idle.line(BALANCE_PREFIX));
         assert_eq!(
             lines[0].1.x, CONTENT_PADDING,
             "the text starts at the content padding"
@@ -305,21 +322,42 @@ mod tests {
         }
     }
 
-    /// The balance line answers to its ref: a new result is one `set_text` away,
-    /// and every state has a line of its own.
+    /// The value line answers to its ref: a new state is one `show` away, and
+    /// every state has a line of its own.
     #[test]
     fn the_balance_line_follows_the_state() {
         let mut app = BadgeApp::new(Theme::dark());
-        assert_eq!(app.balance_text(), Some(State::Idle.line().as_str()));
+        assert_eq!(
+            app.balance_text(),
+            Some(State::Idle.line(BALANCE_PREFIX).as_str())
+        );
 
-        app.set_state(State::Loading);
-        assert_eq!(app.balance_text(), Some(State::Loading.line().as_str()));
+        app.show(TITLE, BALANCE_PREFIX, &State::Loading);
+        assert_eq!(
+            app.balance_text(),
+            Some(State::Loading.line(BALANCE_PREFIX).as_str())
+        );
 
-        app.apply_result(&Ok(reply()));
+        let ready = State::from_result(&Ok(reply()));
+        app.show(TITLE, BALANCE_PREFIX, &ready);
         assert_eq!(app.balance_text(), Some("余额：¥110.00"));
 
-        app.apply_result(&Err("连接超时".to_string()));
-        assert_eq!(app.balance_text(), Some(State::Failed.line().as_str()));
+        let failed = State::from_result(&Err("连接超时".to_string()));
+        app.show(TITLE, BALANCE_PREFIX, &failed);
+        assert_eq!(
+            app.balance_text(),
+            Some(State::Failed.line(BALANCE_PREFIX).as_str())
+        );
+    }
+
+    /// The Go tab reuses the same handshake with its own title and prefix, so
+    /// the second window follows whichever page is active.
+    #[test]
+    fn the_badge_can_show_the_go_tab() {
+        let mut app = BadgeApp::new(Theme::dark());
+        app.show(GO_TITLE, GO_PREFIX, &State::Ready("Go 88%".to_string()));
+        assert_eq!(app.title_text(), Some(GO_TITLE));
+        assert_eq!(app.balance_text(), Some("余量：Go 88%"));
     }
 
     /// The point of the handshake: a result the host applied reaches the pixels.
@@ -327,7 +365,8 @@ mod tests {
     #[test]
     fn an_applied_result_reaches_the_frame() {
         let mut app = BadgeApp::new(Theme::dark());
-        app.apply_result(&Ok(reply()));
+        let ready = State::from_result(&Ok(reply()));
+        app.show(TITLE, BALANCE_PREFIX, &ready);
         assert_eq!(lines(&frame_of(&mut app))[1].0, "余额：¥110.00");
     }
 
@@ -349,7 +388,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(labels, vec![TITLE.to_string(), State::Idle.line()]);
+        assert_eq!(
+            labels,
+            vec![TITLE.to_string(), State::Idle.line(BALANCE_PREFIX)]
+        );
     }
 
     /// Dark is a token swap, not a second code path: same tree, same commands.

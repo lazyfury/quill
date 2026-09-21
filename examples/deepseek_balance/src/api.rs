@@ -4,6 +4,7 @@
 //! blocking call, so the window host can run it on a worker thread while the UI
 //! keeps painting, and the headless UI tests never touch the network.
 
+use deepseek_util::currency::symbol;
 use serde::Deserialize;
 
 /// Balance endpoint used when `DEEPSEEK_BALANCE_URL` is not set.
@@ -44,18 +45,6 @@ impl Balance {
             Some(info) => format!("{}{}", symbol(&info.currency), info.total_balance),
             None => "无余额信息".to_string(),
         }
-    }
-}
-
-/// Currency code to symbol, falling back to the code itself.
-fn symbol(currency: &str) -> String {
-    match currency {
-        "CNY" | "RMB" => "¥".to_string(),
-        "USD" => "$".to_string(),
-        "EUR" => "€".to_string(),
-        "HKD" => "HK$".to_string(),
-        // An unknown code needs a separator, or `JPY1000` reads as one token.
-        other => format!("{other} "),
     }
 }
 
@@ -107,7 +96,7 @@ pub fn resolve_api_key() -> Result<String, String> {
 
 /// Trims surrounding whitespace and drops empty results, so a blank or
 /// newline-padded value counts as unconfigured rather than a bad key.
-fn non_blank(value: Option<String>) -> Option<String> {
+pub(crate) fn non_blank(value: Option<String>) -> Option<String> {
     value
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty())
@@ -146,7 +135,9 @@ const MAX_ERROR_DETAIL_CHARS: usize = 160;
 /// `error.message` is the human-readable reason; showing the body verbatim
 /// puts a dense JSON line on screen. Anything else is shown trimmed. Either
 /// way the result is capped to [`MAX_ERROR_DETAIL_CHARS`].
-fn error_detail(body: &str) -> String {
+///
+/// Shared with [`crate::go`], whose endpoint reports failures the same way.
+pub(crate) fn error_detail(body: &str) -> String {
     let detail = serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|value| {
@@ -168,35 +159,6 @@ fn truncate_chars(text: &str, max: usize) -> String {
     } else {
         format!("{}…", text.chars().take(max).collect::<String>())
     }
-}
-
-/// Shanghai keeps UTC+8 all year (no DST since 1991), so a fixed offset is exact
-/// and the tool needs no timezone database.
-pub const SHANGHAI_OFFSET_SECONDS: i64 = 8 * 3_600;
-
-/// `HH:MM:SS UTC+8` wall-clock stamp for the "refreshed at" line.
-///
-/// Pure `std`: the tool has no date crate, and a fixed offset is enough (see
-/// [`SHANGHAI_OFFSET_SECONDS`]).
-pub fn timestamp() -> String {
-    timestamp_at(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_secs() as i64)
-            .unwrap_or(0),
-    )
-}
-
-/// [`timestamp`] for a given epoch-second value, so the day boundaries stay
-/// testable without a clock.
-pub fn timestamp_at(epoch_seconds: i64) -> String {
-    let seconds_of_day = (epoch_seconds + SHANGHAI_OFFSET_SECONDS).rem_euclid(86_400);
-    format!(
-        "{:02}:{:02}:{:02} UTC+8",
-        seconds_of_day / 3_600,
-        (seconds_of_day % 3_600) / 60,
-        seconds_of_day % 60
-    )
 }
 
 #[cfg(test)]
@@ -233,50 +195,22 @@ mod tests {
         assert!(error.contains("解析响应失败"), "{error}");
     }
 
-    #[test]
-    fn timestamp_is_a_clock_stamp() {
-        let stamp = timestamp();
-        assert_eq!(stamp.len(), "00:00:00 UTC+8".len(), "{stamp}");
-        assert!(stamp.ends_with(" UTC+8"), "{stamp}");
-    }
-
-    #[test]
-    fn the_stamp_is_eight_hours_ahead_of_utc() {
-        // Epoch 0 is 1970-01-01T00:00:00Z -> 08:00:00 in Shanghai.
-        assert_eq!(timestamp_at(0), "08:00:00 UTC+8");
-        assert_eq!(timestamp_at(3_600), "09:00:00 UTC+8");
-    }
-
-    #[test]
-    fn the_stamp_wraps_at_shanghai_midnight() {
-        // 16:00:00 UTC is exactly midnight in Shanghai.
-        assert_eq!(timestamp_at(16 * 3_600), "00:00:00 UTC+8");
-        // 23:59:59 UTC has already rolled over to the next Shanghai day.
-        assert_eq!(timestamp_at(86_400 - 1), "07:59:59 UTC+8");
-        // Pre-epoch values stay inside the day instead of going negative.
-        assert_eq!(timestamp_at(-3_600), "07:00:00 UTC+8");
-    }
-
+    /// The headline is the symbol plus the amount: a known currency (the first
+    /// entry only), an unknown code, and an empty reply all have an answer.
     #[test]
     fn the_headline_is_symbol_plus_amount() {
         let balance = Balance::parse(SAMPLE).expect("valid reply");
         assert_eq!(balance.headline(), "¥110.00");
-    }
 
-    #[test]
-    fn the_headline_names_an_unknown_currency() {
-        let mut balance = Balance::parse(SAMPLE).expect("valid reply");
-        balance.balance_infos[0].currency = "JPY".to_string();
-        assert_eq!(balance.headline(), "JPY 110.00");
-    }
+        let mut unknown = balance.clone();
+        unknown.balance_infos[0].currency = "JPY".to_string();
+        assert_eq!(unknown.headline(), "JPY 110.00");
 
-    #[test]
-    fn an_empty_reply_still_has_a_headline() {
-        let balance = Balance {
+        let empty = Balance {
             is_available: false,
             balance_infos: Vec::new(),
         };
-        assert_eq!(balance.headline(), "无余额信息");
+        assert_eq!(empty.headline(), "无余额信息");
     }
 
     #[test]
@@ -284,7 +218,10 @@ mod tests {
         assert_eq!(non_blank(None), None);
         assert_eq!(non_blank(Some(String::new())), None);
         assert_eq!(non_blank(Some("   ".to_string())), None);
-        assert_eq!(non_blank(Some("sk-test".to_string())), Some("sk-test".into()));
+        assert_eq!(
+            non_blank(Some("sk-test".to_string())),
+            Some("sk-test".into())
+        );
         assert_eq!(
             non_blank(Some("  sk-test\n".to_string())),
             Some("sk-test".into())
