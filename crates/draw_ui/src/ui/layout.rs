@@ -265,6 +265,36 @@ impl Ui {
         result
     }
 
+    /// Cross-axis size of a flex child once its main size is known.
+    ///
+    /// A child is first measured with the container's content size (to resolve
+    /// its basis). It is then measured again with that **resolved main size**, so
+    /// cross content that depends on the main axis — soft-wrapped text — reports
+    /// the size it will actually need rather than the size for the container.
+    /// Without this, a fixed-width card measures its text at the parent's width
+    /// and comes out too short once it is placed at its real (narrower) width.
+    fn flex_cross_size(
+        &self,
+        tree: &SceneTree,
+        cache: &mut LayoutCache,
+        child: NodeId,
+        available: Size,
+        horizontal: bool,
+        main: f32,
+    ) -> f32 {
+        let sized = if horizontal {
+            Size::new(main, available.height)
+        } else {
+            Size::new(available.width, main)
+        };
+        let measured = self.measure_node(tree, cache, child, sized);
+        if horizontal {
+            measured.preferred.height
+        } else {
+            measured.preferred.width
+        }
+    }
+
     fn measure_flex(
         &self,
         tree: &SceneTree,
@@ -293,23 +323,22 @@ impl Ui {
         for (index, child) in children.iter().enumerate() {
             let measured = self.measure_node(tree, cache, *child, inner);
             let layout = self.layout_style(tree, *child);
-            let (p_main, p_cross, c_min_main, c_min_cross) = if horizontal {
+            let (p_main, c_min_main, c_min_cross) = if horizontal {
                 (
                     measured.preferred.width,
-                    measured.preferred.height,
                     measured.min.width,
                     measured.min.height,
                 )
             } else {
                 (
                     measured.preferred.height,
-                    measured.preferred.width,
                     measured.min.height,
                     measured.min.width,
                 )
             };
             let basis =
                 resolve_basis(layout.basis, p_main, inner_main(horizontal, inner)).max(c_min_main);
+            let p_cross = self.flex_cross_size(tree, cache, *child, inner, horizontal, basis);
             let gap = if index == 0 { 0.0 } else { style.gap };
             pref_main += basis + gap;
             // A wrapping flex can break between items, so its minimum main size is
@@ -466,20 +495,14 @@ impl Ui {
         for child in &children {
             let measured = self.measure_node(tree, cache, *child, content.size);
             let layout = self.layout_style(tree, *child);
-            let (p_main, p_cross, min_main) = if horizontal {
-                (
-                    measured.preferred.width,
-                    measured.preferred.height,
-                    measured.min.width,
-                )
+            let (p_main, min_main) = if horizontal {
+                (measured.preferred.width, measured.min.width)
             } else {
-                (
-                    measured.preferred.height,
-                    measured.preferred.width,
-                    measured.min.height,
-                )
+                (measured.preferred.height, measured.min.height)
             };
             let basis = resolve_basis(layout.basis, p_main, content_main).max(min_main);
+            let p_cross =
+                self.flex_cross_size(tree, cache, *child, content.size, horizontal, basis);
             items.push(FlexItem {
                 id: *child,
                 main: basis,
@@ -1482,6 +1505,68 @@ mod tests {
             wanted.min.width <= 20.0 + 32.0,
             "min = {}",
             wanted.min.width
+        );
+    }
+
+    /// A flex item with a definite main size measures its cross content at that
+    /// size, so a fixed-width card's wrapped text still gets its full height
+    /// instead of the one-line height for the (wider) container.
+    #[test]
+    fn a_fixed_width_item_sizes_its_wrapped_text() {
+        let mut tree = SceneTree::new();
+        let tree_root = tree.root();
+        let root = add(
+            &mut tree,
+            tree_root,
+            ControlData::fill_parent(),
+            panel(Color::TRANSPARENT),
+        );
+        let row = add(
+            &mut tree,
+            root,
+            ControlData::fill_parent(),
+            Widget::Flex(FlexStyle::row().padding(Edges::ZERO).gap(0.0)),
+        );
+        let card = add(
+            &mut tree,
+            row,
+            ControlData {
+                layout: LayoutStyle {
+                    basis: SizeBasis::Px(100.0),
+                    shrink: 0.0,
+                    ..LayoutStyle::default()
+                },
+                ..ControlData::default()
+            },
+            Widget::Flex(FlexStyle::column().padding(Edges::ZERO).gap(0.0)),
+        );
+        add(
+            &mut tree,
+            card,
+            ControlData::default(),
+            Widget::Label {
+                text: "word ".repeat(20),
+                font_size: 10.0,
+                color: Color::BLACK,
+                options: crate::layout::TextOptions {
+                    wrap: true,
+                    ..Default::default()
+                },
+            },
+        );
+
+        crate::layout(&mut tree, ViewportSize::new(Size::new(600.0, 400.0)));
+        let card = crate::control(&tree, card).unwrap().rect;
+        assert!(
+            (card.size.width - 100.0).abs() < 0.5,
+            "width {}",
+            card.size.width
+        );
+        let line_h = crate::layout::line_height(10.0);
+        assert!(
+            card.size.height >= 2.0 * line_h,
+            "height {} should fit the wrapped text (one line is {line_h})",
+            card.size.height
         );
     }
 }
