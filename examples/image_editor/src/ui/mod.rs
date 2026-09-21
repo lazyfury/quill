@@ -19,6 +19,7 @@ mod file_panel;
 mod layer_panel;
 pub mod menu;
 mod options_bar;
+mod palette;
 mod properties_panel;
 mod status_bar;
 mod toolbar;
@@ -123,6 +124,7 @@ pub struct EditorView {
     tool_nodes: Vec<(ActiveTool, NodeId)>,
     /// 撤销 / 重做按钮节点（Phase 6）。
     history_nodes: Vec<(HistoryAction, NodeId)>,
+    palette_nodes: Vec<NodeId>,
     /// 文件面板的按钮节点（Phase 7）。
     file_nodes: Vec<(IoAction, NodeId)>,
     /// 导入 / 导出的路径，文件面板与内联编辑共享。
@@ -244,6 +246,7 @@ impl EditorView {
 
         let mut tool_refs: Vec<(ActiveTool, NodeRef)> = Vec::new();
         let mut history_refs: Vec<(HistoryAction, NodeRef)> = Vec::new();
+        let mut palette_refs: Vec<NodeRef> = Vec::new();
         // 图标包只加载一次；工具栏的按钮在构建时就把 `Icon` 子组件搭进去。
         let icons = Rc::new(IconSet::load());
         let toolbar = toolbar::tool_bar(
@@ -253,6 +256,7 @@ impl EditorView {
             icons.clone(),
             &mut tool_refs,
             &mut history_refs,
+            &mut palette_refs,
         );
 
         let layer_count = Rc::new(Cell::new(0usize));
@@ -393,6 +397,10 @@ impl EditorView {
             .into_iter()
             .map(|(action, slot)| (action, slot.get().expect("history button mounted")))
             .collect();
+        let palette_nodes: Vec<NodeId> = palette_refs
+            .iter()
+            .map(|slot| slot.get().expect("palette swatch mounted"))
+            .collect();
         let file_nodes: Vec<(IoAction, NodeId)> = file_refs
             .into_iter()
             .map(|(action, slot)| (action, slot.get().expect("file button mounted")))
@@ -424,6 +432,7 @@ impl EditorView {
             message_label: refs.message.get().expect("message label mounted"),
             tool_nodes,
             history_nodes,
+            palette_nodes,
             file_nodes,
             path,
             io_request,
@@ -1608,6 +1617,17 @@ impl EditorView {
             .map(|(_, id)| *id)
     }
 
+    /// 调色盘色块数量。
+    pub fn palette_swatch_count(&self) -> usize {
+        self.palette_nodes.len()
+    }
+
+    /// 调色盘第 `index` 个色块的中心点；测试与自检模拟点击用。
+    pub fn palette_swatch_center(&self, index: usize) -> Option<Vec2> {
+        let id = *self.palette_nodes.get(index)?;
+        draw_ui::control(&self.tree, id).map(|control| control.rect.center())
+    }
+
     /// 文件面板按钮的节点 id。
     pub fn file_node(&self, action: IoAction) -> Option<NodeId> {
         self.file_nodes
@@ -1973,6 +1993,32 @@ mod tests {
         let mut ctx = PaintContext::new();
         view.paint(&mut ctx);
         ctx.into_draw_list().into_commands()
+    }
+
+    #[test]
+    fn clicking_a_palette_swatch_sets_the_foreground() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('b'),
+        });
+        view.update();
+        view.layout(viewport());
+        assert_eq!(view.foreground(), Color::BLACK, "默认前景是黑");
+        assert!(view.palette_swatch_count() >= 16);
+
+        // SWATCHES[4] = (255, 0, 0)。
+        let center = view.palette_swatch_center(4).expect("swatch mounted");
+        view.event(&InputEvent::PointerDown {
+            position: center,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: center,
+            button: PointerButton::Left,
+        });
+        view.update();
+        assert_eq!(view.foreground(), Color::RED);
     }
 
     #[test]

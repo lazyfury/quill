@@ -189,7 +189,8 @@ src/
 ├── ui/
 │   ├── mod.rs           # EditorView：页面 + 文档 Node2D + 相机同步 + undo/redo
 │   ├── menu.rs          # 菜单栏
-│   ├── toolbar.rs       # 工具栏（工具 + 撤销/重做）
+│   ├── toolbar.rs       # 工具栏（工具 + 撤销/重做 + 调色盘）
+│   ├── palette.rs       # 调色盘（前景 / 背景 + 预设色块）
 │   ├── options_bar.rs   # 工具选项栏（笔刷大小 / 不透明度 / 提示）
 │   ├── canvas.rs        # 透明画布区域（命中 / 定位用）
 │   ├── file_panel.rs    # Phase 7：文件面板（路径 + 导入 / 导出按钮）

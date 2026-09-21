@@ -447,6 +447,21 @@ pub fn check() -> (usize, String) {
     }
     check_pixel_mode_edges(&mut failures);
 
+    // 调色盘：色块齐全，点一个预设色块应把前景色改掉。
+    if view.palette_swatch_count() < 16 {
+        failures.push("调色盘色块不足".to_string());
+    }
+    match view.palette_swatch_center(4) {
+        Some(center) => {
+            click_at(&mut view, center);
+            view.update();
+            if view.foreground() != Color::RED {
+                failures.push("点调色盘没有把前景色设成红".to_string());
+            }
+        }
+        None => failures.push("找不到调色盘色块".to_string()),
+    }
+
     // 可拖动右栏：向左拖分隔条，右栏应变宽。
     let sidebar_before = view.sidebar_width();
     match view.sidebar_handle_center() {
