@@ -484,6 +484,28 @@ pub fn check() -> (usize, String) {
         failures.push("拖分隔条后右栏没变宽".to_string());
     }
 
+    // 左侧调色盘面板也能拖动调宽。
+    let palette_before = view.palette_width();
+    match view.palette_handle_center() {
+        Some(start) => {
+            let end = start + Vec2::new(24.0, 0.0);
+            view.event(&InputEvent::PointerDown {
+                position: start,
+                button: PointerButton::Left,
+            });
+            view.event(&InputEvent::PointerMove { position: end });
+            view.event(&InputEvent::PointerUp {
+                position: end,
+                button: PointerButton::Left,
+            });
+            view.layout(viewport());
+        }
+        None => failures.push("找不到调色盘分隔条".to_string()),
+    }
+    if view.palette_width() <= palette_before {
+        failures.push("拖调色盘分隔条没有变宽".to_string());
+    }
+
     // 右侧栏内部：面板之间的分隔条也能拖动（往里拖，给图层列表留位置）。
     let file_before = view.file_panel_height();
     match view.file_handle_center() {

@@ -17,7 +17,7 @@ use crate::icons::{Icon, IconSet, TOOLBAR_ICON};
 use crate::ui::TOOLBAR_WIDTH;
 
 /// 竖直工具栏。`slots` 收集每个工具按钮的节点，`history_slots` 收集撤销 /
-/// 重做按钮的节点，`palette_slots` 收集调色盘色块；测试与自检靠它们模拟点击。
+/// 重做按钮的节点；测试与自检靠它们模拟点击（点击目标是按钮，不是标签）。
 pub fn tool_bar(
     theme: Theme,
     state: Rc<RefCell<AppState>>,
@@ -25,7 +25,6 @@ pub fn tool_bar(
     icons: Rc<IconSet>,
     slots: &mut Vec<(ActiveTool, NodeRef)>,
     history_slots: &mut Vec<(HistoryAction, NodeRef)>,
-    palette_slots: &mut Vec<NodeRef>,
 ) -> impl Component {
     let mut bar = Flex::column()
         .gap(space::XXXS)
@@ -58,8 +57,6 @@ pub fn tool_bar(
             &slot,
         ));
     }
-    bar = bar.child(Divider::horizontal(theme));
-    bar = bar.child(super::palette::palette_column(theme, state, palette_slots));
     bar
 }
 

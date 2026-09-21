@@ -59,6 +59,10 @@ use crate::ui::options_bar::{options_bar, options_hint, tool_has_brush, OptionsR
 
 /// 工具栏宽度（逻辑像素）。
 const TOOLBAR_WIDTH: f32 = 52.0;
+/// 左侧调色盘面板的宽度（可拖）。
+const PALETTE_WIDTH: f32 = 84.0;
+const PALETTE_MIN: f32 = 64.0;
+const PALETTE_MAX: f32 = 200.0;
 /// 右侧栏默认 / 最小宽度（逻辑像素）。
 const SIDEBAR_WIDTH: f32 = 280.0;
 const SIDEBAR_MIN: f32 = 200.0;
@@ -99,9 +103,11 @@ struct Refs {
     file_panel: NodeRef,
     props_panel: NodeRef,
     history_panel: NodeRef,
+    palette_panel: NodeRef,
     file_handle: NodeRef,
     props_handle: NodeRef,
     history_handle: NodeRef,
+    palette_handle: NodeRef,
     path: NodeRef,
     sidebar: NodeRef,
     sidebar_handle: NodeRef,
@@ -170,6 +176,10 @@ pub struct EditorView {
     sidebar_node: NodeId,
     /// 右侧栏分隔条的节点。
     sidebar_handle_node: NodeId,
+    /// 左侧调色盘面板的宽度 / 节点 / 分隔条。
+    palette_width: Rc<Cell<f32>>,
+    palette_panel_node: NodeId,
+    palette_handle_node: NodeId,
     /// 右侧栏「文件」/「属性」/「历史」面板的共享高度（各自的分隔条写、布局读）。
     file_height: Rc<Cell<f32>>,
     props_height: Rc<Cell<f32>>,
@@ -271,8 +281,8 @@ impl EditorView {
             icons.clone(),
             &mut tool_refs,
             &mut history_refs,
-            &mut palette_refs,
         );
+        let palette_panel = palette::palette_panel(theme, state.clone(), &mut palette_refs);
 
         let layer_count = Rc::new(Cell::new(0usize));
         let layer_selected: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
@@ -297,6 +307,7 @@ impl EditorView {
         let square_mode = Rc::new(Cell::new(true));
         let mut toggle_refs: Vec<(BrushToggle, NodeRef)> = Vec::new();
         let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
+        let palette_width = Rc::new(Cell::new(PALETTE_WIDTH));
         let file_height = Rc::new(Cell::new(FILE_PANEL_HEIGHT));
         let props_height = Rc::new(Cell::new(PROPS_PANEL_HEIGHT));
         let history_height = Rc::new(Cell::new(HISTORY_PANEL_HEIGHT));
@@ -324,6 +335,20 @@ impl EditorView {
                     .grow(1.0)
                     .mouse_filter(MouseFilter::Ignore)
                     .child(toolbar)
+                    .child(
+                        palette_panel
+                            .basis(SizeBasis::Px(palette_width.get()))
+                            .shrink(0.0)
+                            .ref_(&refs.palette_panel),
+                    )
+                    .child(
+                        ResizeHandle::vertical(theme)
+                            .target(refs.palette_panel.clone())
+                            .width(palette_width.clone())
+                            .min(PALETTE_MIN)
+                            .max(PALETTE_MAX)
+                            .ref_(&refs.palette_handle),
+                    )
                     .child(canvas::canvas_area().ref_(&refs.canvas))
                     .child(
                         ResizeHandle::vertical(theme)
@@ -489,6 +514,9 @@ impl EditorView {
             sidebar_width,
             sidebar_node: refs.sidebar.get().expect("sidebar mounted"),
             sidebar_handle_node: refs.sidebar_handle.get().expect("sidebar handle mounted"),
+            palette_width,
+            palette_panel_node: refs.palette_panel.get().expect("palette panel mounted"),
+            palette_handle_node: refs.palette_handle.get().expect("palette handle mounted"),
             file_height,
             props_height,
             history_height,
@@ -994,6 +1022,7 @@ impl EditorView {
     pub fn layout(&mut self, viewport: ViewportSize) {
         self.viewport = viewport;
         self.tree.set_viewport_size(viewport.logical_size());
+        self.clamp_palette_width();
         self.clamp_sidebar_width();
         draw_ui::layout(&mut self.tree, viewport);
         // 面板高度按刚拿到的侧栏矩形钳制一次；变了就再排一遍。
@@ -1287,12 +1316,30 @@ impl EditorView {
     /// 占到给画布留 [`CANVAS_MIN`] 为止（`examples/file_browser` 同款）。
     fn clamp_sidebar_width(&mut self) {
         let full = self.viewport.logical_size().width;
-        let max = (full - TOOLBAR_WIDTH - RESIZE_GUTTER - CANVAS_MIN).max(SIDEBAR_MIN);
+        let max =
+            (full - TOOLBAR_WIDTH - self.palette_width.get() - 2.0 * RESIZE_GUTTER - CANVAS_MIN)
+                .max(SIDEBAR_MIN);
         let current = self.sidebar_width.get();
         let next = current.clamp(SIDEBAR_MIN, max);
         if (next - current).abs() > f32::EPSILON {
             self.sidebar_width.set(next);
             update_control(&mut self.tree, self.sidebar_node, |data| {
+                data.layout.basis = SizeBasis::Px(next);
+            });
+        }
+    }
+
+    /// 左侧调色盘面板的宽度不能把画布 / 右栏挤没。
+    fn clamp_palette_width(&mut self) {
+        let full = self.viewport.logical_size().width;
+        let max = (full - TOOLBAR_WIDTH - 2.0 * RESIZE_GUTTER - SIDEBAR_MIN - CANVAS_MIN)
+            .min(PALETTE_MAX)
+            .max(PALETTE_MIN);
+        let current = self.palette_width.get();
+        let next = current.clamp(PALETTE_MIN, max);
+        if (next - current).abs() > f32::EPSILON {
+            self.palette_width.set(next);
+            update_control(&mut self.tree, self.palette_panel_node, |data| {
                 data.layout.basis = SizeBasis::Px(next);
             });
         }
@@ -1783,6 +1830,15 @@ impl EditorView {
         draw_ui::control(&self.tree, self.sidebar_handle_node).map(|control| control.rect.center())
     }
 
+    /// 左侧调色盘面板的宽度 / 分隔条中心。
+    pub fn palette_width(&self) -> f32 {
+        self.palette_width.get()
+    }
+
+    pub fn palette_handle_center(&self) -> Option<Vec2> {
+        draw_ui::control(&self.tree, self.palette_handle_node).map(|control| control.rect.center())
+    }
+
     /// 右侧栏「文件」/「属性」面板的当前高度（逻辑像素）。
     pub fn file_panel_height(&self) -> f32 {
         self.file_height.get()
@@ -2254,6 +2310,21 @@ mod tests {
         });
         view.layout(viewport());
         assert!(view.props_panel_height() > props_before, "属性面板应变高");
+
+        let palette_before = view.palette_width();
+        let start = view.palette_handle_center().expect("palette handle");
+        let end = start + Vec2::new(24.0, 0.0);
+        view.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerMove { position: end });
+        view.event(&InputEvent::PointerUp {
+            position: end,
+            button: PointerButton::Left,
+        });
+        view.layout(viewport());
+        assert!(view.palette_width() > palette_before, "调色盘面板应变宽");
     }
 
     #[test]

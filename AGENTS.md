@@ -97,9 +97,10 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   quill stack instead of egui. Landed: menu/toolbar/tool-options
                   bar/status bar, a resizable right sidebar whose file/layer/
                   properties/history sections are split by `ResizeHandle::horizontal`
-                  dividers (`ResizeHandle`), a color palette (`ui/palette.rs`, in
-                  the tool column) and a history panel (`ui/history_panel.rs`, a
-                  virtualized `List` of the undo/redo stack you can click to jump),
+                  dividers (`ResizeHandle`), a resizable color-palette panel on the
+                  left (`ui/palette.rs`) and a history panel (`ui/history_panel.rs`,
+                  a virtualized `List` of the undo/redo stack you can click to
+                  jump),
                   `document` model (`Document`/`Layer`/`PixelBuffer`, plus
                   `PixelRegion`), `canvas` (a `Node2D` + `Visual::Image`, camera
                   zoom/pan, coordinate conversion), `renderer` (CPU compositor),

@@ -1,9 +1,9 @@
-//! 调色盘：当前前景 / 背景色 + 预设色块。
+//! 调色盘面板：当前前景 / 背景色 + 预设色块。
 //!
-//! 放在左侧工具栏列里（工具下面、撤销 / 重做之后）。点预设色块把颜色写进
-//! [`AppState::foreground`](crate::app::state::AppState)；前景 / 背景可一键交换。
-//! 色块与当前色都用 `dynamic_background` 每帧从共享状态读，所以吸管取色后
-//! 面板会跟着变，不需要重建树。
+//! 是工具栏左边的一个独立竖直面板（有自己的宽度，可以拖动）；点预设色块把颜色
+//! 写进 [`AppState::foreground`](crate::app::state::AppState)，前景 / 背景可一键
+//! 交换。色块与当前色都用 `dynamic_background` 每帧从共享状态读，所以吸管取色
+//! 后面板会跟着变，不需要重建树。
 //!
 //! 文档色是 8 位 RGBA（[`crate::document::Color`]），UI 的 `SurfaceStyle` 要
 //! 浮点 RGBA（`draw_core::Color`）；转换只在这一层做。
@@ -11,9 +11,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use draw_components::{Button, Component, Flex, NodeRef};
+use draw_components::{Button, Component, Flex, NodeRef, Text};
 use draw_core::{Color, Edges};
-use draw_theme::{radius, space, Theme};
+use draw_theme::{radius, space, SurfaceLevel, Theme};
 use draw_ui::{Align, MouseFilter, SurfaceStyle};
 
 use crate::app::state::AppState;
@@ -49,8 +49,11 @@ fn to_ui(color: DocColor) -> Color {
     )
 }
 
-/// 竖直调色盘，放进工具栏列。
-pub fn palette_column(
+/// 竖直调色盘面板：标题 + 当前色 + 预设色块网格。
+///
+/// 面板宽度由外层 flex 的 `basis` 决定，网格按宽度自动换行（`slots` 收集每个
+/// 色块节点，测试 / 自检靠它模拟点击）。
+pub fn palette_panel(
     theme: Theme,
     state: Rc<RefCell<AppState>>,
     slots: &mut Vec<NodeRef>,
@@ -67,10 +70,11 @@ pub fn palette_column(
     }
 
     Flex::column()
-        .gap(space::XXS)
-        .padding(Edges::ZERO)
-        .align(Align::Center)
+        .gap(space::SM)
+        .padding(Edges::all(space::SM))
+        .background(theme.surface(SurfaceLevel::Surface))
         .mouse_filter(MouseFilter::Ignore)
+        .child(Text::subheading("颜色", theme))
         .child(current_colors(theme, state))
         .child(grid)
 }
