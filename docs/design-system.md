@@ -330,6 +330,16 @@ backward-compatible addition and record it here.
   `word_break` builder. Additive and backward compatible: `WordBreak::Word` is
   the `Default`, so every existing `TextOptions` literal/`default()` call keeps
   the old output.
+- **Wrapping flex containers report the stacked cross size** (driven by
+  `examples/image_editor`'s new-document preset row): `measure_flex` computed a
+  container's preferred cross size from the tallest single item even when `wrap`
+  was on, so a row that broke into two lines still reported one line's height.
+  The container kept that height and the second line overlapped the sibling below
+  it. Measure now breaks the items into lines against the offered main size (the
+  same `wrap_lines` partition `arrange_flex` uses) and sums the per-line cross
+  maxima plus `cross_gap`, for horizontal and vertical wrap alike. Only wrapping
+  containers change (they get the height they actually occupy); non-wrapping flex
+  is untouched.
 - **`Overlays::menu` + `Placement::BelowStart`** (Stage 25, image editor menu
   bar): the overlay layer could anchor a `popover` but had no menu semantics and
   no left-aligned placement. `Overlays::menu(target, content)` is a new overlay

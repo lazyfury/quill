@@ -283,9 +283,12 @@ impl Ui {
         let horizontal = style.direction.is_horizontal();
 
         let mut pref_main = 0.0f32;
-        let mut pref_cross = 0.0f32;
         let mut min_main = 0.0f32;
         let mut min_cross = 0.0f32;
+        let mut single_cross = 0.0f32;
+        // Main/cross per item, kept so a wrapping container can break them into
+        // lines and report the stacked cross size (see below).
+        let mut items: Vec<FlexItem> = Vec::with_capacity(children.len());
 
         for (index, child) in children.iter().enumerate() {
             let measured = self.measure_node(tree, cache, *child, inner);
@@ -305,9 +308,10 @@ impl Ui {
                     measured.min.width,
                 )
             };
-            let basis = resolve_basis(layout.basis, p_main, inner_main(horizontal, inner));
+            let basis =
+                resolve_basis(layout.basis, p_main, inner_main(horizontal, inner)).max(c_min_main);
             let gap = if index == 0 { 0.0 } else { style.gap };
-            pref_main += basis.max(c_min_main) + gap;
+            pref_main += basis + gap;
             // A wrapping flex can break between items, so its minimum main size is
             // the widest item, not the sum of one line (otherwise a wrapped grid
             // would force its container as wide as a single unbounded row).
@@ -316,9 +320,33 @@ impl Ui {
             } else {
                 min_main += c_min_main + gap;
             }
-            pref_cross = pref_cross.max(p_cross);
+            single_cross = single_cross.max(p_cross);
             min_cross = min_cross.max(c_min_cross);
+            items.push(FlexItem {
+                id: *child,
+                main: basis,
+                base: basis,
+                min: c_min_main,
+                cross: p_cross,
+                grow: layout.grow,
+                shrink: layout.shrink,
+                align: layout.align_self.unwrap_or(style.align),
+            });
         }
+
+        // A wrapping container's cross size is the stacked height of its lines, not
+        // the tallest single line. Otherwise a row that wraps keeps one line's
+        // height and overlaps the sibling below it.
+        let pref_cross = if style.wrap && !items.is_empty() {
+            let lines = wrap_lines(&items, inner_main(horizontal, inner), style.gap);
+            let stacked: f32 = lines
+                .iter()
+                .map(|line| line.iter().map(|i| items[*i].cross).fold(0.0f32, f32::max))
+                .sum();
+            stacked + style.cross_gap * lines.len().saturating_sub(1) as f32
+        } else {
+            single_cross
+        };
 
         let (width, height) = if horizontal {
             (pref_main + pad.horizontal(), pref_cross + pad.vertical())
