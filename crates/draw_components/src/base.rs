@@ -42,6 +42,9 @@ pub struct Spec {
     pub foreground: Option<Box<dyn Fn(&mut PaintContext, Rect, InteractState)>>,
     pub on_click: Option<Box<dyn FnMut()>>,
     pub on_drag: Option<Box<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>>,
+    /// Absolute-position pointer callback: press + move while held, with the
+    /// control's rect and the pointer position (sliders / pickers).
+    pub on_pointer: Option<Box<dyn FnMut(Rect, Vec2)>>,
     pub on_scroll: Option<Box<dyn FnMut(Vec2)>>,
     pub cursor_provider: Option<Box<dyn Fn() -> Cursor>>,
     pub children: Vec<ChildFn>,
@@ -55,6 +58,7 @@ impl Default for Spec {
             foreground: None,
             on_click: None,
             on_drag: None,
+            on_pointer: None,
             on_scroll: None,
             cursor_provider: None,
             children: Vec::new(),
@@ -217,6 +221,14 @@ pub trait Component: Sized {
         self
     }
 
+    /// Runs `callback(rect, pointer)` on press and on every move while the
+    /// pointer is held on this node, so a component can map the pointer onto
+    /// its own rectangle (sliders, colour pickers).
+    fn on_pointer(mut self, callback: impl FnMut(Rect, Vec2) + 'static) -> Self {
+        self.spec().on_pointer = Some(Box::new(callback));
+        self
+    }
+
     /// Runs `callback` when a wheel event lands on this node or one of its
     /// descendants, with the scroll delta in logical pixels.
     ///
@@ -331,6 +343,9 @@ pub fn apply_spec(tree: &mut SceneTree, id: NodeId, spec: Spec) {
     if let Some(callback) = spec.on_drag {
         set_on_drag(tree, id, callback);
     }
+    if let Some(callback) = spec.on_pointer {
+        set_pointer_callback(tree, id, callback);
+    }
     if let Some(callback) = spec.on_scroll {
         set_on_scroll(tree, id, callback);
     }
@@ -369,6 +384,20 @@ where
     match tree.data_mut::<Control>(id) {
         Some(control) => {
             control.drag_callback = Some(Rc::new(RefCell::new(callback)));
+            true
+        }
+        None => false,
+    }
+}
+
+/// Registers an absolute-position pointer callback on `id`.
+pub fn set_pointer_callback<F>(tree: &mut SceneTree, id: NodeId, callback: F) -> bool
+where
+    F: FnMut(Rect, Vec2) + 'static,
+{
+    match tree.data_mut::<Control>(id) {
+        Some(control) => {
+            control.pointer_callback = Some(Rc::new(RefCell::new(callback)));
             true
         }
         None => false,

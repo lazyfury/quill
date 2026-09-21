@@ -60,9 +60,9 @@ use crate::ui::options_bar::{options_bar, options_hint, tool_has_brush, OptionsR
 /// 工具栏宽度（逻辑像素）。
 const TOOLBAR_WIDTH: f32 = 52.0;
 /// 左侧调色盘面板的宽度（可拖）。
-const PALETTE_WIDTH: f32 = 84.0;
-const PALETTE_MIN: f32 = 64.0;
-const PALETTE_MAX: f32 = 200.0;
+const PALETTE_WIDTH: f32 = 112.0;
+const PALETTE_MIN: f32 = 96.0;
+const PALETTE_MAX: f32 = 220.0;
 /// 右侧栏默认 / 最小宽度（逻辑像素）。
 const SIDEBAR_WIDTH: f32 = 280.0;
 const SIDEBAR_MIN: f32 = 200.0;
@@ -104,6 +104,7 @@ struct Refs {
     props_panel: NodeRef,
     history_panel: NodeRef,
     palette_panel: NodeRef,
+    palette_picker: NodeRef,
     file_handle: NodeRef,
     props_handle: NodeRef,
     history_handle: NodeRef,
@@ -179,6 +180,7 @@ pub struct EditorView {
     /// 左侧调色盘面板的宽度 / 节点 / 分隔条。
     palette_width: Rc<Cell<f32>>,
     palette_panel_node: NodeId,
+    palette_picker_node: NodeId,
     palette_handle_node: NodeId,
     /// 右侧栏「文件」/「属性」/「历史」面板的共享高度（各自的分隔条写、布局读）。
     file_height: Rc<Cell<f32>>,
@@ -282,7 +284,12 @@ impl EditorView {
             &mut tool_refs,
             &mut history_refs,
         );
-        let palette_panel = palette::palette_panel(theme, state.clone(), &mut palette_refs);
+        let palette_panel = palette::palette_panel(
+            theme,
+            state.clone(),
+            &mut palette_refs,
+            &refs.palette_picker,
+        );
 
         let layer_count = Rc::new(Cell::new(0usize));
         let layer_selected: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
@@ -516,6 +523,7 @@ impl EditorView {
             sidebar_handle_node: refs.sidebar_handle.get().expect("sidebar handle mounted"),
             palette_width,
             palette_panel_node: refs.palette_panel.get().expect("palette panel mounted"),
+            palette_picker_node: refs.palette_picker.get().expect("palette picker mounted"),
             palette_handle_node: refs.palette_handle.get().expect("palette handle mounted"),
             file_height,
             props_height,
@@ -1754,6 +1762,11 @@ impl EditorView {
         draw_ui::control(&self.tree, id).map(|control| control.rect.center())
     }
 
+    /// 取色器饱和 / 明度方块的中心点；测试与自检模拟拖动用。
+    pub fn palette_picker_center(&self) -> Option<Vec2> {
+        draw_ui::control(&self.tree, self.palette_picker_node).map(|control| control.rect.center())
+    }
+
     /// 文件面板按钮的节点 id。
     pub fn file_node(&self, action: IoAction) -> Option<NodeId> {
         self.file_nodes
@@ -2150,13 +2163,11 @@ mod tests {
         view.layout(viewport());
         let c0 = view.palette_swatch_center(0).expect("swatch 0");
         let c1 = view.palette_swatch_center(1).expect("swatch 1");
-        let c2 = view.palette_swatch_center(2).expect("swatch 2");
-        let c3 = view.palette_swatch_center(3).expect("swatch 3");
-        assert!(
-            (c0.y - c1.y).abs() < 0.5 && (c1.y - c2.y).abs() < 0.5,
-            "前 3 个应在同一行"
-        );
-        assert!(c3.y > c0.y + 1.0, "第 4 个应换到下一行");
+        let last = view.palette_swatch_center(15).expect("swatch 15");
+        assert!((c0.y - c1.y).abs() < 0.5, "同一行的前两个 y 应相同");
+        assert!(last.y > c0.y + 1.0, "最后一个色块应换到下面的行");
+        // 每行不超过面板宽度。
+        assert!(c1.x > c0.x, "同一行从左往右排");
     }
 
     #[test]
@@ -2183,6 +2194,35 @@ mod tests {
         });
         view.update();
         assert_eq!(view.foreground(), Color::RED);
+    }
+
+    #[test]
+    fn dragging_the_picker_sets_the_foreground() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('b'),
+        });
+        view.update();
+        view.layout(viewport());
+        assert_eq!(view.foreground(), Color::BLACK, "默认前景是黑");
+
+        let center = view.palette_picker_center().expect("picker mounted");
+        view.event(&InputEvent::PointerDown {
+            position: center,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: center,
+            button: PointerButton::Left,
+        });
+        view.update();
+        let fg = view.foreground();
+        assert_ne!(fg, Color::BLACK, "取色器应改前景色");
+        assert!(
+            fg.r > fg.g && fg.g == fg.b,
+            "中心应是色相 0 / s=v=0.5 的暗红，得到 {fg:?}"
+        );
     }
 
     #[test]

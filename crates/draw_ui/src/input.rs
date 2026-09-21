@@ -5,7 +5,7 @@
 //! `_input -> world -> GUI -> _unhandled_input` order hosts run through
 //! [`route_input`].
 
-use draw_core::{Cursor, EventResult, InputEvent, Key, NodeId, PointerButton, Vec2};
+use draw_core::{Cursor, EventResult, InputEvent, Key, NodeId, PointerButton, Rect, Vec2};
 use draw_scene::SceneTree;
 
 use crate::control::{control_visible, Control, MouseFilter};
@@ -98,6 +98,21 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
                 }
                 return EventResult::Handled;
             }
+            // Absolute-position pointer callback (sliders / pickers): keep
+            // feeding the control that was pressed, even outside its rect.
+            if let Some(pressed) = crate::gui_state_of(tree).and_then(|state| state.pressed) {
+                if let Some(callback) = tree
+                    .data::<Control>(pressed)
+                    .and_then(|control| control.pointer_callback.clone())
+                {
+                    let rect = tree
+                        .data::<Control>(pressed)
+                        .map(|control| control.data.rect)
+                        .unwrap_or(Rect::ZERO);
+                    (callback.borrow_mut())(rect, *position);
+                    return EventResult::Handled;
+                }
+            }
             let hit = hit_test(tree, *position);
             set_hover(tree, hit);
             if hit.is_some() {
@@ -136,6 +151,16 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
             crate::gui_state_mut(tree).focused = hit;
             if let Some(id) = hit {
                 crate::gui_state_mut(tree).pressed = Some(id);
+                if let Some(callback) = tree
+                    .data::<Control>(id)
+                    .and_then(|control| control.pointer_callback.clone())
+                {
+                    let rect = tree
+                        .data::<Control>(id)
+                        .map(|control| control.data.rect)
+                        .unwrap_or(Rect::ZERO);
+                    (callback.borrow_mut())(rect, *position);
+                }
                 if let Some(control) = tree.data_mut::<Control>(id) {
                     if let Widget::Button(button) = &mut control.widget {
                         button.state.pressed = true;
@@ -511,6 +536,41 @@ mod tests {
         );
         assert_eq!(handled, EventResult::Ignored);
         assert_eq!(inner_scrolls.get(), 12.0);
+    }
+
+    #[test]
+    fn a_pointer_callback_receives_the_rect_and_position() {
+        let mut tree = SceneTree::new();
+        let root = tree.root();
+        let container = add(&mut tree, root, ControlData::fill_parent(), panel());
+        let target = slab(&mut tree, container, 10.0, 10.0, 60.0, 60.0, panel());
+        let seen: Rc<Cell<Option<(Rect, Vec2)>>> = Rc::new(Cell::new(None));
+        let seen_by_cb = seen.clone();
+        tree.data_mut::<Control>(target).unwrap().pointer_callback =
+            Some(Rc::new(RefCell::new(move |rect, at| {
+                seen_by_cb.set(Some((rect, at)));
+            })));
+        crate::layout(&mut tree, ViewportSize::new(Size::new(200.0, 200.0)));
+        let rect = tree.data::<Control>(target).unwrap().data.rect;
+        let center = rect.center();
+
+        // Press inside: the callback gets the rect and the absolute position.
+        handle_input(
+            &mut tree,
+            &InputEvent::PointerDown {
+                position: center,
+                button: PointerButton::Left,
+            },
+        );
+        let (got_rect, got_at) = seen.take().expect("press fires the callback");
+        assert_eq!(got_rect, rect);
+        assert_eq!(got_at, center);
+
+        // Move while held: still fed the absolute position.
+        let moved = center + Vec2::new(5.0, -3.0);
+        handle_input(&mut tree, &InputEvent::PointerMove { position: moved });
+        let (_, got_at) = seen.take().expect("move fires the callback");
+        assert_eq!(got_at, moved);
     }
 
     #[test]

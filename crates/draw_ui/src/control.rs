@@ -127,6 +127,14 @@ pub enum DragPhase {
 /// the drag and react to start/end without tracking the pointer itself.
 pub type DragCallback = Rc<RefCell<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>>;
 
+/// A callback invoked while the pointer is **pressed** on a control, with the
+/// control's current rect and the pointer position (same coordinate space).
+///
+/// Unlike [`DragCallback`] (which only reports a delta), this gives an absolute
+/// position, so a component can implement a slider / colour picker that maps the
+/// pointer onto its own rectangle. Fires on press and on every move while held.
+pub type PointerCallback = Rc<RefCell<dyn FnMut(Rect, Vec2)>>;
+
 /// A closure returning a control's cursor, evaluated by the framework while the
 /// control is hovered. Lets a component derive its cursor from its own state
 /// instead of a fixed value.
@@ -167,6 +175,8 @@ pub struct Control {
     pub callback: Option<ClickCallback>,
     /// Pointer-drag callback (pointer capture while held).
     pub drag_callback: Option<DragCallback>,
+    /// Absolute-position pointer callback (press + move while held).
+    pub pointer_callback: Option<PointerCallback>,
     /// Wheel callback: this control (or its subtree) owns mouse-wheel scrolling.
     pub scroll_callback: Option<ScrollCallback>,
     /// Dynamic cursor, resolved each frame while hovered; overrides
@@ -185,6 +195,7 @@ impl Control {
             widget,
             callback: None,
             drag_callback: None,
+            pointer_callback: None,
             scroll_callback: None,
             cursor_provider: None,
             decorations: Vec::new(),

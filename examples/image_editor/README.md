@@ -105,8 +105,10 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   图层面板 `grow(1)` 吸收剩余）；`clamp_panel_heights` 预留图层最小高度。
   右栏还多了「历史」面板（`ui/history_panel.rs`）：一条虚拟化 `List` 显示
   撤销 / 重做栈（旧→新 → 「● 当前」→ 重做下一个），点某一步就撤 / 重做到那里。
-  左侧工具栏右边是**独立的调色盘面板**（`ui/palette.rs`，宽度可拖），不挤在
-  工具栏列里。
+  左侧工具栏右边是**独立的调色盘面板**（`ui/palette.rs`，宽度可拖）：上面一个
+  **HSV 取色器**（饱和/明度方块 + 色相条，拖动即改前景色），下面是当前前景 /
+  背景与 16 个预设色块。取色器靠 `Component::on_pointer`（press + move 给绝对
+  位置）把指针映射到自己的矩形上；没有渐变图元，方块用一小片实心色块拼出。
 
 ### 计划（Phase 10+）
 
@@ -194,7 +196,7 @@ src/
 │   ├── mod.rs           # EditorView：页面 + 文档 Node2D + 相机同步 + undo/redo
 │   ├── menu.rs          # 菜单栏
 │   ├── toolbar.rs       # 工具栏（工具 + 撤销/重做）
-│   ├── palette.rs       # 左侧调色盘面板（前景 / 背景 + 预设色块）
+│   ├── palette.rs       # 左侧调色盘面板（HSV 取色器 + 前景/背景 + 预设色块）
 │   ├── options_bar.rs   # 工具选项栏（笔刷大小 / 不透明度 / 提示）
 │   ├── canvas.rs        # 透明画布区域（命中 / 定位用）
 │   ├── file_panel.rs    # Phase 7：文件面板（路径 + 导入 / 导出按钮）

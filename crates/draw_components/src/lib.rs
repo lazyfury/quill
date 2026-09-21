@@ -55,8 +55,8 @@ mod router;
 
 pub use base::{
     apply_spec, control_mut, set_cursor_provider, set_on_click, set_on_drag, set_on_scroll,
-    set_text, update_control, ChildFn, Column, Component, Flex, Grid, HBox, Label, Panel, Row,
-    Spec, VBox,
+    set_pointer_callback, set_text, update_control, ChildFn, Column, Component, Flex, Grid, HBox,
+    Label, Panel, Row, Spec, VBox,
 };
 pub use components::{
     Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, List, ListColumn,

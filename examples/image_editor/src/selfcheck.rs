@@ -462,6 +462,19 @@ pub fn check() -> (usize, String) {
         None => failures.push("找不到调色盘色块".to_string()),
     }
 
+    // 取色器：点方块中心应改前景色。
+    match view.palette_picker_center() {
+        Some(center) => {
+            click_at(&mut view, center);
+            view.update();
+            let fg = view.foreground();
+            if fg == Color::RED || fg == Color::BLACK {
+                failures.push("取色器没有改前景色".to_string());
+            }
+        }
+        None => failures.push("找不到取色器".to_string()),
+    }
+
     // 可拖动右栏：向左拖分隔条，右栏应变宽。
     let sidebar_before = view.sidebar_width();
     match view.sidebar_handle_center() {

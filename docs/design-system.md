@@ -357,7 +357,16 @@ backward-compatible addition and record it here.
   a right-hand sidebar (target on the far side) resized in the wrong direction.
   `invert()` flips the drag delta. Additive — the default behavior and every
   existing call site are unchanged.
-
+- **`Control::pointer_callback` / `Component::on_pointer`** (driven by
+  `examples/image_editor`'s colour picker): `DragCallback` only reports a
+  **delta**, so a component could not map the pointer onto its own rectangle
+  (sliders, colour pickers). `Control` gains an additive
+  `pointer_callback: Option<Rc<RefCell<dyn FnMut(Rect, Vec2)>>>` fired on press
+  and on every move while held, with the control's rect and the absolute pointer
+  position; `draw_components` exposes it as `Component::on_pointer` /
+  `set_pointer_callback`. `draw_ui::handle_input` routes the held pointer to the
+  pressed control after drag capture. Additive: `Widget`/`ControlData` shapes
+  are unchanged and existing `on_click`/`on_drag` callbacks are untouched.
 
 ## Deferred
 

@@ -38,7 +38,7 @@ mod widget;
 
 pub use control::{
     ClickCallback, Control, ControlData, CursorProvider, DragCallback, DragPhase, GuiState,
-    MouseFilter, ScrollCallback,
+    MouseFilter, PointerCallback, ScrollCallback,
 };
 pub use debug::DebugDrawOptions;
 pub use decor::{

@@ -71,7 +71,8 @@
 ## Done（近期）
 
 - **调色盘 + 历史面板**：**左侧独立调色盘面板**（`ui/palette.rs`，宽度可拖；
-  前景 / 背景 + 16 个预设色块，点击设前景色）；右侧栏「历史」面板（虚拟化 `List`，
+  **HSV 取色器**（饱和/明度方块 + 色相条，用 `Component::on_pointer` 映射指针）
+  + 前景 / 背景 + 16 个预设色块）；右侧栏「历史」面板（虚拟化 `List`，
   `History::undo_labels`/`redo_labels`，点一步撤 / 重做到那里，`ui/history_panel.rs`）；
   右栏高度钳制改为三个可拖面板。
 - **撤销补全 + 右侧栏可调**：移动工具（`SetLayerPositionCommand`）、新建 / 删除图层
