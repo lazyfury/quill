@@ -1,5 +1,8 @@
 # Components
 
+> For the app-level walkthrough (frame loop, hosting, conventions), start with
+> `docs/ui-guide.md`; this page is the widget/layout/input reference.
+
 UI is built from **components** on one `draw_scene::SceneTree`. A component is a
 value that builds exactly one primary control node; mount a whole scene with
 `.into_tree()` (or `SceneTree::add_child`) and nest with `.child()`.

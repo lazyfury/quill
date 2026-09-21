@@ -68,7 +68,9 @@ multi_tree    -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
 wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, demo_app,
                  draw_backend_wgpu, draw_profile, draw_debug_ui, winit
 deepseek_balance -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
-                 draw_components, draw_backend_wgpu, winit, ureq
+                 draw_components, draw_backend_wgpu, winit, ureq,
+                 deepseek_util (own sub-crate `examples/deepseek_balance/util`:
+                 time + currency helpers, std-only)
                  (standalone tool: own workspace, NOT a workspace member,
                   so it stays out of `cargo check --workspace`)
 file_browser   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
@@ -106,6 +108,29 @@ through a winit `EventLoopProxy`). `wgpu` only in
 (`ab_glyph`), text shaping
 (`rustybuzz`, `unicode-bidi`) and system-font discovery live only in
 `draw_backend_wgpu`; the core stays text-free.
+
+## Code division (one concern per module)
+
+Modules are cut by concern, not by size and not by convenience. A file that
+passes ~500 lines gets split along its seams, and a concern that is true of the
+domain — not of HTTP, not of the UI, not of the platform — gets its own small
+crate/module instead of being embedded where it happens to be used.
+
+- **Name the owner.** Each layer has one job: the API module owns HTTP + wire
+  parsing, the view module owns tree construction, the state machine owns
+  decisions, the host owns the platform loop. Formatting is not the API's job;
+  parsing is not the UI's.
+- **Generic helpers get a home.** Time formatting/parsing, currency rendering
+  and the like belong in a dependency-free helper crate/module, split by
+  concern (`time.rs`, `currency.rs`, …), so they are testable and reusable and
+  the callers stay focused. Do not scatter them across the files that use them.
+- **A standalone example keeps its own sub-crate.** `examples/deepseek_balance`
+  is its own workspace; its helpers live in `examples/deepseek_balance/util`
+  (member of that workspace) so they never leak into `cargo check --workspace`.
+- **Respect the dependency direction** above: a helper crate depends on nothing
+  backend- or UI-specific; helpers never import the layer that consumes them.
+- **Tests live with the concern.** A moved function takes its tests with it;
+  don't pile every test into one file or keep tests for code that moved.
 
 ## Stages
 
@@ -283,20 +308,55 @@ Then emit the report and stop for approval.
 
 ## Context hygiene (keep agent/LLM context small)
 
+Learned the hard way: a few sessions ballooned past 150k tokens mostly from
+re-reading two 2k-line files and re-printing `--dump`.
+
 - Do **not** read or `grep` `target/`, `examples/*/dist/` (ignored generated
-  wasm/js), or `Cargo.lock`. To find a symbol, `rg` from the repo root (ripgrep
-  honors `.gitignore`); avoid `grep -r`.
+  wasm/js), or `Cargo.lock`. Use `rg` from the repo root to locate a symbol
+  **before** opening a file (ripgrep honors `.gitignore`); avoid `grep -r`.
 - Use the map below instead of `ls -R` / `find` exploration.
-- Read one module, not a whole crate. If a file passes ~500 lines, prefer
-  splitting it over reading it whole.
+- Read one module, not a whole crate. If a file passes ~500 lines, split it
+  instead of reading it whole; read only the window around the change.
+- For "where is X / how does X work", delegate to the `explore` subagent and ask
+  for a short answer with `file:line` — raw file contents should not enter the
+  main context.
+- Keep command noise out: capture `cargo` / `--dump` output to a file or pipe it
+  through `rg`/`sed`. Never print a whole UI tree or command list; add a filter
+  flag to the dump tool rather than dumping everything.
+- Batch verification into one call (`cargo fmt --check && cargo test && <selfcheck>`),
+  not one command per concern.
+- Do not re-read a file after editing it: the `edit` tool matches unique
+  surrounding context and needs no fresh read. Never `git stash`/`pop` just to
+  diff a revision — use `git show HEAD:path > /tmp/x` or a worktree.
+- When a change spans many call sites (a refactor), rewrite the module in one
+  pass and compile per layer (API -> impl -> host) so errors stay local.
+- Keep web search cheap: few results, small context window.
+
+## Test discipline (keep the suite high-signal)
+
+The suite is a contract, not a diary. Before adding or keeping a test:
+
+- One behaviour per test, named as the rule. Merge assertions that only make
+  sense together (parse + fields, show + hide).
+- Do not re-test a shared gate through every entry point. The throttle / refresh
+  intent is one rule: test it once, not separately for click, key and timer
+  rejection.
+- Turn several near-identical cases into one table/loop.
+- Keep negative controls (tests that prove a checker actually fires) and any
+  test whose comment records a past bug — those are not redundant.
+- `--selfcheck` already frame-checks layouts; do not duplicate it with
+  hand-rolled draw-list assertions unless the check is new.
+- If the count outgrows the behaviour it covers, delete before adding. See
+  `docs/testing.md` for the layers.
 
 ## Where to look
 
 | I need... | Look at |
 |---|---|
+| **Build an app UI: frame loop, widgets, hosting, conventions, cheat sheet** | **`docs/ui-guide.md`** (read this before scanning crates) |
 | Pipeline, coordinates, stage plan, backend replaceability | `docs/architecture.md` |
 | Backends (Canvas / wgpu / recording), adding a backend, browser boundary | `docs/backend.md` |
-| Controls, layout, components | `docs/components.md` |
+| Controls, layout, components (API reference by name) | `docs/components.md` |
 | Design tokens, theme, component library | `docs/design-system.md` |
 | Roadmap / remaining primitives & components | `docs/plan.md` |
 | Godot-style unified scene migration (Stage 25+) | `docs/godot-migration.md` |

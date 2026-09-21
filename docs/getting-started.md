@@ -108,8 +108,9 @@ draw_ui::paint(&tree, &mut ctx);
 
 Themed components (`draw_components::Text`, `Card`, `Button`, `Checkbox`, …)
 take the theme as their first argument: `Text::heading("Notes", theme)`,
-`Card::new(theme)`. See `docs/components.md` for anchors, containers, events and
-custom components, and `examples/web_demo` for a runnable browser example.
+`Card::new(theme)`. Start with `docs/ui-guide.md` for the app-level guide (frame
+loop, hosting, conventions); `docs/components.md` is the widget/layout/input
+reference. `examples/web_demo` is a runnable browser example.
 
 ## Debug component bounds
 
