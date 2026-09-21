@@ -62,8 +62,8 @@ use crate::ui::options_bar::{options_bar, options_hint, tool_has_brush, OptionsR
 const TOOLBAR_WIDTH: f32 = 52.0;
 /// 左侧调色盘面板的宽度（可拖）。
 const PALETTE_WIDTH: f32 = 172.0;
-const PALETTE_MIN: f32 = 96.0;
-const PALETTE_MAX: f32 = 220.0;
+const PALETTE_MIN: f32 = 156.0;
+const PALETTE_MAX: f32 = 250.0;
 /// 右侧栏默认 / 最小宽度（逻辑像素）。
 const SIDEBAR_WIDTH: f32 = 280.0;
 const SIDEBAR_MIN: f32 = 200.0;
@@ -345,9 +345,14 @@ impl EditorView {
                     .child(toolbar)
                     .child(Divider::vertical(theme))
                     .child(
-                        palette_panel
+                        // 调色盘外面留一圈边距，让它像右栏那些卡片一样“浮”在底色上，
+                        // 而不是一条贴着工具栏的通栏面板。
+                        Flex::column()
                             .basis(SizeBasis::Px(palette_width.get()))
                             .shrink(0.0)
+                            .padding(Edges::all(space::XS))
+                            .mouse_filter(MouseFilter::Ignore)
+                            .child(palette_panel)
                             .ref_(&refs.palette_panel),
                     )
                     .child(
@@ -371,7 +376,7 @@ impl EditorView {
                         Flex::column()
                             .basis(SizeBasis::Px(sidebar_width.get()))
                             .shrink(0.0)
-                            .gap(space::XXS)
+                            .gap(space::XXXS)
                             .padding(Edges::ZERO)
                             .mouse_filter(MouseFilter::Ignore)
                             .child(
