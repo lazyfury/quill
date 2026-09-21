@@ -43,9 +43,9 @@ A **component** is a value that builds exactly one control node. Compose with
 
 ```rust
 use draw_components::{Button, Card, Column, Divider, Row, Text};
-use draw_theme::{space, Theme};
+use draw_theme::{default_theme, space, Mode};
 
-let theme = Theme::dark();
+let theme = default_theme(Mode::Dark);
 let tree = Column::new()
     .gap(space::MD)
     .child(Text::heading("Settings", theme))
@@ -184,10 +184,11 @@ reading its own data instead:
   Backends only consume `DrawList`.
 - **One concern per module.** Views build trees; hosts own the platform loop and
   I/O; formatting/parsing live in small helpers, not in the widget code.
-- **Theme is a value, tokens are the API.** Take `theme: Theme` in component
-  constructors and use `theme.palette.*` / `theme.surface(SurfaceLevel::..)` /
-  `space` / `radius` / `TextSize`; never hard-code hex. Dark is a token swap,
-  not a second code path.
+- **Theme is a trait, tokens are the API.** Take `theme: &'static dyn Theme` in
+  component constructors and use `theme.palette().*` /
+  `theme.surface(SurfaceLevel::..)` / `space` / `radius` / `TextSize`; never
+  hard-code hex. Dark is a token swap, not a second code path, and an app can
+  implement `draw_theme::Theme` to override any token.
 - **State is external.** View state in `Rc<Cell<_>>`/`Rc<RefCell<_>>` passed to
   callbacks; reach nodes by `NodeRef`, not by walking the tree.
 - **Compose, then mount.** Build leaf components as locals, compose the root,
@@ -222,13 +223,15 @@ Read this section before scanning the repo; then open only the file you need.
   `SceneTree::{add_child, set_visible, update}`,
   `draw_ui::{layout, paint, route_input, set_text_measurer, mark_dirty, control,
   widget, content_size, hovered_cursor}`.
-- Tokens: `draw_theme::{Theme, Tone, SurfaceLevel, space, radius, TextSize}`;
-  construct `Theme::dark()` / `Theme::light()` and pass by value.
+- Tokens: `draw_theme::{Theme, DefaultTheme, Tone, SurfaceLevel, space, radius,
+  TextSize}`; use `draw_theme::default_theme(Mode::Dark)` / `compact_theme(..)`,
+  or implement `Theme` for your own type, and pass the `&'static dyn Theme`.
 - Types/input: `draw_core::{Rect, Size, Vec2, Edges, Color, InputEvent,
   EventResult, Cursor, Key}`; IR/commands: `draw_render::{PaintContext,
   DrawList, DrawCommand}`.
 - The five calls that answer most questions: `into_tree`, `layout`, `paint`,
-  `route_input`, `set_text` — plus `Theme::palette`/`surface` for colours.
+  `route_input`, `set_text` — plus `theme.palette()`/`theme.surface(..)` for
+  colours.
 - Don't: invent a `quill::{Button, ..}` import (no facade), hard-code hex, store
   app state in the tree, read/write the tree from inside a callback without a
   shared cell, or call `tree.add_child` for static layout.

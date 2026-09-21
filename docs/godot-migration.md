@@ -200,7 +200,7 @@ This is the largest refactor; split it.
   and `draw_components::Component` now carries a `Spec` and exposes the modifiers
   (`child`, `background`, `surface`, `dynamic_background`, `foreground`,
   `on_click`, `grow`, `min_size`, …) as methods. `draw_components` components
-  take the `Theme` as a plain `Copy` value; **the theme is no longer stored on
+  take a `&'static dyn Theme`; **the theme is no longer stored on
   the tree** (Phase 4f is reversed for the theme only — the text measurer still
   lives on the root). `draw_ui` decorators no longer take a `Theme`; their
   closures capture the colors they need.

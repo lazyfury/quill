@@ -61,17 +61,17 @@ Then submit `list` to any `RenderBackend` (recording, Canvas 2D, ...). See
 ## Create your first control
 
 Components compose into one node tree. Attach a component with
-`SceneTree::add_child`; nest with `.child()`. The theme is a value passed to the
-constructors, never stored on the tree.
+`SceneTree::add_child`; nest with `.child()`. The theme is a `&'static dyn Theme`
+passed to the constructors, never stored on the tree.
 
 ```rust
 use draw_components::base::Button;
 use draw_components::{Component, Flex, Label, Panel, VBox};
 use draw_core::{Size, ViewportSize};
 use draw_scene::SceneTree;
-use draw_theme::Theme;
+use draw_theme::{default_theme, Mode, Theme};
 
-let theme = Theme::dark();
+let theme: &'static dyn Theme = default_theme(Mode::Dark);
 let mut tree = SceneTree::new();
 
 let root = tree.add_child(tree.root(), Flex::column());

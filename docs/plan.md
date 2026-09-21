@@ -53,11 +53,13 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Theme
 
-- `Theme` is a plain `Copy` value passed to component constructors; nothing
-  reads it from the tree. Support a **runtime light/dark toggle** by rebuilding
-  the tree with a different `Theme` (or resolving colors per frame in the
-  component's `prepare`/decorator). `dynamic_surface_decor` already resolves per
-  frame.
+- `Theme` is a trait (`draw_theme::Theme`) with a built-in `DefaultTheme`
+  implementation; components take a `&'static dyn Theme`, so an application can
+  implement its own theme and override any token (palette, density, surface
+  mapping, fonts) without touching the component library. A **runtime
+  light/dark toggle** still rebuilds the tree with a different theme (or
+  resolves colors per frame in the component's `prepare`/decorator);
+  `dynamic_surface_decor` already resolves per frame.
 - `Theme` also carries a `Density` (spacing scale + control metrics): `compact()`
   is a token swap, and the component library reads `theme.spacing` /
   `control_height` / `row_height`, so a custom theme (e.g. the image editor's)
@@ -65,6 +67,17 @@ audited by `draw_profile`'s inspector, or it is not "done".
   (`mini()`/`regular()`), defaulting to the theme's `default_control`.
 - Font weights are not modeled (no weight axis yet) — add `FontWeight` tokens
   when the backends can render them.
+- **Configurable font metrics (planned).** `line_height` / `ascent` come straight
+  from the loaded face (`ab_glyph`: `height + line_gap`, `ascent`). Faces with
+  skewed metrics (large descent / line gap — some CJK fonts) make vertically
+  centered text sit off-center, and there is no knob: `FontConfig` only carries
+  `mode` + `device_pixel_rasterization`, and `TextOptions` has no vertical
+  alignment / baseline offset. Plan: add overrides to `FontConfig`
+  (`line_height_ratio: Option<f32>`, `ascent_ratio: Option<f32>`,
+  `baseline_offset: f32`), applied in `Font::line_height` / `Font::ascent`
+  (`draw_backend_wgpu/src/font/mod.rs`); defaults (`None` / `0.0`) keep today's
+  behaviour. A host can already work around this by overriding
+  `TextMeasurer::ascent` (as `image_editor` does for its bundled CJK font).
 
 ## Component layer (`draw_components`)
 

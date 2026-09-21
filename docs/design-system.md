@@ -21,18 +21,25 @@ and focus.
 ## Tokens — `draw_theme`
 
 ```rust
-use draw_theme::{space, radius, control, ControlSize, Mode, Space, TextSize, Theme};
+use draw_theme::{
+    compact_theme, default_theme, ControlSize, Mode, Space, SurfaceLevel, Theme,
+};
 
-let theme = Theme::dark();
-theme.mode;                       // Mode::Dark
-theme.palette.background;         // #0A0A0A
-theme.palette.surface_raised;     // #171717
-theme.palette.border;             // #262626
+let theme: &'static dyn Theme = default_theme(Mode::Dark);
+theme.mode();                             // Mode::Dark
+theme.palette().background;               // #0A0A0A
+theme.palette().surface_raised;           // #171717
+theme.palette().border;                   // #262626
 theme.surface(SurfaceLevel::Raised);
-theme.spacing(Space::LG);         // 16.0
-theme.compact().spacing(Space::LG); // 12.0 (0.75x)
-theme.control_height(ControlSize::Mini); // 32.0 comfortable / 24.0 compact
+theme.spacing(Space::LG);                 // 16.0
+compact_theme(Mode::Dark).spacing(Space::LG); // 12.0 (0.75x)
+theme.control_height(ControlSize::Mini);  // 32.0 comfortable / 24.0 compact
 ```
+
+`Theme` is a trait (required: `palette()` + `mode()`; the rest are defaulted), so
+an app can implement it for its own type and override any token. `DefaultTheme`
+is the built-in implementation; `default_theme(..)` / `compact_theme(..)` return
+`'static` trait objects ready to hand to components.
 
 ### Color
 
@@ -63,11 +70,11 @@ Semantic accents (`accent`, `success`, `warning`, `error`, `info`), `on_accent`,
 
 ### Density
 
-`Theme` also carries a `Density`: the spacing and control metrics components
+`Theme` also exposes a `Density`: the spacing and control metrics components
 read. `Density::COMFORTABLE` (default) is the base scale with regular controls;
-`Density::COMPACT` tightens everything and makes controls mini. `Theme::compact()`
-/ `Theme::with_density(..)` swap it — a token swap, not a second code path;
-colors and type sizes are unaffected.
+`Density::COMPACT` tightens everything and makes controls mini.
+`DefaultTheme::compact()` / `with_density(..)` swap it — a token swap, not a
+second code path; colors and type sizes are unaffected.
 
 | Token | Comfortable | Compact |
 |---|---|---|
@@ -84,8 +91,8 @@ Components read `theme.spacing(Space::…)`, `theme.control_height(size)`,
 `Button::regular()`) and defaults to `theme.default_control()`; an explicit
 `.min_size(..)` on a component wins over the density default (so a toolbar can
 pin its icon buttons to a fixed size). A custom theme (e.g.
-`image_editor::theme::editor_theme`) is just a `Theme` value with a
-different density.
+`image_editor::theme::editor_theme`) is just a `Theme` impl with a different
+density.
 
 ## Components — `draw_components`
 
@@ -93,17 +100,17 @@ The crate split is deliberate: `draw_ui` is the UI runtime **and** the styling
 primitives (`SurfaceStyle`, `fill_rounded_rect`/`inset`/`surface`, `Tone`,
 `SurfaceTone`, and the `surface_decor`/`dynamic_surface_decor`/
 `foreground_decor` factories), while `draw_components` contains **only component
-builders**. Components implement `draw_components::Component`, receive the `Theme` as a
-`Copy` value, and attach their chrome to their own node. Hosts build one tree
-and use a single paint/input pass:
+builders**. Components implement `draw_components::Component`, receive a
+`&'static dyn Theme`, and attach their chrome to their own node. Hosts build one
+tree and use a single paint/input pass:
 
 ```rust
 use draw_components::{Component, Flex};
 use draw_components::{Card, Checkbox, Text};
 use draw_scene::SceneTree;
-use draw_theme::{space, Theme, Tone};
+use draw_theme::{default_theme, space, Mode, Theme, Tone};
 
-let theme = Theme::dark();
+let theme = default_theme(Mode::Dark);
 let mut tree = SceneTree::new();
 
 let root = tree.add_child(tree.root(), Flex::column());
@@ -117,8 +124,8 @@ draw_ui::paint(&tree, &mut ctx);          // surfaces + content + marks, in tree
 draw_ui::route_input(&mut tree, &event); // dispatches component clicks
 ```
 
-The theme is a `Copy` value passed to constructors; nothing reads it from the
-tree, so switching light/dark is just building with a different `Theme`.
+The theme is a `&'static dyn Theme` passed to constructors; nothing reads it
+from the tree, so switching light/dark is just building with a different theme.
 
 ### Paint passes
 
@@ -255,7 +262,8 @@ backward-compatible addition and record it here.
   tokens. `SurfaceStyle`, `fill_rounded_rect`/`fill_rounded_rect_corners`/`inset`/
   `surface`, `Tone`, `SurfaceTone` and the `surface_decor`/
   `dynamic_surface_decor`/`foreground_decor` factories moved from `draw_kit` into
-  `draw_ui`. `Theme` stays pure data (mode + palette + scale accessors), and
+  `draw_ui`. `Theme` stays a small token interface (mode + palette + scale
+  accessors), and
   `draw_components` (renamed from `draw_kit`) now contains only component
   builders.
 - **`draw_components::NodeRef` / `Ref<C>` + `Component::ref_` / `with_ref`**
@@ -352,11 +360,12 @@ backward-compatible addition and record it here.
 - **`Theme.density` (`Density`) — spacing and control metrics as a token**
   (driven by `image_editor`'s compact theme): spacing and control
   metrics were hardcoded `draw_theme` consts, so a custom theme could only swap
-  colors. `Theme` now carries a `Density` (`space_scale`, `control_height`,
-  `control_height_mini`, `control_padding_x`/`_y`, `row_height`,
-  `default_control`) with accessors (`spacing`, `control_height`,
-  `control_padding_x`/`_y`, `row_height`, `default_control`);
-  `Theme::compact()` / `with_density` swap it. The component library reads those
+  colors. `Theme` (the trait) now exposes a `Density` (`space_scale`,
+  `control_height`, `control_height_mini`, `control_padding_x`/`_y`,
+  `row_height`, `default_control`) with accessors (`spacing`, `control_height`,
+  `control_padding_x`/`_y`, `row_height`, `default_control`); `DefaultTheme`
+  carries it and `DefaultTheme::compact()` / `with_density` swap it. The
+  component library reads those
   accessors instead of the `space` / `control` consts (the consts stay the
   base/comfortable values and the source of the scale). `Button` gained
   `ControlSize` (`mini()` / `regular()`, default from the theme).

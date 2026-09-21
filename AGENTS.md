@@ -37,11 +37,12 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
    `draw_scene`, `draw_render` and `draw_ui`. Keep `draw_ui::Widget` and the
    backend-neutral core frozen unless a change is genuinely required and
    backward compatible; record any such change in `docs/design-system.md`.
-   Exact token names/paths matter: use `theme.palette.*` and `theme.surface(level)`
-   rather than hard-coding hex values in components. Dark is a token swap, not a
-   second code path, and dark values must stay within the documented palette.
-   Density is the same: `Theme.density` (`compact()`) changes spacing / control
-   metrics without a second code path, and components read
+   Exact token names/paths matter: use `theme.palette().*` and
+   `theme.surface(level)` rather than hard-coding hex values in components. Dark
+   is a token swap, not a second code path, and dark values must stay within the
+   documented palette. Density is the same: `theme.density()` (the built-in
+   `DefaultTheme::compact()`) changes spacing / control metrics without a second
+   code path, and components read
    `theme.spacing`/`control_height`/`row_height` rather than the `space`/`control`
    consts.
    **Migration exception (Stage 25+):** the Godot-style migration
@@ -262,8 +263,8 @@ crate/module instead of being embedded where it happens to be used.
       observability/tests/docs.
       **Stage 25.10/25.11 (component-native API):** `draw_scene::SceneChild` +
       `SceneTree::add_child`; `draw_components::Component` carries a `Spec` and exposes
-      modifiers as methods; `draw_components` components take the `Theme` as a
-      `Copy` value; the theme is no longer stored on the tree.
+      modifiers as methods; `draw_components` components take a
+      `&'static dyn Theme`; the theme is no longer stored on the tree.
       **Stage 25.12 (`Line` primitive):** `DrawCommand::Line { from, to, paint,
       width }` + `PaintContext::draw_line`, implemented in Canvas / wgpu /
       recording; `Divider` and column separators draw a real line.
