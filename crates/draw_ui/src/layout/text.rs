@@ -608,10 +608,14 @@ mod tests {
         // (default `Word` already hard-breaks an overlong word), but that an
         // *ordinary* word can break mid-word. `tokens` shows the exact unit
         // granularity: every character becomes its own break opportunity.
-        let word_units: Vec<String> =
-            tokens("hello", WordBreak::Word).into_iter().map(|(t, _)| t).collect();
-        let break_units: Vec<String> =
-            tokens("hello", WordBreak::BreakAll).into_iter().map(|(t, _)| t).collect();
+        let word_units: Vec<String> = tokens("hello", WordBreak::Word)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
+        let break_units: Vec<String> = tokens("hello", WordBreak::BreakAll)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
         assert_eq!(word_units, vec!["hello".to_string()]);
         assert_eq!(
             break_units,
@@ -647,14 +651,21 @@ mod tests {
         // `tokens` exposes the exact break-unit granularity per mode. A mixed
         // run proves keep-all joins CJK into the surrounding word instead of
         // splitting every wide char.
-        let word_units: Vec<String> =
-            tokens("ab你好cd", WordBreak::Word).into_iter().map(|(t, _)| t).collect();
-        let keep_units: Vec<String> =
-            tokens("ab你好cd", WordBreak::KeepAll).into_iter().map(|(t, _)| t).collect();
+        let word_units: Vec<String> = tokens("ab你好cd", WordBreak::Word)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
+        let keep_units: Vec<String> = tokens("ab你好cd", WordBreak::KeepAll)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
         // Default: "ab", each CJK char, "cd".
         assert_eq!(
             word_units,
-            vec!["ab", "你", "好", "cd"].into_iter().map(String::from).collect::<Vec<_>>()
+            vec!["ab", "你", "好", "cd"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
         );
         // Keep-all: one uninterrupted word.
         assert_eq!(keep_units, vec!["ab你好cd".to_string()]);
