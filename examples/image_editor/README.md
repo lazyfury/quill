@@ -92,18 +92,13 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
 
 ### 计划（Phase 10+）
 
-复用已有的叠加层（`draw_components::Overlays`）与 `examples/file_browser` 的
-工作线程 / `EventLoopProxy` 模式：
+本示例的待办已经整理到同目录的 [`todo.md`](todo.md)（含像素模式主线、
+Phase 10/11 和性能收尾），README 只留功能说明。要点：
 
-- [ ] **Phase 10 — 文件浏览器**：把「文件」面板里的路径文本输入换成选择器
-  覆盖层：`List` 列出目录项，扫描放工作线程（`EventLoopProxy`，抄
-  `examples/file_browser`），双击 / Enter 进入目录、过滤 `*.png`，选中即导入
-  并设定导出路径。
-- [ ] **Phase 11 — 图层右键菜单**：在图层面板某一行点右键，在指针处弹出上下文
-  菜单（重命名 / 复制 / 删除 / 显示隐藏 / 上移下移 / 向下合并 / 不透明度）。
-  两个前置（均为增量改动）：`Overlays` 支持**原始矩形 / 指针位置**锚点（现在
-  只认 `NodeId`）；`draw_ui` 增加右键回调（`PointerButton::Right` 已存在，但
-  `handle_input` 目前只处理左键）。
+- **Phase 10 — 文件浏览器**：路径输入换成 `List` 覆盖层，扫描走工作线程，
+  过滤 `*.png`，选中即导入 / 设导出路径。
+- **Phase 11 — 图层右键菜单**：两个前置（增量）：`Overlays` 支持原始矩形 / 指针
+  位置锚点；`draw_ui` 增加右键回调。
 
 ## 主题（紧凑）
 
