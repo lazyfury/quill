@@ -111,6 +111,7 @@ pub fn palette_panel(
     let hsv: PickerHsv = Rc::new(Cell::new((0.0, 1.0, 1.0)));
 
     Card::new(theme)
+        .grow(1.0)
         .child(Text::subheading("颜色", theme))
         .child(picker(theme, state.clone(), hsv, picker_ref))
         .child(current_colors(theme, state))

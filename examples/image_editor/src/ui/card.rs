@@ -56,7 +56,7 @@ impl Component for Card {
         // 容器本身不吃指针，卡片里的按钮 / 列表照常命中。
         self.spec.data.mouse_filter = MouseFilter::Ignore;
         self.spec.background = Some(Box::new(move |_| {
-            SurfaceStyle::new(theme.surface(SurfaceLevel::Surface))
+            SurfaceStyle::new(theme.surface(SurfaceLevel::Raised))
         }));
     }
 }

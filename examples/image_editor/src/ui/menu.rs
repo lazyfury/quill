@@ -15,7 +15,7 @@ use std::rc::Rc;
 use draw_components::{Button, Component, Flex, Menu, MenuItem, NodeRef};
 use draw_core::Edges;
 use draw_scene::SceneTree;
-use draw_theme::{space, TextSize, Theme};
+use draw_theme::{space, SurfaceLevel, TextSize, Theme};
 use draw_ui::MouseFilter;
 
 /// 菜单栏标题，从左到右。
@@ -53,6 +53,7 @@ pub fn menu_bar(
     let mut bar = Flex::row()
         .gap(space::XXS)
         .padding(Edges::symmetric(space::SM, space::XXS))
+        .background(theme.surface(SurfaceLevel::Surface))
         .mouse_filter(MouseFilter::Ignore);
     for (index, name) in MENUS.iter().enumerate() {
         let slot = NodeRef::new();
