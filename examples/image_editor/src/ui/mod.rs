@@ -34,7 +34,7 @@ use std::path::Path;
 use std::rc::Rc;
 
 use draw_components::{
-    set_text, update_control, Component, Flex, ListState, NodeRef, Overlays, ResizeHandle,
+    set_text, update_control, Component, Divider, Flex, ListState, NodeRef, Overlays, ResizeHandle,
 };
 use draw_core::{
     Edges, EventResult, InputEvent, Key, NodeId, PointerButton, Rect, Size, Vec2, ViewportSize,
@@ -342,6 +342,7 @@ impl EditorView {
                     .grow(1.0)
                     .mouse_filter(MouseFilter::Ignore)
                     .child(toolbar)
+                    .child(Divider::vertical(theme))
                     .child(
                         palette_panel
                             .basis(SizeBasis::Px(palette_width.get()))
