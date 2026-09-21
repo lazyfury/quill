@@ -165,6 +165,8 @@ pub struct EditorView {
     render_target: RenderTarget,
     /// 文档变了、还没上传的合成结果。
     texture_dirty: bool,
+    /// 显示用的透明棋盘格背景是否开启。
+    show_checkerboard: bool,
     /// 是否已做过首次适配。
     fitted: bool,
     viewport: ViewportSize,
@@ -403,6 +405,7 @@ impl EditorView {
             renderer: CpuRenderer,
             render_target: RenderTarget::new(document_size.0, document_size.1),
             texture_dirty: true,
+            show_checkerboard: true,
             fitted: false,
             viewport: ViewportSize::new(Size::new(1280.0, 800.0)),
             pan_last: None,
@@ -758,6 +761,15 @@ impl EditorView {
                 self.clear_selection();
             }
             menu::MenuAction::CropLayerToDocument => self.crop_layer_to_document(),
+            menu::MenuAction::ToggleCheckerboard => {
+                self.show_checkerboard = !self.show_checkerboard;
+                self.texture_dirty = true;
+                *self.message.borrow_mut() = Some(if self.show_checkerboard {
+                    "已显示棋盘格".to_string()
+                } else {
+                    "已隐藏棋盘格".to_string()
+                });
+            }
             menu::MenuAction::About => {
                 *self.message.borrow_mut() = Some(menu::about_text());
             }
@@ -1398,8 +1410,10 @@ impl EditorView {
         let state = self.state.borrow();
         self.renderer
             .render(&state.document, &mut self.render_target);
-        // 显示用：透明区域补上棋盘格。导出走 `export_png_to`，仍是纯合成。
-        paint_backdrop(&mut self.render_target.pixels);
+        // 显示用：透明区域补上棋盘格（可关）。导出走 `export_png_to`，仍是纯合成。
+        if self.show_checkerboard {
+            paint_backdrop(&mut self.render_target.pixels);
+        }
         Some(self.render_target.pixels.clone())
     }
 
@@ -1981,6 +1995,25 @@ mod tests {
         let revealed = view.take_texture_upload().expect("应产出合成结果");
         assert_eq!(revealed.get_pixel(0, 0), crate::canvas::color_at(0, 0));
         assert_eq!(revealed.get_pixel(8, 0), crate::canvas::color_at(8, 0));
+    }
+
+    #[test]
+    fn the_checkerboard_can_be_toggled_off() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        // 隐藏背景图层，让透明区域露出来。
+        let background = view.state.borrow().document.layers[0].id;
+        view.state
+            .borrow_mut()
+            .document
+            .set_layer_visible(background, false);
+        view.mark_texture_dirty();
+        let shown = view.take_texture_upload().expect("应产出合成结果");
+        assert_eq!(shown.get_pixel(0, 0), crate::canvas::color_at(0, 0));
+
+        view.apply_menu_action(super::menu::MenuAction::ToggleCheckerboard);
+        let hidden = view.take_texture_upload().expect("应产出合成结果");
+        assert_eq!(hidden.get_pixel(0, 0), Color::TRANSPARENT, "关掉后保持透明");
     }
 
     #[test]

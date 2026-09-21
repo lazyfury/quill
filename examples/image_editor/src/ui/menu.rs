@@ -37,6 +37,8 @@ pub enum MenuAction {
     ClearSelection,
     /// 把当前图层裁到文档大小（丢掉画布外像素）。
     CropLayerToDocument,
+    /// 切换透明棋盘格背景。
+    ToggleCheckerboard,
     About,
     /// 尚未实现的菜单项：只把提示写进状态栏。
     Placeholder(&'static str),
@@ -235,6 +237,14 @@ pub fn menu_content(
                     theme,
                     &action,
                     MenuAction::ZoomFit,
+                ))
+                .separator()
+                .item(menu_item(
+                    "显示棋盘格",
+                    None,
+                    theme,
+                    &action,
+                    MenuAction::ToggleCheckerboard,
                 ));
         }
         _ => {

@@ -45,15 +45,15 @@
 - [x] **CPU 合成成本收口**（`src/renderer/cpu.rs`）：图层缓冲现在可能比文档大，
   之前的慢路会遍历整块缓冲。改成只遍历「落在渲染目标里的那部分」，合成成本
   只跟文档尺寸有关，不再随缓冲增长（`DirtyRegion` 留给文档变大时再说）。
-- **棋盘格屏幕空间恒定大小**：现在 8 文档像素/格，随缩放变大；可改成屏幕空间恒定
-  格子或加开关。文件：`src/canvas/checkerboard.rs`、`src/ui/mod.rs`。
+- [~] **棋盘格**：视图菜单加「显示棋盘格」开关（`MenuAction::ToggleCheckerboard`）；
+  **屏幕空间恒定大小**仍未做（现在烘在显示纹理里，改成独立叠加改动偏大，暂缓）。
+  文件：`src/canvas/checkerboard.rs`、`src/ui/mod.rs`。
 - **最近邻只在 wgpu**（**暂不做，canvas 先不管**）：给 `draw_backend_canvas` 加
   `imageSmoothingEnabled` 等价开关。文件：`crates/draw_backend_canvas`（quill 主仓）。
 - [x] **图层缓冲回收**：图层菜单加「裁到文档」（`Document::crop_layer_to_document`）：
   按 `position` 摆好后裁回文档尺寸、`position` 归零，丢掉画布外像素。
-- **`--selfcheck` 覆盖**：棋盘格 / 最近邻 / 移动映射目前只有单元测试。
-- [~] **UI 暴露**：属性面板已显示图层 `position` / 缓冲尺寸；还剩棋盘格 /
-  最近邻（canvas 后端）的开关。
+- **`--selfcheck` 覆盖**：棋盘格 / 移动映射目前只有单元测试。
+- [x] **UI 暴露**：属性面板显示图层 `position` / 缓冲尺寸；视图菜单可开关棋盘格。
 
 ## 3. 计划阶段（Phase 10+）
 
@@ -70,6 +70,7 @@
 
 ## Done（近期）
 
+- **棋盘格开关**：视图菜单「显示棋盘格」（可关，导出不受影响）。
 - **图层菜单「裁到文档」**：`Document::crop_layer_to_document` 回收被移动撑大的缓冲
   （`cropping_a_layer_to_the_document_drops_off_canvas_pixels`）。
 - **属性面板显示图层几何**：`偏移 (x, y) · 缓冲 W×H`（`the_properties_panel_shows_layer_geometry`）。

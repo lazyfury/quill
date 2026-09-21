@@ -127,7 +127,8 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   overlay above `zoom >= 6`), displayed with nearest-neighbour
                   texture filtering
                   (`WgpuBackend::set_texture_filter` + `TextureFilter::Nearest`)
-                  and a checkerboard transparency backdrop. The move tool drags a
+                  and a checkerboard transparency backdrop (toggled from the 视图
+                  menu). The move tool drags a
                   layer's `position` (its pixel-buffer origin, possibly negative);
                   the first brush stroke calls
                   `Document::ensure_layer_covers_document`, which grows the buffer to

@@ -36,7 +36,8 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   `src/canvas/` 提供相机与坐标转换；滚轮缩放（锚定指针）、中键平移、
   `+`/`-`/`0`/`F` 快捷键，状态栏显示指针下的像素坐标。画布默认带一层透明
   棋盘格背景（`src/canvas/checkerboard.rs`）：只在显示用的合成结果上生成，
-  所以隐藏 / 擦除掉不透明的「背景」图层就会露出来，而导出的 PNG 仍保留 alpha。
+  所以隐藏 / 擦除掉不透明的「背景」图层就会露出来，而导出的 PNG 仍保留 alpha；
+  视图菜单的「显示棋盘格」可以开关它。
   默认文档是 128×128 的像素画画布，宿主用
   `WgpuBackend::set_texture_filter(.., TextureFilter::Nearest)` 放大时做最近邻
   采样，像素不会插值模糊。
