@@ -51,10 +51,17 @@ use crate::host::UserEvent;
 
 /// `刷新余额` — re-queries the endpoint.
 pub const MENU_REFRESH: &str = "quill.deepseek.refresh";
+/// `暂停自动刷新` / `继续自动刷新` — toggles the automatic refresh timer.
+pub const MENU_PAUSE: &str = "quill.deepseek.pause";
 /// `打开/收起面板` — same as clicking the item.
 pub const MENU_PANEL: &str = "quill.deepseek.panel";
 /// `退出`.
 pub const MENU_QUIT: &str = "quill.deepseek.quit";
+
+/// Label of [`MENU_PAUSE`] while the timer is running.
+pub const PAUSE_LABEL_RUNNING: &str = "暂停自动刷新";
+/// Label of [`MENU_PAUSE`] while the timer is held.
+pub const PAUSE_LABEL_PAUSED: &str = "继续自动刷新";
 
 /// Shown in the menu bar before the first reply lands.
 pub const TITLE_IDLE: &str = "—";
@@ -68,6 +75,9 @@ pub struct MenuBar {
     /// be explained, and an entry that looks live but silently does nothing is
     /// worse than a greyed one.
     refresh: MenuItem,
+    /// Kept so [`MenuBar::set_paused`] can swap its label between
+    /// [`PAUSE_LABEL_RUNNING`] and [`PAUSE_LABEL_PAUSED`].
+    pause: MenuItem,
 }
 
 impl MenuBar {
@@ -78,12 +88,13 @@ impl MenuBar {
     /// factor) instead of a scaled bitmap.
     pub fn new(title: &str) -> Result<Self, String> {
         let refresh = MenuItem::with_id(MENU_REFRESH, "刷新余额", true, None);
+        let pause = MenuItem::with_id(MENU_PAUSE, PAUSE_LABEL_RUNNING, true, None);
         let panel = MenuItem::with_id(MENU_PANEL, "打开 / 收起面板", true, None);
         let quit = MenuItem::with_id(MENU_QUIT, "退出", true, None);
         let separator = PredefinedMenuItem::separator();
 
         let menu = Menu::new();
-        menu.append_items(&[&refresh, &panel, &separator, &quit])
+        menu.append_items(&[&refresh, &pause, &panel, &separator, &quit])
             .map_err(|error| format!("构建菜单失败: {error}"))?;
 
         let tray = TrayIconBuilder::new()
@@ -96,12 +107,39 @@ impl MenuBar {
             .build()
             .map_err(|error| format!("创建状态栏项失败: {error}"))?;
 
-        Ok(Self { tray, refresh })
+        Ok(Self {
+            tray,
+            refresh,
+            pause,
+        })
     }
 
     /// Greys out or re-enables `刷新余额`, mirroring the view's throttle.
     pub fn set_refresh_enabled(&self, enabled: bool) {
         self.refresh.set_enabled(enabled);
+    }
+
+    /// Swaps `暂停自动刷新` / `继续自动刷新` to match the timer's state.
+    pub fn set_paused(&self, paused: bool) {
+        self.pause.set_text(if paused {
+            PAUSE_LABEL_PAUSED
+        } else {
+            PAUSE_LABEL_RUNNING
+        });
+    }
+
+    /// The current text of `暂停自动刷新`, read back from the platform.
+    ///
+    /// The self-check narrates this: a native menu's label is otherwise only
+    /// visible in a screenshot, which this project does not take.
+    pub fn pause_label(&self) -> String {
+        self.pause.text()
+    }
+
+    /// Greys out `暂停自动刷新` when the run has no automatic timer (`--every 0`),
+    /// so the entry does not promise a pause that would do nothing.
+    pub fn set_pause_enabled(&self, enabled: bool) {
+        self.pause.set_enabled(enabled);
     }
 
     /// Whether `刷新余额` is currently enabled, read back from the platform.

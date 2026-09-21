@@ -332,6 +332,12 @@ struct MenuBarState {
     anchor: Option<TrayAnchor>,
     /// Automatic refresh interval, if the timer is on.
     interval: Option<Duration>,
+    /// Whether the automatic timer is held (the menu's `暂停自动刷新`).
+    ///
+    /// Pausing only stops the *timer*: a manual refresh (the item's `刷新余额`,
+    /// the panel's button, `R`/`F5`) still goes out, because that is the whole
+    /// point of asking for one while the timer sleeps.
+    paused: bool,
     /// When the timer next fires.
     next: Option<Instant>,
     /// When the loop next has to come back for the on-screen countdowns.
@@ -521,6 +527,12 @@ impl App {
                 self.init_window(event_loop, Mode::Window);
                 return;
             }
+        }
+
+        // A run with `--every 0` has no timer, so `暂停自动刷新` would be a lie:
+        // grey it out rather than let it toggle nothing.
+        if let Some(item) = self.menu.item.as_ref() {
+            item.set_pause_enabled(self.menu.interval.is_some());
         }
 
         // The view refreshes on open, but opening is normally noticed by a
@@ -1372,13 +1384,18 @@ impl App {
         self.tick();
 
         let now = Instant::now();
-        if let Some(interval) = self.menu.interval {
-            let due = *self.menu.next.get_or_insert(now + interval);
-            if now >= due {
-                self.menu.next = Some(now + interval);
-                self.view.request_refresh();
-                self.tick();
-                self.request_redraw();
+        // A paused timer is left alone entirely: `next` is `None`, so nothing is
+        // due and no new deadline is seeded. Resuming (see `toggle_pause`) starts
+        // the interval over.
+        if !self.menu.paused {
+            if let Some(interval) = self.menu.interval {
+                let due = *self.menu.next.get_or_insert(now + interval);
+                if now >= due {
+                    self.menu.next = Some(now + interval);
+                    self.view.request_refresh();
+                    self.tick();
+                    self.request_redraw();
+                }
             }
         }
         self.update_countdown();
@@ -1386,8 +1403,8 @@ impl App {
         // The footer countdown only exists with a timer; the button counts its
         // cooldown down either way, so a run with `--every 0` still has something
         // to animate while the panel is open.
-        let ticking =
-            self.menu.open && (self.menu.interval.is_some() || !self.view.refresh_ready());
+        let ticking = self.menu.open
+            && ((self.menu.interval.is_some() && !self.menu.paused) || !self.view.refresh_ready());
         let tick_at = ticking.then(|| next_tick(now, self.menu.tick_at));
         self.menu.tick_at = tick_at;
 
@@ -1406,17 +1423,25 @@ impl App {
     /// `None`, which is also what a run without a timer shows, so the line never
     /// claims a refresh that will not happen.
     fn update_countdown(&mut self) {
-        let left = match (self.menu.open, self.menu.interval) {
-            (true, Some(interval)) => {
-                let next = *self
-                    .menu
-                    .next
-                    .get_or_insert_with(|| Instant::now() + interval);
-                Some(next.saturating_duration_since(Instant::now()))
-            }
-            _ => None,
+        // A paused timer has no deadline to count down to; the line says so
+        // instead of disappearing, so a paused panel is not mistaken for one
+        // whose timer simply has not been configured.
+        let changed = if self.menu.paused && self.menu.interval.is_some() {
+            self.view.set_countdown_paused()
+        } else {
+            let left = match (self.menu.open, self.menu.interval) {
+                (true, Some(interval)) => {
+                    let next = *self
+                        .menu
+                        .next
+                        .get_or_insert_with(|| Instant::now() + interval);
+                    Some(next.saturating_duration_since(Instant::now()))
+                }
+                _ => None,
+            };
+            self.view.set_countdown(left)
         };
-        if self.view.set_countdown(left) {
+        if changed {
             // Narrating each move is the only way to see the countdown tick in a
             // run that takes no screenshots.
             self.trace(&format!(
@@ -1463,10 +1488,49 @@ impl App {
                 self.tick();
                 self.request_redraw();
             }
+            menubar::MENU_PAUSE => self.toggle_pause(),
             menubar::MENU_PANEL => self.toggle_panel(event_loop),
             menubar::MENU_QUIT => event_loop.exit(),
             _ => {}
         }
+    }
+
+    /// Flips the automatic timer between running and held.
+    ///
+    /// Resuming starts the interval over rather than firing at once, so
+    /// `继续自动刷新` never produces a request the user did not ask for; the
+    /// next automatic query is one full interval away. A run with no timer at
+    /// all (`--every 0`) has nothing to toggle and the menu entry is greyed out.
+    fn toggle_pause(&mut self) {
+        let Some(interval) = self.menu.interval else {
+            return;
+        };
+        self.menu.paused = !self.menu.paused;
+        self.menu.next = if self.menu.paused {
+            None
+        } else {
+            Some(Instant::now() + interval)
+        };
+        if let Some(item) = self.menu.item.as_ref() {
+            item.set_paused(self.menu.paused);
+        }
+        self.trace(&format!(
+            "自动刷新 → {}{}",
+            if self.menu.paused {
+                "已暂停"
+            } else {
+                "继续"
+            },
+            self.menu
+                .item
+                .as_ref()
+                .map(|item| format!("（菜单项 {}）", item.pause_label()))
+                .unwrap_or_default(),
+        ));
+        // The countdown line has to move now, not on the next batch: with the
+        // panel open and the pointer still, nothing else schedules a frame.
+        self.update_countdown();
+        self.request_redraw();
     }
 }
 

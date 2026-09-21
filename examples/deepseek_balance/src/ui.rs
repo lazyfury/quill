@@ -98,6 +98,9 @@ const FOOTER_HINT: &str = "未配置 DEEPSEEK_API_KEY 时会提示；每次刷�
 /// Prefix of the countdown line, e.g. `自动刷新 04:32` (see
 /// [`BalanceApp::set_countdown`]).
 const COUNTDOWN_PREFIX: &str = "自动刷新";
+/// The countdown line while the automatic timer is held by the menu's
+/// `暂停自动刷新` (see [`BalanceApp::set_countdown_paused`]).
+const COUNTDOWN_PAUSED: &str = "自动刷新已暂停";
 
 /// The error the debug button stages, long enough to wrap and exercise the
 /// error line's `max_lines(2)` layout.
@@ -694,6 +697,20 @@ impl BalanceApp {
     /// the host only schedules a frame when the countdown actually moved.
     pub fn set_countdown(&mut self, remaining: Option<Duration>) -> bool {
         let line = remaining.map(|left| format!("{COUNTDOWN_PREFIX} {}", clock(left)));
+        self.set_countdown_line(line)
+    }
+
+    /// Shows the line the timer is held on, in place of the countdown.
+    ///
+    /// The host calls this while the menu's `暂停自动刷新` holds: the line stays
+    /// visible so a paused panel reads as paused rather than as one with no
+    /// timer. Same change contract as [`BalanceApp::set_countdown`].
+    pub fn set_countdown_paused(&mut self) -> bool {
+        self.set_countdown_line(Some(COUNTDOWN_PAUSED.to_string()))
+    }
+
+    /// Writes `line` (or hides the label for `None`) and reports whether it moved.
+    fn set_countdown_line(&mut self, line: Option<String>) -> bool {
         if line == self.countdown_line {
             return false;
         }
@@ -1432,6 +1449,24 @@ mod tests {
         assert!(app.set_countdown(None));
         assert_eq!(app.countdown_visible(), Some(false));
         assert!(!app.set_countdown(None), "and stays put");
+    }
+
+    /// Pausing replaces the countdown with a line that says so, and it is a
+    /// one-shot move: the host calls this every batch, so a repeat must not ask
+    /// for another frame.
+    #[test]
+    fn a_paused_timer_says_so_instead_of_counting_down() {
+        let mut app = settled(520.0, 460.0);
+        app.set_countdown(Some(Duration::from_secs(300)));
+
+        assert!(app.set_countdown_paused());
+        assert_eq!(app.countdown_visible(), Some(true));
+        assert_eq!(app.countdown_text(), Some("自动刷新已暂停"));
+        assert!(!app.set_countdown_paused(), "and stays put");
+
+        // Resuming goes back to a countdown.
+        assert!(app.set_countdown(Some(Duration::from_secs(300))));
+        assert_eq!(app.countdown_text(), Some("自动刷新 05:00"));
     }
 
     #[test]
