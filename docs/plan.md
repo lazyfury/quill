@@ -47,6 +47,7 @@ audited by `draw_profile`'s inspector, or it is not "done".
 | `Toolbar` | next | grouped icon buttons + separators |
 | `Modal` / `Toast` | done | `Overlays::confirm` (scrim) / `Overlays::message` (transient) |
 | `Popover` | done | `Overlays::popover`, anchored with edge flipping |
+| `Menu` / `MenuItem` | done | floating surface + rows (`shortcut`/`tone`/`disabled`); `Overlays::menu` anchors `BelowStart`; used by `examples/image_editor` |
 | `Progress`, `Spinner`, `Skeleton` | later | uses `Arc`/rounded primitives |
 | `ScrollView` | next | the clip + offset model now exists (`ControlData.clip`, `set_on_scroll`); wrap it in a component with a draggable scrollbar |
 
@@ -57,6 +58,11 @@ audited by `draw_profile`'s inspector, or it is not "done".
   the tree with a different `Theme` (or resolving colors per frame in the
   component's `prepare`/decorator). `dynamic_surface_decor` already resolves per
   frame.
+- `Theme` also carries a `Density` (spacing scale + control metrics): `compact()`
+  is a token swap, and the component library reads `theme.spacing` /
+  `control_height` / `row_height`, so a custom theme (e.g. the image editor's)
+  changes density without touching components. `Button` takes a `ControlSize`
+  (`mini()`/`regular()`), defaulting to the theme's `default_control`.
 - Font weights are not modeled (no weight axis yet) — add `FontWeight` tokens
   when the backends can render them.
 
@@ -131,6 +137,40 @@ priority order and add native tests.
 - Scrollable note list (depends on `ScrollView`).
 - Keyboard navigation (arrow keys move list selection; `⌘K` command palette).
 - Command palette overlay using the `List`/`Input` components.
+
+## Demo (`examples/image_editor`)
+
+A Photoshop-style editor built on `draw_ui` / `draw_components` (own workspace,
+see its README). Phases 1–8 landed. The next three reuse the overlay layer
+(`draw_components::Overlays`) and the worker-thread / `EventLoopProxy` pattern
+from `examples/file_browser`:
+
+- **Phase 9 — menu bar (done).** The menu bar opens real drop-downs: a title
+  click records a request that the view drains into `Overlays::menu`, whose
+  content is a `Menu` of `MenuItem`s (label + right-aligned shortcut, disabled
+  when the action is unavailable). Undo/redo, import/export, zoom and
+  clear-selection are wired; the rest are labeled placeholders. `Menu`/
+  `MenuItem` and `Overlays::menu` live in `draw_components`, so Phase 11 reuses
+  them.
+- **Phase 10 — file browser.** Replace the inline path field in the file panel
+  with a picker overlay: a `List` of directory entries filled by a scan on a
+  worker thread (`EventLoopProxy`, copied from `examples/file_browser`),
+  double-click / Enter to navigate, a `*.png` filter, and picking a file drives
+  import (and sets the export path). First consumer of `List` + a worker thread
+  inside a second host.
+- **Phase 11 — layer context menu.** Right-click a layer row opens a context
+  menu at the pointer (rename / duplicate / delete / hide / move / merge down /
+  opacity). Two additive prerequisites:
+  1. `Overlays` anchored to a **raw rect or pointer position**, not only a
+     laid-out `NodeId` (Component-layer item 2 above).
+  2. Right-click routing: `PointerButton::Right` exists, but
+     `draw_ui::handle_input` only reacts to the left button. Add an additive
+     context callback (`Control::context_callback` +
+     `Component::on_context_menu`) so any control can own a context menu, rather
+     than the host hit-testing rows itself.
+
+Cross-cutting: Phases 9 and 11 both need "a popover full of commands", so the
+`Menu` component should land first and be reused by both.
 
 ## Invariants
 

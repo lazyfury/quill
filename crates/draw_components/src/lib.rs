@@ -37,7 +37,8 @@
 //! - Surfaces: [`Card`], [`Divider`], [`Badge`], [`CodeBlock`], [`Terminal`],
 //!   [`EmptyState`].
 //! - Controls: [`Button`], [`Checkbox`], [`Switch`].
-//! - Floating: [`Overlays`] (`confirm`, `popover`, `tips`, `message`).
+//! - Menus: [`Menu`] + [`MenuItem`], placed with [`Overlays::menu`].
+//! - Floating: [`Overlays`] (`confirm`, `popover`, `menu`, `tips`, `message`).
 //!
 //! Inputs, selects, tabs and tables are staged next.
 
@@ -59,7 +60,7 @@ pub use base::{
 };
 pub use components::{
     Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, List, ListColumn,
-    ListState, ResizeHandle, RowSource, Switch, Terminal, Text,
+    ListState, Menu, MenuItem, ResizeHandle, RowSource, Switch, Terminal, Text, MENU_MIN_WIDTH,
 };
 pub use node_ref::{NodeRef, Ref};
 pub use overlay::{OverlayId, Overlays, Placement};

@@ -15,6 +15,7 @@ mod icons;
 mod io;
 mod renderer;
 mod selfcheck;
+mod theme;
 mod tools;
 mod ui;
 

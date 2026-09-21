@@ -36,6 +36,9 @@ pub struct ResizeHandle {
     min: f32,
     max: f32,
     color: Option<Color>,
+    /// Flip the drag direction: the target pane is on the far side of the
+    /// handle (a right-hand sidebar resized from its left edge).
+    invert: bool,
 }
 
 impl ResizeHandle {
@@ -51,6 +54,7 @@ impl ResizeHandle {
             min: 0.0,
             max: f32::INFINITY,
             color: None,
+            invert: false,
         }
     }
 
@@ -94,6 +98,14 @@ impl ResizeHandle {
 
     pub fn color(mut self, color: Color) -> Self {
         self.color = Some(color);
+        self
+    }
+
+    /// Flips the drag direction: use it when the target pane is on the far side
+    /// of the handle (e.g. a right sidebar resized from its left edge, so
+    /// dragging left grows the sidebar).
+    pub fn invert(mut self) -> Self {
+        self.invert = true;
         self
     }
 }
@@ -170,12 +182,16 @@ impl Component for ResizeHandle {
             return;
         };
         let (min, max) = (self.min, self.max);
+        let invert = self.invert;
         self.spec.on_drag = Some(Box::new(move |tree, phase, delta| match phase {
             DragPhase::Start => dragging.set(true),
             DragPhase::End => dragging.set(false),
             DragPhase::Move => {
                 let current = width.get();
-                let step = if vertical { delta.x } else { delta.y };
+                let mut step = if vertical { delta.x } else { delta.y };
+                if invert {
+                    step = -step;
+                }
                 let next = (current + step).clamp(min, max);
                 if (next - current).abs() > f32::EPSILON {
                     width.set(next);
@@ -191,3 +207,72 @@ impl Component for ResizeHandle {
 }
 
 crate::impl_scene_child!(ResizeHandle);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::base::Flex;
+    use draw_core::{InputEvent, PointerButton, ViewportSize};
+    use draw_scene::SceneTree;
+    use draw_ui::control;
+
+    /// Drags the handle 50px right and returns the target width it drove.
+    fn dragged_width(invert: bool) -> f32 {
+        let theme = Theme::dark();
+        let width = Rc::new(Cell::new(200.0));
+        let target = NodeRef::new();
+        let mut tree = SceneTree::new();
+        let root = tree.root();
+        let mut handle = ResizeHandle::vertical(theme)
+            .target(target.clone())
+            .width(width.clone())
+            .min(100.0)
+            .max(300.0);
+        if invert {
+            handle = handle.invert();
+        }
+        let page = tree.add_child(
+            root,
+            Flex::row()
+                .gap(0.0)
+                .padding(Edges::ZERO)
+                .child(
+                    Flex::column()
+                        .basis(SizeBasis::Px(200.0))
+                        .shrink(0.0)
+                        .ref_(&target),
+                )
+                .child(handle),
+        );
+        draw_ui::layout(&mut tree, ViewportSize::new(Size::new(800.0, 600.0)));
+        let node = tree.children(page).unwrap()[1];
+        let start = control(&tree, node).unwrap().rect.center();
+        let end = start + Vec2::new(50.0, 0.0);
+        draw_ui::handle_input(
+            &mut tree,
+            &InputEvent::PointerDown {
+                position: start,
+                button: PointerButton::Left,
+            },
+        );
+        draw_ui::handle_input(&mut tree, &InputEvent::PointerMove { position: end });
+        draw_ui::handle_input(
+            &mut tree,
+            &InputEvent::PointerUp {
+                position: end,
+                button: PointerButton::Left,
+            },
+        );
+        width.get()
+    }
+
+    #[test]
+    fn dragging_right_grows_a_target_on_the_left() {
+        assert!((dragged_width(false) - 250.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn invert_flips_the_drag_direction() {
+        assert!((dragged_width(true) - 150.0).abs() < 1e-3);
+    }
+}

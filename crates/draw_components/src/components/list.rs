@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use draw_core::{Color, Edges, NodeId, Vec2};
 use draw_scene::SceneTree;
-use draw_theme::{space, TextSize, Theme, Tone};
+use draw_theme::{Space, TextSize, Theme, Tone};
 use draw_ui::{dynamic_surface_decor, Control, MouseFilter, SizeBasis, SurfaceStyle, Widget};
 
 use crate::base::{
@@ -103,10 +103,11 @@ struct Slot {
 
 impl ListState {
     pub fn new() -> Self {
+        let theme = Theme::dark();
         Self {
             inner: Rc::new(RefCell::new(ListInner {
                 container: None,
-                theme: Theme::dark(),
+                theme,
                 columns: Vec::new(),
                 source: Rc::new(|_| Vec::new()),
                 on_activate: None,
@@ -115,8 +116,8 @@ impl ListState {
                 first: Rc::new(Cell::new(0)),
                 selected: Rc::new(Cell::new(None)),
                 row_height: 0.0,
-                padding: space::SM,
-                gap: space::MD,
+                padding: theme.spacing(Space::SM),
+                gap: theme.spacing(Space::MD),
                 offset: 0.0,
                 max_offset: 0.0,
                 viewport_height: 0.0,
@@ -440,8 +441,8 @@ impl List {
             state: ListState::new(),
             theme,
             row_height: row_height.max(1.0),
-            padding: space::SM,
-            gap: space::MD,
+            padding: theme.spacing(Space::SM),
+            gap: theme.spacing(Space::MD),
             source: Rc::new(source),
             columns: vec![ListColumn::flexible()],
             count: Rc::new(Cell::new(0)),

@@ -34,7 +34,7 @@ use crate::base::{Component, Flex, Label};
 use draw_core::{Color, Edges, EventResult, InputEvent, Key, NodeId, Size, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
-use draw_theme::{radius, space, SurfaceLevel, TextSize, Theme, Tone};
+use draw_theme::{radius, Space, SurfaceLevel, TextSize, Theme, Tone};
 use draw_ui::{Align, Justify, MouseFilter};
 
 use crate::Button;
@@ -85,6 +85,12 @@ enum Kind {
     },
     Popover {
         title: Option<String>,
+        content: ContentFn,
+    },
+    /// A drop-down menu: like a popover but the content owns all chrome
+    /// (a [`Menu`](crate::Menu) draws its own surface), so no default padding or
+    /// border is added around it.
+    Menu {
         content: ContentFn,
     },
     Tips {
@@ -226,6 +232,29 @@ impl Overlays {
             },
             Anchor::Target(target),
             placement,
+        );
+        entry.dismiss_on_outside = true;
+        entry.dismiss_on_escape = true;
+        self.push(entry)
+    }
+
+    /// Opens a drop-down menu anchored below `target`, built by `content`.
+    ///
+    /// `content` owns its chrome, so it typically adds a
+    /// [`Menu`](crate::Menu) and its [`MenuItem`](crate::MenuItem)s. The menu
+    /// closes on Escape or a click outside.
+    pub fn menu(
+        &mut self,
+        target: NodeId,
+        content: impl Fn(&mut SceneTree, NodeId) + 'static,
+    ) -> OverlayId {
+        let mut entry = Entry::new(
+            OverlayId(0),
+            Kind::Menu {
+                content: Rc::new(content),
+            },
+            Anchor::Target(target),
+            Placement::BelowStart,
         );
         entry.dismiss_on_outside = true;
         entry.dismiss_on_escape = true;
@@ -648,8 +677,8 @@ fn build_entry(
             tree.add_child(
                 root,
                 Flex::column()
-                    .gap(space::MD)
-                    .padding(Edges::all(space::LG))
+                    .gap(theme.spacing(Space::MD))
+                    .padding(Edges::all(theme.spacing(Space::LG)))
                     .anchors(Edges::ZERO)
                     .offsets(Edges::ZERO)
                     .min_size(CONFIRM_WIDTH, 0.0)
@@ -668,7 +697,7 @@ fn build_entry(
                         Flex::row()
                             .align(Align::Center)
                             .justify(Justify::End)
-                            .gap(space::SM)
+                            .gap(theme.spacing(Space::SM))
                             .padding(Edges::ZERO)
                             .child(cancel)
                             .child(confirm),
@@ -679,8 +708,8 @@ fn build_entry(
             let node = tree.add_child(
                 root,
                 Flex::column()
-                    .gap(space::SM)
-                    .padding(Edges::all(space::MD))
+                    .gap(theme.spacing(Space::SM))
+                    .padding(Edges::all(theme.spacing(Space::MD)))
                     .anchors(Edges::ZERO)
                     .offsets(Edges::ZERO)
                     .surface(surface),
@@ -696,11 +725,28 @@ fn build_entry(
             content(tree, node);
             node
         }
+        Kind::Menu { content } => {
+            // No surface/padding here: the added `Menu` owns all chrome, so this
+            // node is only a positioning wrapper.
+            let node = tree.add_child(
+                root,
+                Flex::column()
+                    .gap(0.0)
+                    .padding(Edges::ZERO)
+                    .anchors(Edges::ZERO)
+                    .offsets(Edges::ZERO),
+            );
+            content(tree, node);
+            node
+        }
         Kind::Tips { text } => {
             let node = tree.add_child(
                 root,
                 Flex::row()
-                    .padding(Edges::symmetric(space::SM, space::XS))
+                    .padding(Edges::symmetric(
+                        theme.spacing(Space::SM),
+                        theme.spacing(Space::XS),
+                    ))
                     .gap(0.0)
                     .anchors(Edges::ZERO)
                     .offsets(Edges::ZERO)
@@ -724,7 +770,10 @@ fn build_entry(
                 root,
                 Flex::row()
                     .align(Align::Center)
-                    .padding(Edges::symmetric(space::MD, space::SM))
+                    .padding(Edges::symmetric(
+                        theme.spacing(Space::MD),
+                        theme.spacing(Space::SM),
+                    ))
                     .gap(0.0)
                     .anchors(Edges::ZERO)
                     .offsets(Edges::ZERO)

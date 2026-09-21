@@ -17,18 +17,22 @@
 mod canvas;
 mod file_panel;
 mod layer_panel;
-mod menu;
+pub mod menu;
+mod options_bar;
 mod properties_panel;
 mod status_bar;
 mod toolbar;
 
 pub use file_panel::IoAction;
+pub use options_bar::BrushAdjust;
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 
-use draw_components::{set_text, Component, Flex, ListState, NodeRef};
+use draw_components::{
+    set_text, update_control, Component, Flex, ListState, NodeRef, Overlays, ResizeHandle,
+};
 use draw_core::{
     Edges, EventResult, InputEvent, Key, NodeId, PointerButton, Rect, Size, Vec2, ViewportSize,
 };
@@ -45,11 +49,17 @@ use crate::document::{LayerId, PixelBuffer};
 use crate::icons::IconSet;
 use crate::renderer::{sample_pixel, CpuRenderer, RenderTarget, Renderer};
 use crate::tools::{BrushMode, BrushTool, MoveTool, PointerEvent, Tool, ToolContext};
+use crate::ui::options_bar::{options_bar, options_hint, tool_has_brush, OptionsRefs};
 
 /// 工具栏宽度（逻辑像素）。
 const TOOLBAR_WIDTH: f32 = 52.0;
-/// 右侧栏宽度（逻辑像素）。
+/// 右侧栏默认 / 最小宽度（逻辑像素）。
 const SIDEBAR_WIDTH: f32 = 280.0;
+const SIDEBAR_MIN: f32 = 200.0;
+/// 画布区域的最小宽度：右栏拖动到再宽也不能把画布挤没。
+const CANVAS_MIN: f32 = 160.0;
+/// 分隔条的把手宽度（`ResizeHandle` 的默认值）。
+const RESIZE_GUTTER: f32 = 6.0;
 /// 适配时画布四周留的空白。
 const FIT_PADDING: f32 = 24.0;
 /// 一个滚轮刻度 / `+`/`-` 的缩放倍率。
@@ -65,6 +75,8 @@ struct Refs {
     props_name: NodeRef,
     props_detail: NodeRef,
     path: NodeRef,
+    sidebar: NodeRef,
+    sidebar_handle: NodeRef,
 }
 
 /// 正在进行的图层重命名。
@@ -97,6 +109,32 @@ pub struct EditorView {
     path: Rc<RefCell<String>>,
     /// 文件面板按钮留下的动作请求；`update` 取走执行。
     io_request: Rc<Cell<Option<IoAction>>>,
+    /// 菜单标题留下的“打开第几个菜单”请求；`update` 取走打开下拉。
+    menu_request: Rc<Cell<Option<usize>>>,
+    /// 菜单项留下的动作请求；`update` 取走执行（并关闭菜单）。
+    menu_action: Rc<Cell<Option<menu::MenuAction>>>,
+    /// 菜单标题的节点（下拉的锚点），顺序与 [`menu::MENUS`] 一致。
+    menu_nodes: Vec<NodeId>,
+    /// 当前打开菜单的下标（用于点同一标题时切换成关闭）。
+    open_menu: Cell<Option<usize>>,
+    /// 覆盖层：承载菜单下拉，画在 UI 之上并优先接收输入。
+    overlays: Overlays,
+    /// 工具选项栏的文本 / 容器节点。
+    options_tool: NodeId,
+    options_brush: NodeId,
+    options_size: NodeId,
+    options_opacity: NodeId,
+    options_hint: NodeId,
+    /// 选项栏 `−` / `+` 留下的请求；`update` 取走执行。
+    brush_request: Rc<Cell<Option<BrushAdjust>>>,
+    /// `−` / `+` 按钮节点（测试 / 自检点击用）。
+    brush_buttons: Vec<(BrushAdjust, NodeId)>,
+    /// 右侧栏共享宽度（分隔条写、`clamp_sidebar_width` 也写）。
+    sidebar_width: Rc<Cell<f32>>,
+    /// 右侧栏节点（分隔条的目标）。
+    sidebar_node: NodeId,
+    /// 右侧栏分隔条的节点。
+    sidebar_handle_node: NodeId,
     /// 路径标签节点，以及上一次写入的内容（避免每帧刷文本）。
     path_label: NodeId,
     shown_path: Option<String>,
@@ -156,6 +194,9 @@ impl EditorView {
                 .into_owned(),
         ));
         let io_request: Rc<Cell<Option<IoAction>>> = Rc::new(Cell::new(None));
+        let menu_request: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+        let menu_action: Rc<Cell<Option<menu::MenuAction>>> = Rc::new(Cell::new(None));
+        let mut menu_refs: Vec<NodeRef> = Vec::new();
         let mut file_refs: Vec<(IoAction, NodeRef)> = Vec::new();
         let file_panel = file_panel::file_panel(
             theme,
@@ -167,10 +208,13 @@ impl EditorView {
 
         let mut tool_refs: Vec<(ActiveTool, NodeRef)> = Vec::new();
         let mut history_refs: Vec<(HistoryAction, NodeRef)> = Vec::new();
+        // 图标包只加载一次；工具栏的按钮在构建时就把 `Icon` 子组件搭进去。
+        let icons = Rc::new(IconSet::load());
         let toolbar = toolbar::tool_bar(
             theme,
             state.clone(),
             message.clone(),
+            icons.clone(),
             &mut tool_refs,
             &mut history_refs,
         );
@@ -186,13 +230,25 @@ impl EditorView {
         );
         let layer_state = layer_list.state();
 
+        // 工具选项栏（菜单栏下面一行）+ 可拖动的右栏。
+        let options = OptionsRefs::default();
+        let brush_request: Rc<Cell<Option<BrushAdjust>>> = Rc::new(Cell::new(None));
+        let mut brush_refs: Vec<(BrushAdjust, NodeRef)> = Vec::new();
+        let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
+
         // 布局根（SceneTree 根）的子节点是按 anchors 摆的，flex 从下一层才开始 ——
         // 所以页面 column 必须是根的唯一子节点（demo_app / file_browser 同款形状）。
         let page = Flex::column()
             .gap(0.0)
             .padding(Edges::ZERO)
             .mouse_filter(MouseFilter::Ignore)
-            .child(menu::menu_bar(theme, message.clone()))
+            .child(menu::menu_bar(theme, menu_request.clone(), &mut menu_refs))
+            .child(options_bar(
+                theme,
+                brush_request.clone(),
+                &options,
+                &mut brush_refs,
+            ))
             .child(
                 Flex::row()
                     .gap(0.0)
@@ -202,8 +258,16 @@ impl EditorView {
                     .child(toolbar)
                     .child(canvas::canvas_area().ref_(&refs.canvas))
                     .child(
+                        ResizeHandle::vertical(theme)
+                            .target(refs.sidebar.clone())
+                            .width(sidebar_width.clone())
+                            .min(SIDEBAR_MIN)
+                            .invert()
+                            .ref_(&refs.sidebar_handle),
+                    )
+                    .child(
                         Flex::column()
-                            .basis(SizeBasis::Px(SIDEBAR_WIDTH))
+                            .basis(SizeBasis::Px(sidebar_width.get()))
                             .shrink(0.0)
                             .gap(space::SM)
                             .padding(Edges::all(space::SM))
@@ -220,7 +284,8 @@ impl EditorView {
                                 theme,
                                 &refs.props_name,
                                 &refs.props_detail,
-                            )),
+                            ))
+                            .ref_(&refs.sidebar),
                     ),
             )
             .child(status_bar::status_bar(
@@ -260,17 +325,18 @@ impl EditorView {
             .into_iter()
             .map(|(action, slot)| (action, slot.get().expect("file button mounted")))
             .collect();
+        let menu_nodes: Vec<NodeId> = menu_refs
+            .iter()
+            .map(|slot| slot.get().expect("menu button mounted"))
+            .collect();
+        let brush_buttons: Vec<(BrushAdjust, NodeId)> = brush_refs
+            .into_iter()
+            .map(|(adjust, slot)| (adjust, slot.get().expect("brush button mounted")))
+            .collect();
 
-        // 图标包 -> 工具栏按钮 + 侧边栏网格。解析结果由 decorator 持有，每帧只重描边。
-        let icon_set = IconSet::load();
-        let icon_color = theme.palette.foreground;
-        for (tool, node) in &tool_nodes {
-            icon_set.attach_icon(&mut tree, *node, tool.icon(), icon_color);
-        }
-        for (action, node) in &history_nodes {
-            icon_set.attach_icon(&mut tree, *node, action.icon(), icon_color);
-        }
-        let icon_count = icon_set.len();
+        // 图标包在构建按钮时已被各 `Icon` 组件解析并持有（decorator 里），这里
+        // 只留个数给自检 / 报告用。
+        let icon_count = icons.len();
 
         let mut view = Self {
             tree,
@@ -285,6 +351,21 @@ impl EditorView {
             file_nodes,
             path,
             io_request,
+            menu_request,
+            menu_action,
+            menu_nodes,
+            open_menu: Cell::new(None),
+            overlays: Overlays::new(theme),
+            options_tool: options.tool.get().expect("options tool mounted"),
+            options_brush: options.brush.get().expect("options brush mounted"),
+            options_size: options.size.get().expect("options size mounted"),
+            options_opacity: options.opacity.get().expect("options opacity mounted"),
+            options_hint: options.hint.get().expect("options hint mounted"),
+            brush_request,
+            brush_buttons,
+            sidebar_width,
+            sidebar_node: refs.sidebar.get().expect("sidebar mounted"),
+            sidebar_handle_node: refs.sidebar_handle.get().expect("sidebar handle mounted"),
             path_label: refs.path.get().expect("path label mounted"),
             shown_path: None,
             path_edit: None,
@@ -320,7 +401,8 @@ impl EditorView {
 
     /// 用后端真实字体的度量，让排版量到的宽度跟画出来的宽度一致。
     pub fn set_text_measurer(&mut self, measurer: Rc<dyn TextMeasurer>) {
-        draw_ui::set_text_measurer(&mut self.tree, measurer);
+        draw_ui::set_text_measurer(&mut self.tree, measurer.clone());
+        self.overlays.set_text_measurer(measurer);
     }
 
     /// 宿主每帧调用：同步状态栏、在文档改动后刷新图层列表并标记重合成。
@@ -332,6 +414,10 @@ impl EditorView {
         }
         self.sync_status();
         self.sync_path();
+        if let Some(adjust) = self.brush_request.take() {
+            self.apply_brush_adjust(adjust);
+        }
+        self.sync_options();
 
         let (revision, active) = {
             let state = self.state.borrow();
@@ -350,6 +436,17 @@ impl EditorView {
 
         if self.rename_request.replace(false) {
             self.begin_rename();
+        }
+        if let Some(action) = self.menu_action.take() {
+            self.overlays.close_all();
+            self.apply_menu_action(action);
+        }
+        if let Some(index) = self.menu_request.take() {
+            self.open_menu(index);
+        }
+        // Esc / 点外部已经关掉了菜单时，清掉记录的下标。
+        if self.overlays.is_empty() {
+            self.open_menu.set(None);
         }
         if self.renaming.is_some() {
             self.sync_rename_status();
@@ -555,6 +652,77 @@ impl EditorView {
         }
     }
 
+    /// 命中位置落在哪个菜单标题上（含其子节点）；用于一次点击切换菜单。
+    fn menu_index_at(&self, position: Vec2) -> Option<usize> {
+        let hit = draw_ui::hit_test(&self.tree, position)?;
+        let mut current = Some(hit);
+        while let Some(node) = current {
+            if let Some(index) = self.menu_nodes.iter().position(|id| *id == node) {
+                return Some(index);
+            }
+            current = self.tree.parent(node);
+        }
+        None
+    }
+
+    /// 打开第 `index` 个菜单的下拉，锚在对应标题按钮下。
+    fn open_menu(&mut self, index: usize) {
+        let Some(&anchor) = self.menu_nodes.get(index) else {
+            return;
+        };
+        self.overlays.close_all();
+        let theme = self.theme;
+        let action = self.menu_action.clone();
+        let (can_undo, can_redo, has_selection) = {
+            let state = self.state.borrow();
+            (
+                state.can_undo(),
+                state.can_redo(),
+                state.selection.is_some(),
+            )
+        };
+        self.overlays.menu(anchor, move |tree, root| {
+            menu::menu_content(
+                tree,
+                root,
+                theme,
+                index,
+                action.clone(),
+                can_undo,
+                can_redo,
+                has_selection,
+            );
+        });
+        self.open_menu.set(Some(index));
+    }
+
+    /// 执行一个菜单动作（[`EditorView::update`] 在关闭菜单后调用）。
+    fn apply_menu_action(&mut self, action: menu::MenuAction) {
+        match action {
+            menu::MenuAction::Undo => {
+                self.undo();
+            }
+            menu::MenuAction::Redo => {
+                self.redo();
+            }
+            menu::MenuAction::Import => self.handle_io(IoAction::Import),
+            menu::MenuAction::Export => self.handle_io(IoAction::Export),
+            menu::MenuAction::ZoomIn => self.apply_canvas_action(CanvasAction::ZoomIn),
+            menu::MenuAction::ZoomOut => self.apply_canvas_action(CanvasAction::ZoomOut),
+            menu::MenuAction::ZoomReset => self.apply_canvas_action(CanvasAction::Reset),
+            menu::MenuAction::ZoomFit => self.apply_canvas_action(CanvasAction::Fit),
+            menu::MenuAction::ClearSelection => {
+                self.clear_selection();
+            }
+            menu::MenuAction::About => {
+                *self.message.borrow_mut() = Some(menu::about_text());
+            }
+            menu::MenuAction::Placeholder(note) => {
+                *self.message.borrow_mut() = Some(note.to_string());
+            }
+        }
+    }
+
     /// 路径编辑中的按键 / 文本输入；返回是否消费了事件。
     fn handle_path_input(&mut self, event: &InputEvent) -> bool {
         match event {
@@ -620,6 +788,7 @@ impl EditorView {
     pub fn layout(&mut self, viewport: ViewportSize) {
         self.viewport = viewport;
         self.tree.set_viewport_size(viewport.logical_size());
+        self.clamp_sidebar_width();
         draw_ui::layout(&mut self.tree, viewport);
         // 第一次布局拿到画布区域的真实矩形，才能做适配。
         if !self.fitted {
@@ -630,6 +799,8 @@ impl EditorView {
         if self.layer_state.sync(&mut self.tree) {
             draw_ui::layout(&mut self.tree, viewport);
         }
+        // 覆盖层用自己的树，必须在主树排完之后定位。
+        self.overlays.layout(&self.tree, viewport);
         self.sync_document_node();
         self.tree.update();
     }
@@ -639,6 +810,7 @@ impl EditorView {
         self.tree.paint(ctx);
         self.paint_selection(ctx);
         draw_ui::paint(&self.tree, ctx);
+        self.overlays.paint(ctx);
     }
 
     /// 框选选区的描边：把文档像素矩形换算成屏幕坐标，画一圈 1px 线。
@@ -669,6 +841,27 @@ impl EditorView {
     /// 工具快捷键、画布缩放 / 平移由视图先处理；其余（点击、指针）交给
     /// `draw_ui::handle_input`，由它去找带回调的控件。
     pub fn event(&mut self, event: &InputEvent) -> EventResult {
+        // 覆盖层优先：菜单打开时，Esc / 点击外部由它先处理。
+        // 例外：点的是菜单标题时，先关掉当前菜单、把点击留给主树 —— 这样点
+        // 另一个标题一次就能切换，点同一个标题则是关闭。
+        if let InputEvent::PointerDown { position, .. } = event {
+            if self.menu_open() {
+                if let Some(index) = self.menu_index_at(*position) {
+                    let same = self.open_menu.get() == Some(index);
+                    self.overlays.close_all();
+                    self.open_menu.set(None);
+                    if same {
+                        return EventResult::Handled;
+                    }
+                } else if self.overlays.handle_input(event).is_handled() {
+                    return EventResult::Handled;
+                }
+            } else if self.overlays.handle_input(event).is_handled() {
+                return EventResult::Handled;
+            }
+        } else if self.overlays.handle_input(event).is_handled() {
+            return EventResult::Handled;
+        }
         // 重命名 / 路径编辑进行中：键盘只编辑文本，不触发工具 / 画布快捷键。
         if self.renaming.is_some() && self.handle_rename_input(event) {
             return EventResult::Handled;
@@ -831,6 +1024,21 @@ impl EditorView {
 
     fn canvas_area_rect(&self) -> Option<Rect> {
         draw_ui::control(&self.tree, self.canvas_area).map(|control| control.rect)
+    }
+
+    /// 分隔条只管 `[min, max]`，管不了"窗口变窄了"。那一半在这里：右栏最多
+    /// 占到给画布留 [`CANVAS_MIN`] 为止（`examples/file_browser` 同款）。
+    fn clamp_sidebar_width(&mut self) {
+        let full = self.viewport.logical_size().width;
+        let max = (full - TOOLBAR_WIDTH - RESIZE_GUTTER - CANVAS_MIN).max(SIDEBAR_MIN);
+        let current = self.sidebar_width.get();
+        let next = current.clamp(SIDEBAR_MIN, max);
+        if (next - current).abs() > f32::EPSILON {
+            self.sidebar_width.set(next);
+            update_control(&mut self.tree, self.sidebar_node, |data| {
+                data.layout.basis = SizeBasis::Px(next);
+            });
+        }
     }
 
     fn canvas_area_contains(&self, position: Vec2) -> bool {
@@ -1016,6 +1224,39 @@ impl EditorView {
             Some(format!("笔刷不透明度 {:.0}%", self.brush.opacity * 100.0));
     }
 
+    /// 选项栏的 `−` / `+` 请求 -> 真正的笔刷调整。
+    fn apply_brush_adjust(&mut self, adjust: BrushAdjust) {
+        match adjust {
+            BrushAdjust::SizeDown => self.adjust_brush_size(-2.0),
+            BrushAdjust::SizeUp => self.adjust_brush_size(2.0),
+            BrushAdjust::OpacityDown => self.adjust_brush_opacity(-0.05),
+            BrushAdjust::OpacityUp => self.adjust_brush_opacity(0.05),
+        }
+    }
+
+    /// 工具选项栏：工具名 / 提示 / 笔刷配置，按当前工具显示。
+    fn sync_options(&mut self) {
+        let tool = self.state.borrow().active_tool;
+        set_text(&mut self.tree, self.options_tool, tool.label());
+        set_text(
+            &mut self.tree,
+            self.options_size,
+            format!("{:.0}px", self.brush.size),
+        );
+        set_text(
+            &mut self.tree,
+            self.options_opacity,
+            format!("{:.0}%", self.brush.opacity * 100.0),
+        );
+        set_text(&mut self.tree, self.options_hint, options_hint(tool));
+
+        let show_brush = tool_has_brush(tool);
+        if self.tree.is_visible(self.options_brush) != Some(show_brush) {
+            self.tree.set_visible(self.options_brush, show_brush);
+            draw_ui::mark_dirty(&mut self.tree, self.options_brush);
+        }
+    }
+
     // -- 访问器（宿主 / 测试 / 自检） -----------------------------------
 
     /// 当前激活的工具。
@@ -1150,6 +1391,51 @@ impl EditorView {
     /// 文件面板按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
     pub fn file_center(&self, action: IoAction) -> Option<Vec2> {
         draw_ui::control(&self.tree, self.file_node(action)?).map(|control| control.rect.center())
+    }
+
+    /// 选项栏 `−` / `+` 按钮的节点。
+    pub fn brush_adjust_node(&self, adjust: BrushAdjust) -> Option<NodeId> {
+        self.brush_buttons
+            .iter()
+            .find(|(candidate, _)| *candidate == adjust)
+            .map(|(_, id)| *id)
+    }
+
+    /// 选项栏 `−` / `+` 按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
+    pub fn brush_adjust_center(&self, adjust: BrushAdjust) -> Option<Vec2> {
+        let id = self.brush_adjust_node(adjust)?;
+        draw_ui::control(&self.tree, id).map(|control| control.rect.center())
+    }
+
+    /// 当前笔刷大小（逻辑像素）。
+    pub fn brush_size(&self) -> f32 {
+        self.brush.size
+    }
+
+    /// 右栏当前宽度（逻辑像素）。
+    pub fn sidebar_width(&self) -> f32 {
+        self.sidebar_width.get()
+    }
+
+    /// 右栏分隔条的中心点（逻辑坐标）；测试与自检模拟拖动用。
+    pub fn sidebar_handle_center(&self) -> Option<Vec2> {
+        draw_ui::control(&self.tree, self.sidebar_handle_node).map(|control| control.rect.center())
+    }
+
+    /// 菜单标题按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
+    pub fn menu_center(&self, index: usize) -> Option<Vec2> {
+        let id = *self.menu_nodes.get(index)?;
+        draw_ui::control(&self.tree, id).map(|control| control.rect.center())
+    }
+
+    /// 当前是否有下拉菜单打开。
+    pub fn menu_open(&self) -> bool {
+        !self.overlays.is_empty()
+    }
+
+    /// 当前打开菜单的下标（没有打开则为 `None`）。
+    pub fn open_menu_index(&self) -> Option<usize> {
+        self.open_menu.get()
     }
 
     /// 当前文档的图层数（自检核对导入结果用）。
@@ -1311,28 +1597,79 @@ mod tests {
         assert_eq!(label_text(&view, view.tool_label), "橡皮擦");
     }
 
+    fn menu_index(name: &str) -> usize {
+        crate::ui::menu::MENUS
+            .iter()
+            .position(|candidate| *candidate == name)
+            .expect("menu exists")
+    }
+
+    /// 走 `EditorView::event` 的一次点击（覆盖层参与路由，与真实鼠标一致）。
+    fn click_event(view: &mut EditorView, position: Vec2) {
+        view.event(&InputEvent::PointerDown {
+            position,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position,
+            button: PointerButton::Left,
+        });
+    }
+
     #[test]
-    fn clicking_a_menu_reports_a_placeholder_message() {
+    fn clicking_a_menu_title_opens_its_dropdown() {
         let mut view = EditorView::new(Theme::dark(), AppState::default());
         view.layout(viewport());
-        // “帮助”仍是占位菜单项；点击它的中心。
-        let text = "帮助";
-        let position = view
-            .tree
-            .iter()
-            .find_map(|id| match draw_ui::widget(&view.tree, id) {
-                Some(Widget::Label { text: label, .. }) if label == text => {
-                    draw_ui::control(&view.tree, id).map(|c| c.rect.center())
-                }
-                _ => None,
-            })
-            .expect("help menu label");
-        click(&mut view, position);
+        let help = menu_index("帮助");
+        let center = view.menu_center(help).expect("help menu button");
+        click_event(&mut view, center);
         view.update();
-        assert!(
-            label_text(&view, view.message_label).contains("占位"),
-            "菜单占位提示应出现在状态栏"
-        );
+        assert!(view.menu_open(), "点菜单标题应打开下拉");
+    }
+
+    #[test]
+    fn clicking_another_menu_title_switches_in_one_click() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let file = menu_index("文件");
+        let edit = menu_index("编辑");
+        let center = view.menu_center(file).expect("file menu button");
+        click_event(&mut view, center);
+        view.update();
+        assert_eq!(view.open_menu_index(), Some(file));
+        // 一次点击就切到「编辑」，而不是先关再点。
+        let center = view.menu_center(edit).expect("edit menu button");
+        click_event(&mut view, center);
+        view.update();
+        assert_eq!(view.open_menu_index(), Some(edit));
+        assert!(view.menu_open());
+    }
+
+    #[test]
+    fn clicking_the_open_menu_title_closes_it() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let help = menu_index("帮助");
+        let center = view.menu_center(help).expect("help menu button");
+        click_event(&mut view, center);
+        view.update();
+        assert!(view.menu_open());
+        click_event(&mut view, center);
+        view.update();
+        assert!(!view.menu_open(), "点同一标题应关闭菜单");
+    }
+
+    #[test]
+    fn escape_closes_an_open_menu() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let help = menu_index("帮助");
+        let center = view.menu_center(help).expect("help menu button");
+        click_event(&mut view, center);
+        view.update();
+        assert!(view.menu_open());
+        view.event(&InputEvent::KeyDown { key: Key::Escape });
+        assert!(!view.menu_open(), "Esc 应关闭菜单");
     }
 
     #[test]
@@ -1356,6 +1693,71 @@ mod tests {
         let mut ctx = PaintContext::new();
         view.paint(&mut ctx);
         ctx.into_draw_list().into_commands()
+    }
+
+    #[test]
+    fn the_options_bar_adjusts_the_brush_size() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        // Select the brush so its config is shown in the options bar.
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('b'),
+        });
+        view.update();
+        view.layout(viewport());
+        let before = view.brush_size();
+        let center = view
+            .brush_adjust_center(BrushAdjust::SizeUp)
+            .expect("size + button");
+        view.event(&InputEvent::PointerDown {
+            position: center,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: center,
+            button: PointerButton::Left,
+        });
+        view.update();
+        assert_eq!(view.brush_size(), before + 2.0);
+    }
+
+    #[test]
+    fn dragging_the_sidebar_handle_resizes_the_sidebar() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let before = view.sidebar_width();
+        let start = view.sidebar_handle_center().expect("sidebar handle");
+        // The sidebar is on the right, so dragging the handle left grows it.
+        let end = start - Vec2::new(40.0, 0.0);
+        view.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerMove { position: end });
+        view.event(&InputEvent::PointerUp {
+            position: end,
+            button: PointerButton::Left,
+        });
+        view.layout(viewport());
+        assert!(
+            view.sidebar_width() > before,
+            "{} should have grown from {before}",
+            view.sidebar_width()
+        );
+    }
+
+    #[test]
+    fn the_active_tool_button_paints_the_selection_color() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let selection = view.theme().palette.selection;
+        assert!(
+            paint_commands(&view).iter().any(|command| matches!(
+                command,
+                DrawCommand::FillRoundedRect { paint, .. } if paint.color == selection
+            )),
+            "当前工具的按钮应画出 selection 高亮"
+        );
     }
 
     #[test]

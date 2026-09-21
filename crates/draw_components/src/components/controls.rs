@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::base::{Component, Flex, Label, Spec};
 use draw_core::{Edges, Size, Vec2};
-use draw_theme::{control, radius, space, TextSize, Theme};
+use draw_theme::{radius, Space, TextSize, Theme};
 use draw_ui::{Align, SurfaceStyle, TextOptions, Widget};
 
 /// A compact checkbox with a label.
@@ -63,7 +63,7 @@ impl Component for Checkbox {
         Widget::Flex(
             draw_ui::FlexStyle::row()
                 .align(Align::Center)
-                .gap(space::SM),
+                .gap(self.theme.spacing(Space::SM)),
         )
     }
 
@@ -73,7 +73,7 @@ impl Component for Checkbox {
             .state
             .clone()
             .unwrap_or_else(|| Rc::new(Cell::new(self.initial)));
-        self.spec.data.min_size = Size::new(0.0, control::ROW_SM);
+        self.spec.data.min_size = Size::new(0.0, theme.row_height());
 
         let paint_state = state.clone();
         self.spec.child(
@@ -188,7 +188,7 @@ impl Component for Switch {
         Widget::Flex(
             draw_ui::FlexStyle::row()
                 .align(Align::Center)
-                .gap(space::SM),
+                .gap(self.theme.spacing(Space::SM)),
         )
     }
 
@@ -198,7 +198,7 @@ impl Component for Switch {
             .state
             .clone()
             .unwrap_or_else(|| Rc::new(Cell::new(self.initial)));
-        self.spec.data.min_size = Size::new(0.0, control::ROW_SM);
+        self.spec.data.min_size = Size::new(0.0, theme.row_height());
 
         let paint_state = state.clone();
         self.spec.child(

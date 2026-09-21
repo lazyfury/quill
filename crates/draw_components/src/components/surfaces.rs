@@ -3,7 +3,7 @@
 use crate::base::{Component, Flex, Label, Spec};
 use draw_core::{Color, Edges, Size, Vec2};
 use draw_render::PaintContext;
-use draw_theme::{radius, space, SurfaceTone, TextSize, Theme, Tone};
+use draw_theme::{radius, Space, SurfaceTone, TextSize, Theme, Tone};
 use draw_ui::{Align, Justify, SurfaceStyle, TextOptions, Widget};
 
 use crate::Text;
@@ -39,8 +39,8 @@ impl Card {
             fill: None,
             hairline: true,
             radius: radius::LG,
-            padding: Edges::all(space::LG),
-            gap: space::MD,
+            padding: Edges::all(theme.spacing(Space::LG)),
+            gap: theme.spacing(Space::MD),
         }
     }
 
@@ -263,7 +263,10 @@ impl Component for Badge {
                 .align(Align::Center)
                 .justify(Justify::Center)
                 .gap(0.0)
-                .padding(Edges::symmetric(space::SM, space::XXS)),
+                .padding(Edges::symmetric(
+                    self.theme.spacing(Space::SM),
+                    self.theme.spacing(Space::XXS),
+                )),
         )
     }
 
@@ -333,8 +336,8 @@ impl Component for CodeBlock {
     fn widget(&self) -> Widget {
         Widget::Flex(
             draw_ui::FlexStyle::column()
-                .gap(space::SM)
-                .padding(Edges::all(space::LG)),
+                .gap(self.theme.spacing(Space::SM))
+                .padding(Edges::all(self.theme.spacing(Space::LG))),
         )
     }
 
@@ -348,7 +351,7 @@ impl Component for CodeBlock {
         if self.filename.is_some() || self.language.is_some() {
             let mut header = Flex::row()
                 .align(Align::Center)
-                .gap(space::SM)
+                .gap(theme.spacing(Space::SM))
                 .anchors(Edges::ZERO)
                 .offsets(Edges::ZERO);
             if let Some(filename) = self.filename.clone() {
@@ -422,8 +425,8 @@ impl Component for Terminal {
     fn widget(&self) -> Widget {
         Widget::Flex(
             draw_ui::FlexStyle::column()
-                .gap(space::SM)
-                .padding(Edges::all(space::LG)),
+                .gap(self.theme.spacing(Space::SM))
+                .padding(Edges::all(self.theme.spacing(Space::LG))),
         )
     }
 
@@ -441,14 +444,14 @@ impl Component for Terminal {
         ];
         self.spec.child(
             Flex::row()
-                .gap(space::XS)
+                .gap(theme.spacing(Space::XS))
                 .padding(Edges::ZERO)
                 .anchors(Edges::ZERO)
                 .offsets(Edges::ZERO)
                 .min_size(0.0, 8.0)
                 .foreground(move |ctx: &mut PaintContext, rect, _| {
                     let r = 3.5;
-                    let step = r * 2.0 + space::XXS;
+                    let step = r * 2.0 + theme.spacing(Space::XXS);
                     let y = rect.top() + r;
                     for (index, color) in dots.into_iter().enumerate() {
                         ctx.fill_circle(
@@ -520,8 +523,8 @@ impl Component for EmptyState {
         Widget::Flex(
             draw_ui::FlexStyle::column()
                 .align(Align::Center)
-                .gap(space::MD)
-                .padding(Edges::all(space::XXXL)),
+                .gap(self.theme.spacing(Space::MD))
+                .padding(Edges::all(self.theme.spacing(Space::XXXL))),
         )
     }
 

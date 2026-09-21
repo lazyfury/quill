@@ -250,7 +250,9 @@ tree.add_child(
 `ResizeHandle` looks like a `Divider` (1px line) but its node is a wider gutter
 (`size`, default 6px) that can be grabbed. It sets the target's
 `LayoutStyle.basis` on drag; the surrounding `Flex` re-adapts the other panes.
-Fixed panes/gutters should use `shrink(0.0)`.
+Fixed panes/gutters should use `shrink(0.0)`. By default the target is the pane
+before the handle; add `.invert()` when it is on the far side (a right sidebar
+resized from its left edge, so dragging left grows it).
 
 One gutter resizes two panes: give the *left* pane a `basis` and let the right one
 `grow(1.0)`, then point the handle at the left pane — dragging left shrinks it and
@@ -403,6 +405,39 @@ already-built node (handy when the view's internals are captured as it is
 composed, as `demo_app` does). `go(tree, i)` switches and applies immediately;
 `add_named` + `go_name(tree, "settings")` route by name. The host applies the
 route once per frame (typically in its `update`).
+
+## Menus
+
+`Menu` is a floating surface of `MenuItem` rows; `Overlays::menu` drops it below
+an anchor and handles Escape / click-outside. The host opens it in its frame
+update, so click callbacks (which cannot borrow the host) only record a request.
+
+```rust
+use draw_components::{Menu, MenuItem};
+
+// A menu title click records `Some(index)` in a shared cell...
+Button::ghost("File", theme).on_click({ let r = request.clone(); move || r.set(Some(0)) });
+
+// ...and `update` drains it into an overlay:
+overlays.menu(title_node, move |tree, node| {
+    tree.add_child(node, Menu::new(theme)
+        .item(MenuItem::action("Undo", "Ctrl+Z", theme).on_click(undo).disabled(!can_undo))
+        .separator()
+        .item(MenuItem::new("Export PNG…", theme).on_click(export)));
+});
+```
+
+`MenuItem` renders a left label and an optional right-aligned `shortcut`, takes a
+`tone` (`destructive()` for delete), and `disabled(true)` dims it and drops the
+click. `Menu::min_width` overrides the 200px default; the surface stretches each
+row. A menu item click does not close the overlay by itself — the host closes it
+when it drains the action (see `examples/image_editor`).
+
+The overlay consumes an outside click (that is how it dismisses), so a host whose
+menu bar should switch menus in one click has to intercept the title hit *before*
+delegating to `Overlays`: `examples/image_editor` checks the pointer against its
+menu-title nodes on `PointerDown`, closes the overlay, and lets the click reach
+the tree (clicking the open title closes it; clicking another switches).
 
 ## Request redraw
 

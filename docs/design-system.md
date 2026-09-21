@@ -21,7 +21,7 @@ and focus.
 ## Tokens — `draw_theme`
 
 ```rust
-use draw_theme::{space, radius, control, Mode, TextSize, Theme};
+use draw_theme::{space, radius, control, ControlSize, Mode, Space, TextSize, Theme};
 
 let theme = Theme::dark();
 theme.mode;                       // Mode::Dark
@@ -29,7 +29,9 @@ theme.palette.background;         // #0A0A0A
 theme.palette.surface_raised;     // #171717
 theme.palette.border;             // #262626
 theme.surface(SurfaceLevel::Raised);
-theme.spacing(space::LG);         // 16.0
+theme.spacing(Space::LG);         // 16.0
+theme.compact().spacing(Space::LG); // 12.0 (0.75x)
+theme.control_height(ControlSize::Mini); // 32.0 comfortable / 24.0 compact
 ```
 
 ### Color
@@ -56,8 +58,34 @@ Semantic accents (`accent`, `success`, `warning`, `error`, `info`), `on_accent`,
 - Spacing: `space::{XXXS..COLOSSAL}` = `2,4,6,8,12,16,20,24,32,40,48,64,80`.
 - Radius: `radius::{NONE,SM,MD,LG,PANEL,FULL}` = `0,4,6,8,10,9999`.
 - Type: `TextSize::{Display,Title,Heading,Subheading,Body,Small,Caption}`.
-- Controls: `control::{HEIGHT,HEIGHT_SM,HEIGHT_LG,ICON,ROW,ROW_SM,TAB}`.
+- Controls: `control::{HEIGHT,HEIGHT_SM,HEIGHT_LG,ICON,ROW,ROW_SM,TAB}` (the base / comfortable values).
 - Motion: `motion::{FAST,NORMAL,SLOW}` = 100/150/200 ms.
+
+### Density
+
+`Theme` also carries a `Density`: the spacing and control metrics components
+read. `Density::COMFORTABLE` (default) is the base scale with regular controls;
+`Density::COMPACT` tightens everything and makes controls mini. `Theme::compact()`
+/ `Theme::with_density(..)` swap it — a token swap, not a second code path;
+colors and type sizes are unaffected.
+
+| Token | Comfortable | Compact |
+|---|---|---|
+| `space_scale` (× every `Space`) | 1.0 | 0.75 |
+| `control_height` | 36 | 28 |
+| `control_height_mini` | 32 | 24 |
+| `control_padding_x` / `_y` | 12 / 8 | 8 / 4 |
+| `row_height` (lists / menus) | 36 | 28 |
+| `default_control` | `Regular` | `Mini` |
+
+Components read `theme.spacing(Space::…)`, `theme.control_height(size)`,
+`theme.control_padding_x()/y()` and `theme.row_height()` rather than the `space`
+/ `control` consts. `Button` takes a `ControlSize` (`Button::mini()` /
+`Button::regular()`) and defaults to `theme.default_control()`; an explicit
+`.min_size(..)` on a component wins over the density default (so a toolbar can
+pin its icon buttons to a fixed size). A custom theme (e.g.
+`examples/image_editor::theme::editor_theme`) is just a `Theme` value with a
+different density.
 
 ## Components — `draw_components`
 
@@ -134,15 +162,16 @@ placeholders) and detail pane (toolbar, hero scene, body, actions).
 | `Text` | display/title/heading/subheading/body/small/caption; `tone`, `color`, wrapping. |
 | `Card` | column flex container with themed surface + hairline border. |
 | `Divider` | 1px horizontal/vertical rule. |
-| `ResizeHandle` | draggable divider; resizes the target pane's flex basis. |
+| `ResizeHandle` | draggable divider; resizes the target pane's flex basis; `invert()` when the target is on the far side (a right sidebar). |
 | `Badge` | metadata tag; `tone`, `pill`, `solid`. |
-| `Button` | `Primary`/`Secondary`/`Ghost`/`Destructive` variants with `on_click`. |
+| `Button` | `Primary`/`Secondary`/`Ghost`/`Destructive` variants with `on_click`; `ControlSize` via `mini()`/`regular()` (default from the theme density); an explicit `background`/`dynamic_background` overrides the variant surface. |
 | `CodeBlock` | code surface, optional filename/language. |
 | `Terminal` | header dots, command and output lines. |
 | `EmptyState` | icon placeholder, title, description. |
 | `Checkbox` | compact control with shared state and `on_change`. |
 | `Switch` | compact on/off control. |
 | `List` | virtualized rows: mounts the viewport's rows (+1 buffer) and recycles them; `ListState` (`sync`/`scroll_by`/`scroll_to`/`invalidate`), wheel + click, container clip. |
+| `Menu` / `MenuItem` | floating menu surface + rows (label, optional right-aligned shortcut, `tone`/`destructive`, `disabled`, `on_click`); `Menu::separator`/`min_width`; place with `Overlays::menu`. |
 
 `draw_components` containers take children, so a screen is one expression:
 
@@ -161,9 +190,9 @@ Extend the library by implementing `draw_components::Component` (see
 
 ## Overlays
 
-`draw_components::Overlays` is a generic floating layer built on its own `Ui`.
-It keeps the host pipeline explicit — the host lays out its UI, then the layer,
-and paints the layer last:
+`draw_components::Overlays` is a generic floating layer built on its own
+`SceneTree`. It keeps the host pipeline explicit — the host lays out its UI,
+then the layer, and paints the layer last:
 
 ```rust
 app.ui.layout(viewport);
@@ -179,14 +208,16 @@ no-op, so hosts can call it unconditionally.
 | Builder | Behavior |
 |---|---|
 | `confirm(title, message)` | modal dialog, centered, scrim, Esc / click-outside / buttons close it. |
-| `popover(target, placement, content)` | anchored to a laid-out control; `content` builds into the layer's `Ui`. |
+| `popover(target, placement, content)` | anchored to a laid-out control; `content` builds into the layer's `SceneTree`. |
+| `menu(target, content)` | drop-down menu: like `popover` but the content owns its chrome (add a `Menu`); anchored `BelowStart`, Esc / click-outside close it. |
 | `tips(target, text)` | tooltip anchored to a control, shown only while it (or a descendant) is hovered. |
 | `message(text)` / `message_tone(text, tone)` | transient toast, auto-dismissed after ~2.5s. |
 
 Positioning is in `overlay::placement::place`: `Above`/`Below`/`Left`/`Right`
 flip to the opposite side when they would leave the viewport, then clamp to an
-8px margin; `Center`/`TopCenter`/`BottomCenter` are used for dialogs and toasts.
-`Overlays::rect(id)` exposes the resolved rectangle for tests/tools.
+8px margin; `BelowStart` left-aligns to the anchor (right-aligning when it would
+overflow) for menus; `Center`/`TopCenter`/`BottomCenter` are used for dialogs and
+toasts. `Overlays::rect(id)` exposes the resolved rectangle for tests/tools.
 
 Entries are declarative and rebuilt only when the set changes, so per-frame
 layout stays incremental. Button clicks, Esc and click-outside push actions that
@@ -299,6 +330,33 @@ backward-compatible addition and record it here.
   `word_break` builder. Additive and backward compatible: `WordBreak::Word` is
   the `Default`, so every existing `TextOptions` literal/`default()` call keeps
   the old output.
+- **`Overlays::menu` + `Placement::BelowStart`** (Stage 25, image editor menu
+  bar): the overlay layer could anchor a `popover` but had no menu semantics and
+  no left-aligned placement. `Overlays::menu(target, content)` is a new overlay
+  kind whose content owns all chrome (no default surface/padding wrapper),
+  anchored `BelowStart` (left edges aligned; right-aligns near the right edge),
+  and dismissed by Escape / click-outside like a popover. Additive: the existing
+  `popover`/`confirm`/`tips`/`message` entries and the `Placement` variants are
+  unchanged. `Menu`/`MenuItem` themselves are plain `draw_components` themed
+  components — no `Widget`/`ControlData` shape changed.
+- **`Theme.density` (`Density`) — spacing and control metrics as a token**
+  (driven by `examples/image_editor`'s compact theme): spacing and control
+  metrics were hardcoded `draw_theme` consts, so a custom theme could only swap
+  colors. `Theme` now carries a `Density` (`space_scale`, `control_height`,
+  `control_height_mini`, `control_padding_x`/`_y`, `row_height`,
+  `default_control`) with accessors (`spacing`, `control_height`,
+  `control_padding_x`/`_y`, `row_height`, `default_control`);
+  `Theme::compact()` / `with_density` swap it. The component library reads those
+  accessors instead of the `space` / `control` consts (the consts stay the
+  base/comfortable values and the source of the scale). `Button` gained
+  `ControlSize` (`mini()` / `regular()`, default from the theme).
+  `Density::COMFORTABLE` (the default) reproduces the previous metrics exactly,
+  so existing themes and components are unchanged.
+- **`ResizeHandle::invert()`** (driven by `examples/image_editor`'s resizable
+  right sidebar): the handle assumed its target pane was on the *near* side, so
+  a right-hand sidebar (target on the far side) resized in the wrong direction.
+  `invert()` flips the drag delta. Additive — the default behavior and every
+  existing call site are unchanged.
 
 
 ## Deferred
@@ -308,5 +366,5 @@ Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /
 square and rounded corners), implemented by the canvas, wgpu and recording
 backends, so surfaces no longer compose circles + rects by hand. Inputs, selects,
 tabs and tables are staged next; see `docs/plan.md` for the full roadmap.
-The overlay layer covers confirm dialogs, popovers, tooltips and toasts, and
-`List` covers scrolling rows (`docs/components.md`).
+The overlay layer covers confirm dialogs, popovers, menus, tooltips and toasts,
+and `List` covers scrolling rows (`docs/components.md`).

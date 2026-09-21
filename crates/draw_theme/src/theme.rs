@@ -2,6 +2,7 @@
 
 use draw_core::Color;
 
+use crate::density::{ControlSize, Density};
 use crate::palette::Palette;
 use crate::scale::{Motion, Radius, Space, TextSize};
 
@@ -37,11 +38,15 @@ pub enum SurfaceLevel {
     Floating,
 }
 
-/// A resolved design system: [`Mode`] + [`Palette`] + scale accessors.
+/// A resolved design system: [`Mode`] + [`Palette`] + [`Density`] + scale
+/// accessors.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
     pub mode: Mode,
     pub palette: Palette,
+    /// Layout density (spacing / control metrics). Colors and type are
+    /// unaffected, so a compact theme is a token swap.
+    pub density: Density,
 }
 
 impl Default for Theme {
@@ -55,6 +60,7 @@ impl Theme {
         Self {
             mode: Mode::Light,
             palette: Palette::light(),
+            density: Density::default(),
         }
     }
 
@@ -62,7 +68,19 @@ impl Theme {
         Self {
             mode: Mode::Dark,
             palette: Palette::dark(),
+            density: Density::default(),
         }
+    }
+
+    /// Returns a copy of this theme with a different layout density.
+    pub fn with_density(mut self, density: Density) -> Self {
+        self.density = density;
+        self
+    }
+
+    /// This theme with [`Density::COMPACT`] (tighter spacing, mini controls).
+    pub fn compact(self) -> Self {
+        self.with_density(Density::COMPACT)
     }
 
     /// Builds the theme for an explicit mode.
@@ -125,9 +143,37 @@ impl Theme {
         size.px()
     }
 
-    /// Spacing step in pixels.
-    pub const fn spacing(&self, space: Space) -> f32 {
-        space.px()
+    /// Spacing step in pixels, scaled by the theme's [`Density`].
+    pub fn spacing(&self, space: Space) -> f32 {
+        space.px() * self.density.space_scale
+    }
+
+    /// Height of a control at `size` (regular or mini).
+    pub fn control_height(&self, size: ControlSize) -> f32 {
+        match size {
+            ControlSize::Regular => self.density.control_height,
+            ControlSize::Mini => self.density.control_height_mini,
+        }
+    }
+
+    /// Horizontal padding inside a control.
+    pub fn control_padding_x(&self) -> f32 {
+        self.density.control_padding_x
+    }
+
+    /// Vertical padding inside a control.
+    pub fn control_padding_y(&self) -> f32 {
+        self.density.control_padding_y
+    }
+
+    /// Default list / menu row height.
+    pub fn row_height(&self) -> f32 {
+        self.density.row_height
+    }
+
+    /// Size a control gets when it does not ask for one explicitly.
+    pub fn default_control(&self) -> ControlSize {
+        self.density.default_control
     }
 
     /// Radius step in pixels.

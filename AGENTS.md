@@ -40,6 +40,10 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
    Exact token names/paths matter: use `theme.palette.*` and `theme.surface(level)`
    rather than hard-coding hex values in components. Dark is a token swap, not a
    second code path, and dark values must stay within the documented palette.
+   Density is the same: `Theme.density` (`compact()`) changes spacing / control
+   metrics without a second code path, and components read
+   `theme.spacing`/`control_height`/`row_height` rather than the `space`/`control`
+   consts.
    **Migration exception (Stage 25+):** the Godot-style migration
    (`docs/godot-migration.md`) may change `draw_scene` / `draw_ui` incompatible;
    keep the compatibility layer green per phase and update
@@ -90,7 +94,8 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                  draw_profile, winit, tracing
                  (standalone demo: own workspace, NOT a workspace member;
                   the Photoshop-style editor demo whose UI is built with the
-                  quill stack instead of egui. Landed: menu/toolbar/status bar,
+                  quill stack instead of egui. Landed: menu/toolbar/tool-options
+                  bar/status bar, a resizable right sidebar (`ResizeHandle`),
                   `document` model (`Document`/`Layer`/`PixelBuffer`, plus
                   `PixelRegion`), `canvas` (a `Node2D` + `Visual::Image`, camera
                   zoom/pan, coordinate conversion), `renderer` (CPU compositor),
@@ -98,19 +103,26 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   active layer), `history` (`Command`/`History`/
                   `PaintCommand`: one stroke = one undo, toolbar buttons +
                   `Ctrl/Cmd+Z`), and Lucide icons (toolbar tool + undo/redo
-                  buttons) stroked straight into the IR via `draw_svg` (no
-                  rasterization, no texture; vendored 7-icon subset matching
-                  the toolbar + `IMAGE_EDITOR_ICON_DIR` to point at a full
-                  pack)), and PNG import/export (`io` `codec`/`file` on the
+                  buttons) built as an `Icon` component that strokes straight
+                  into the IR via `draw_svg` (no rasterization, no texture;
+                  vendored 7-icon subset matching the toolbar +
+                  `IMAGE_EDITOR_ICON_DIR` to point at a full pack)), and PNG import/export (`io` `codec`/`file` on the
                   `png` crate — a dependency only in this example, the core
                   stays dependency-free; a sidebar `file` panel with inline
                   path editing since winit has no native file dialog), and the
                   move / rectangle-select / eyedropper tools (`MoveTool` moves a
                   layer's `position`; selection lives in `AppState` and clips the
                   brush via `canvas::pixel_selection`; the eyedropper reads the
-                  composite through `renderer::sample_pixel`). Verified headlessly
+                  composite through `renderer::sample_pixel`), and a real menu
+                  bar (a title click opens `draw_components::Overlays::menu`,
+                  whose content is a `Menu` of `MenuItem`s; undo/redo, import/
+                  export, zoom/fit, clear-selection and about are wired, the rest
+                  are labeled placeholders; the reusable `Menu`/`MenuItem` live
+                  in `draw_components`), and a compact custom theme
+                  (`theme::editor_theme`, `Density::COMPACT`). Verified headlessly
                   with `--selfcheck` (undo/redo, a real export->decode + import
-                  round-trip, the three tools, and an icon/FillCircle check))
+                  round-trip, the three tools, the menu open -> item -> close
+                  loop, and an icon/FillCircle check))
 ```
 
 Planned (Stage 25, see `docs/godot-migration.md`):

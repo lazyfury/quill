@@ -13,6 +13,10 @@ pub enum Placement {
     Above,
     /// Below the anchor (flips above when it would clip the bottom edge).
     Below,
+    /// Below the anchor with the left edges aligned; used by drop-down menus.
+    /// Flips above near the bottom edge and right-aligns when it would overflow
+    /// the right edge.
+    BelowStart,
     /// Left of the anchor (flips right when it would clip the left edge).
     Left,
     /// Right of the anchor (flips left when it would clip the right edge).
@@ -46,6 +50,7 @@ pub fn place(
     let (preferred_x, preferred_y) = match placement {
         Placement::Above => (anchor.center().x - w * 0.5, anchor.top() - offset - h),
         Placement::Below => (anchor.center().x - w * 0.5, anchor.bottom() + offset),
+        Placement::BelowStart => (anchor.left(), anchor.bottom() + offset),
         Placement::Left => (anchor.left() - offset - w, anchor.center().y - h * 0.5),
         Placement::Right => (anchor.right() + offset, anchor.center().y - h * 0.5),
         Placement::Center => (anchor.center().x - w * 0.5, anchor.center().y - h * 0.5),
@@ -57,6 +62,8 @@ pub fn place(
     match placement {
         Placement::Above if y < min_y => y = anchor.bottom() + offset,
         Placement::Below if y > max_y => y = anchor.top() - offset - h,
+        Placement::BelowStart if y > max_y => y = anchor.top() - offset - h,
+        Placement::BelowStart if x > max_x => x = anchor.right() - w,
         Placement::Left if x < min_x => x = anchor.right() + offset,
         Placement::Right if x > max_x => x = anchor.left() - offset - w,
         _ => {}
@@ -103,6 +110,35 @@ mod tests {
         );
         assert!((out.left() - 150.0).abs() < 1e-3);
         assert!((out.top() - 168.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn below_start_aligns_the_left_edges() {
+        let out = place(
+            anchor(),
+            Size::new(100.0, 40.0),
+            viewport(),
+            Placement::BelowStart,
+            8.0,
+            8.0,
+        );
+        assert!((out.left() - anchor().left()).abs() < 1e-3);
+        assert!((out.top() - 168.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn below_start_right_aligns_when_it_would_overflow() {
+        let anchor = Rect::from_min_size(Vec2::new(360.0, 20.0), Size::new(30.0, 16.0));
+        let out = place(
+            anchor,
+            Size::new(100.0, 40.0),
+            viewport(),
+            Placement::BelowStart,
+            8.0,
+            8.0,
+        );
+        assert!(out.right() <= 400.0 - 8.0 + 1e-3, "not clamped: {out:?}");
+        assert!((out.right() - anchor.right()).abs() < 1e-3);
     }
 
     #[test]

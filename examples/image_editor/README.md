@@ -63,6 +63,47 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   选中时画一圈描边，Esc 清空；吸管用 `renderer::sample_pixel` 取**合成后**的
   颜色写进前景色。三个工具的纯逻辑分别放在 `canvas` / `renderer` / `tools`，
   视图只做坐标换算与状态同步。
+- [x] **Phase 9 — 菜单栏（真实下拉）**：标题点击改成一个共享请求格，
+  `EditorView::update` 用它调 `draw_components::Overlays::menu` 弹出下拉；
+  下拉内容是一个 `Menu`（`MenuItem` 行 = 左标签 + 右快捷键，动作不可用时
+  `disabled`）。撤销 / 重做、导入 / 导出、缩放 / 适配、取消选区、关于已接真实
+  动作，其余是带标注的占位项。菜单打开时点**另一个**标题会一次点击切换、点
+  当前标题则关闭（标题的点击在覆盖层消费外部点击之前被 `EditorView` 拦下，
+  再交给主树）。`Menu` / `MenuItem` / `Overlays::menu` 都在核心包
+  `draw_components`，Phase 11 的右键菜单直接复用。
+- [x] **Phase 9.x — 工具选项栏 + 可拖动右栏**：菜单栏下面多一行工具选项栏
+  （`ui/options_bar.rs`）：画笔 / 橡皮显示笔刷大小、不透明度与 `−` / `+`
+  按钮，其余工具显示一句操作提示；`−` / `+` 只写请求格，`update` 统一调整。
+  右侧栏宽度改用 `ResizeHandle::vertical(..).invert()`（目标在把手右边）拖动，
+  并在 `layout` 里 `clamp_sidebar_width`，保证画布不被挤没。
+
+### 计划（Phase 10+）
+
+复用已有的叠加层（`draw_components::Overlays`）与 `examples/file_browser` 的
+工作线程 / `EventLoopProxy` 模式：
+
+- [ ] **Phase 10 — 文件浏览器**：把「文件」面板里的路径文本输入换成选择器
+  覆盖层：`List` 列出目录项，扫描放工作线程（`EventLoopProxy`，抄
+  `examples/file_browser`），双击 / Enter 进入目录、过滤 `*.png`，选中即导入
+  并设定导出路径。
+- [ ] **Phase 11 — 图层右键菜单**：在图层面板某一行点右键，在指针处弹出上下文
+  菜单（重命名 / 复制 / 删除 / 显示隐藏 / 上移下移 / 向下合并 / 不透明度）。
+  两个前置（均为增量改动）：`Overlays` 支持**原始矩形 / 指针位置**锚点（现在
+  只认 `NodeId`）；`draw_ui` 增加右键回调（`PointerButton::Right` 已存在，但
+  `handle_input` 目前只处理左键）。
+
+## 主题（紧凑）
+
+编辑器用自己的主题 `theme::editor_theme(light)`：设计系统的调色板 +
+`Density::COMPACT`（间距 ×0.75、控件更矮、默认 mini 按钮）。这是一次 token
+替换，不是第二条代码路径 —— 组件库的间距 / 控件高度都从 `Theme` 读
+（`theme.spacing(..)` / `theme.control_height(..)` / `theme.row_height()`），
+所以改 `editor_theme` 一处就能整体调紧/调松。想回到常规尺寸用
+`Density::COMFORTABLE`。
+
+工具栏的图标尺寸是**显式固定**的（`icons::TOOLBAR_ICON`，20px，画在按钮中央），
+不从按钮矩形推算 —— 所以紧凑主题把按钮变矮时图标不会跟着缩水；图标按钮用
+`.min_size(32, 28)` 钉住高度，密度默认值不会覆盖它。
 
 ## 快捷键
 
@@ -95,7 +136,7 @@ src/
 ├── app/
 │   ├── state.rs         # ActiveTool / CanvasCamera / AppState（纯数据）
 │   └── application.rs   # winit + wgpu 宿主（滚轮 -> Wheel、纹理上传）
-├── icons.rs             # 附加：Lucide 图标包加载 + 描边到按钮（draw_svg）
+├── icons.rs             # Lucide 图标包加载 + `Icon` 组件（draw_svg）
 ├── document/            # Phase 2：后端无关的数据模型
 │   ├── mod.rs
 │   ├── color.rs         # 8-bit RGBA
@@ -127,6 +168,7 @@ src/
 │   ├── mod.rs           # EditorView：页面 + 文档 Node2D + 相机同步 + undo/redo
 │   ├── menu.rs          # 菜单栏
 │   ├── toolbar.rs       # 工具栏（工具 + 撤销/重做）
+│   ├── options_bar.rs   # 工具选项栏（笔刷大小 / 不透明度 / 提示）
 │   ├── canvas.rs        # 透明画布区域（命中 / 定位用）
 │   ├── file_panel.rs    # Phase 7：文件面板（路径 + 导入 / 导出按钮）
 │   ├── layer_panel.rs   # 图层面板（List + 操作按钮）
@@ -196,11 +238,18 @@ Phase 6 起还做一次**真实的撤销 / 重做往返**：画笔一笔 → 点
 
 ## 图标（Lucide，附加）
 
-工具栏的 5 个工具和撤销 / 重做各挂一枚 Lucide 图标：按钮本身是空的点击 / 高亮区，
-图标由 `foreground_decor` 用核心的 `draw_svg` 描边（backend-neutral：把 SVG 描边成
-IR 的 `Line` / `FillCircle`）——**不栅格化成纹理**，也不加额外依赖；小字标签在
-按钮下面（`ui/toolbar.rs`）。默认加载仓库自带的 7 个图标（`assets/icons/`，
-含 Lucide 的 ISC `LICENSE`），测试与 `--selfcheck` 因而可复现。
+工具栏的 5 个工具和撤销 / 重做各有一枚 Lucide 图标。图标是一个真正的
+`Icon` **组件**（`src/icons.rs`）：`Icon::new(icons, name, color, size)` 占
+`size × size`，在自己的矩形里居中描边；构建按钮时直接
+`.child(Icon::new(..))`（见 `ui/toolbar.rs`），不用等树建好再回头挂装饰器。
+按钮本身是空的点击 / 高亮区，`Icon` 的 `mouse_filter` 是 `Ignore`，点击落到按钮上。
+当前工具用 `theme.palette.selection` 高亮（`Button` 的显式 `dynamic_background`
+会覆盖 variant 的默认背景）。
+
+描边走核心的 `draw_svg`（backend-neutral：把 SVG 描边成 IR 的 `Line` /
+`FillCircle`）——**不栅格化成纹理**，也不加额外依赖；小字标签在按钮下面。
+默认加载仓库自带的 7 个图标（`assets/icons/`，含 Lucide 的 ISC `LICENSE`），
+测试与 `--selfcheck` 因而可复现。
 
 想看完整图标包（2112 个）：
 

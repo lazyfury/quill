@@ -13,6 +13,7 @@ use draw_theme::{radius, space, SurfaceLevel, Theme};
 use draw_ui::{Align, MouseFilter, SizeBasis, SurfaceStyle};
 
 use crate::app::state::{ActiveTool, AppState, HistoryAction};
+use crate::icons::{Icon, IconSet, TOOLBAR_ICON};
 use crate::ui::TOOLBAR_WIDTH;
 
 /// 竖直工具栏。`slots` 收集每个工具按钮的节点，`history_slots` 收集撤销 /
@@ -21,6 +22,7 @@ pub fn tool_bar(
     theme: Theme,
     state: Rc<RefCell<AppState>>,
     message: Rc<RefCell<Option<String>>>,
+    icons: Rc<IconSet>,
     slots: &mut Vec<(ActiveTool, NodeRef)>,
     history_slots: &mut Vec<(HistoryAction, NodeRef)>,
 ) -> impl Component {
@@ -34,7 +36,13 @@ pub fn tool_bar(
     for tool in ActiveTool::ALL {
         let slot = NodeRef::new();
         slots.push((tool, slot.clone()));
-        bar = bar.child(tool_button(theme, tool, state.clone(), &slot));
+        bar = bar.child(tool_button(
+            theme,
+            tool,
+            state.clone(),
+            icons.clone(),
+            &slot,
+        ));
     }
     bar = bar.child(Divider::horizontal(theme));
     for action in HistoryAction::ALL {
@@ -45,22 +53,28 @@ pub fn tool_bar(
             action,
             state.clone(),
             message.clone(),
+            icons.clone(),
             &slot,
         ));
     }
     bar
 }
 
-/// 一个工具按钮：点击写入激活工具；激活时高亮，悬停时给一点反馈。
+/// 一个工具按钮：图标 + 点击写入激活工具；激活时高亮，悬停时给一点反馈。
 fn tool_button(
     theme: Theme,
     tool: ActiveTool,
     state: Rc<RefCell<AppState>>,
+    icons: Rc<IconSet>,
     slot: &NodeRef,
 ) -> impl Component {
     let click_state = state.clone();
     let button = Button::ghost("", theme)
         .min_size(32.0, 28.0)
+        .child(
+            Icon::new(icons, tool.icon(), theme.palette.foreground, TOOLBAR_ICON)
+                .min_size(12.0, 12.0),
+        )
         .on_click(move || {
             click_state.borrow_mut().active_tool = tool;
         })
@@ -77,16 +91,23 @@ fn tool_button(
     labeled(theme, tool.short_label(), button)
 }
 
-/// 撤销 / 重做按钮：写共享状态里的 `History`，并把结果写到状态栏提示。
+/// 撤销 / 重做按钮：图标 + 写共享状态里的 `History`，并把结果写到状态栏提示。
 fn history_button(
     theme: Theme,
     action: HistoryAction,
     state: Rc<RefCell<AppState>>,
     message: Rc<RefCell<Option<String>>>,
+    icons: Rc<IconSet>,
     slot: &NodeRef,
 ) -> impl Component {
     let button = Button::ghost("", theme)
         .min_size(32.0, 28.0)
+        .child(Icon::new(
+            icons,
+            action.icon(),
+            theme.palette.foreground,
+            TOOLBAR_ICON,
+        ))
         .on_click(move || {
             let result = {
                 let mut state = state.borrow_mut();

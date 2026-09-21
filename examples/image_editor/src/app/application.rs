@@ -71,11 +71,8 @@ struct App {
 
 impl App {
     fn new(options: Options) -> Self {
-        let theme = if options.light {
-            Theme::light()
-        } else {
-            Theme::dark()
-        };
+        // 编辑器自己的主题：设计系统的调色板 + 紧凑密度（更小 padding、mini 控件）。
+        let theme = crate::theme::editor_theme(options.light);
         tracing::info!(target: "image_editor", theme = ?theme.mode, "application_start");
         let state = AppState::default();
         tracing::info!(

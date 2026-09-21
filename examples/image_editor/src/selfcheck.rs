@@ -16,10 +16,9 @@
 //!   的条件，不开窗就能抓到 UI 回归。
 
 use draw_backend_recording::{RecordedFrame, RecordingBackend};
-use draw_core::{InputEvent, PointerButton, Size, Vec2, ViewportSize};
+use draw_core::{InputEvent, Key, PointerButton, Size, Vec2, ViewportSize};
 use draw_profile::{inspect_with, FrameCounters, FrameStats, InspectionConfig, Severity};
 use draw_render::{DrawCommand, PaintContext, RenderBackend};
-use draw_theme::Theme;
 
 use crate::app::state::{ActiveTool, AppState, HistoryAction};
 use crate::document::{Color, PixelBuffer};
@@ -96,9 +95,34 @@ fn contains(frame: &RecordedFrame, needle: &str) -> bool {
     texts(frame).iter().any(|text| text.contains(needle))
 }
 
+/// 画一帧但不消费视图，供交互序列中反复读命令。
+fn paint_frame(view: &EditorView) -> RecordedFrame {
+    let viewport = viewport();
+    let mut backend = RecordingBackend::new();
+    backend.begin_frame(viewport).expect("begin frame");
+    let mut ctx = PaintContext::new();
+    view.paint(&mut ctx);
+    backend.submit(&ctx.into_draw_list()).expect("submit frame");
+    backend.end_frame().expect("end frame");
+    backend.last_frame().expect("a frame was recorded").clone()
+}
+
+/// 一段文字在命令流里的可点击点（基线左侧稍下方，落在行内）。
+fn text_center(frame: &RecordedFrame, needle: &str) -> Option<Vec2> {
+    frame.commands().iter().find_map(|command| match command {
+        DrawCommand::DrawText {
+            text,
+            position,
+            font_size,
+            ..
+        } if text.contains(needle) => Some(*position + Vec2::new(8.0, -font_size * 0.5)),
+        _ => None,
+    })
+}
+
 /// 自检主流程：返回（失败数，报告文本）。
 pub fn check() -> (usize, String) {
-    let mut view = EditorView::new(Theme::dark(), AppState::default());
+    let mut view = EditorView::new(crate::theme::editor_theme(false), AppState::default());
     view.layout(viewport());
     // 切换工具是真正可用的交互，这里真的点一下。
     click_tool(&mut view, ActiveTool::Brush);
@@ -261,6 +285,90 @@ pub fn check() -> (usize, String) {
         failures.push("移动工具没有改变图层位置".to_string());
     }
 
+    // Phase 9：菜单栏 -> 下拉菜单 -> 菜单项动作。
+    let view_index = crate::ui::menu::MENUS
+        .iter()
+        .position(|name| *name == "视图")
+        .expect("视图 menu exists");
+    match view.menu_center(view_index) {
+        Some(center) => {
+            click_at(&mut view, center);
+            view.update();
+            view.layout(viewport());
+            let menu_frame = paint_frame(&view);
+            if !view.menu_open() {
+                failures.push("点「视图」后菜单没有打开".to_string());
+            }
+            if view.open_menu_index() != Some(view_index) {
+                failures.push("打开的菜单下标不对".to_string());
+            }
+            for needle in ["放大", "缩小", "100%", "适配窗口"] {
+                if !contains(&menu_frame, needle) {
+                    failures.push(format!("视图菜单缺少菜单项：`{needle}`"));
+                }
+            }
+            // 点「适配窗口」：应执行缩放并关闭菜单。
+            match text_center(&menu_frame, "适配窗口") {
+                Some(item_center) => {
+                    click_at(&mut view, item_center);
+                    view.update();
+                }
+                None => failures.push("找不到「适配窗口」菜单项的位置".to_string()),
+            }
+            if view.menu_open() {
+                failures.push("点菜单项后菜单没有关闭".to_string());
+            }
+        }
+        None => failures.push("找不到「视图」菜单标题".to_string()),
+    }
+
+    // 工具选项栏：切到画笔，点「大小 +」，笔刷应变大；工具名也在帧里。
+    view.event(&InputEvent::KeyDown {
+        key: Key::Character('b'),
+    });
+    view.update();
+    view.layout(viewport());
+    let options_frame = paint_frame(&view);
+    if !contains(&options_frame, "画笔工具") {
+        failures.push("选项栏缺少当前工具名".to_string());
+    }
+    let size_before = view.brush_size();
+    match view.brush_adjust_center(crate::ui::BrushAdjust::SizeUp) {
+        Some(center) => {
+            click_at(&mut view, center);
+            view.update();
+        }
+        None => failures.push("找不到选项栏的「大小 +」按钮".to_string()),
+    }
+    if view.brush_size() <= size_before {
+        failures.push(format!(
+            "选项栏「{}」没生效",
+            crate::ui::BrushAdjust::SizeUp.label()
+        ));
+    }
+
+    // 可拖动右栏：向左拖分隔条，右栏应变宽。
+    let sidebar_before = view.sidebar_width();
+    match view.sidebar_handle_center() {
+        Some(start) => {
+            let end = start - Vec2::new(40.0, 0.0);
+            view.event(&InputEvent::PointerDown {
+                position: start,
+                button: PointerButton::Left,
+            });
+            view.event(&InputEvent::PointerMove { position: end });
+            view.event(&InputEvent::PointerUp {
+                position: end,
+                button: PointerButton::Left,
+            });
+            view.layout(viewport());
+        }
+        None => failures.push("找不到右栏分隔条".to_string()),
+    }
+    if view.sidebar_width() <= sidebar_before {
+        failures.push("拖分隔条后右栏没变宽".to_string());
+    }
+
     let (view, frame) = record(view);
     let camera = view.canvas_camera();
 
@@ -290,7 +398,8 @@ pub fn check() -> (usize, String) {
     }
 
     // 语义：每块面板的关键文字都要出现在命令流里。
-    let required: [(&str, &str); 14] = [
+    // （框选结果由上面的 `view.selection()` 结构化断言，不靠状态栏那句瞬时提示。）
+    let required: [(&str, &str); 13] = [
         ("文件", "菜单栏 / 文件面板"),
         ("编辑", "菜单栏"),
         ("帮助", "菜单栏"),
@@ -304,7 +413,6 @@ pub fn check() -> (usize, String) {
         ("导入 PNG", "文件面板按钮"),
         ("导出 PNG", "文件面板按钮"),
         ("import", "导入后的图层名"),
-        ("选区", "状态栏（框选结果）"),
     ];
     for (needle, panel) in required {
         if !contains(&frame, needle) {
@@ -383,7 +491,10 @@ pub fn run(dump: bool) -> i32 {
 
 /// 打印整帧的绘制命令（`--dump` 用；只给一次，方便定位问题）。
 fn dump_commands() -> String {
-    let (_, frame) = record(EditorView::new(Theme::dark(), AppState::default()));
+    let (_, frame) = record(EditorView::new(
+        crate::theme::editor_theme(false),
+        AppState::default(),
+    ));
     let mut out = String::from("\n绘制命令:\n");
     for (index, command) in frame.commands().iter().enumerate() {
         out.push_str(&format!("  {index:>4}  {command:?}\n"));
@@ -404,7 +515,10 @@ mod tests {
 
     #[test]
     fn the_frame_is_structurally_clean() {
-        let (view, frame) = record(EditorView::new(Theme::dark(), AppState::default()));
+        let (view, frame) = record(EditorView::new(
+            crate::theme::editor_theme(false),
+            AppState::default(),
+        ));
         let mut stats = FrameStats::new(0);
         stats.counters = FrameCounters::new(0, view.control_count(), frame.command_count(), 1);
         let report = inspect_with(&frame.draw_list, &stats, &InspectionConfig::default());
@@ -422,7 +536,10 @@ mod tests {
 
     #[test]
     fn every_panel_puts_ink_on_the_frame() {
-        let (_, frame) = record(EditorView::new(Theme::dark(), AppState::default()));
+        let (_, frame) = record(EditorView::new(
+            crate::theme::editor_theme(false),
+            AppState::default(),
+        ));
         for needle in ["文件", "画笔", "图层", "属性"] {
             assert!(contains(&frame, needle), "缺少 `{needle}`");
         }
@@ -437,7 +554,7 @@ mod tests {
 
     #[test]
     fn clicking_the_brush_button_updates_the_status_bar() {
-        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        let mut view = EditorView::new(crate::theme::editor_theme(false), AppState::default());
         view.layout(viewport());
         click_tool(&mut view, ActiveTool::Brush);
         let (_, frame) = record(view);
@@ -446,7 +563,10 @@ mod tests {
 
     #[test]
     fn all_text_stays_on_screen() {
-        let (_, frame) = record(EditorView::new(Theme::dark(), AppState::default()));
+        let (_, frame) = record(EditorView::new(
+            crate::theme::editor_theme(false),
+            AppState::default(),
+        ));
         for command in frame.commands() {
             if let DrawCommand::DrawText { position, .. } = command {
                 assert!(

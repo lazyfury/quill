@@ -5,11 +5,13 @@
 //! `draw_ui` or any backend, so it is usable from every layer.
 //!
 //! ```rust
-//! use draw_theme::{space, Mode, TextSize, Theme};
+//! use draw_theme::{space, Mode, Space, TextSize, Theme};
 //!
 //! let theme = Theme::dark();
 //! assert_eq!(theme.mode, Mode::Dark);
 //! assert_eq!(space::MD, 12.0);
+//! assert_eq!(theme.spacing(Space::MD), 12.0);
+//! assert_eq!(theme.compact().spacing(Space::MD), 9.0);
 //! assert_eq!(TextSize::Body.px(), 15.0);
 //! ```
 //!
@@ -20,11 +22,13 @@
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_theme";
 
+mod density;
 mod palette;
 mod scale;
 mod theme;
 mod tone;
 
+pub use density::{ControlSize, Density};
 pub use palette::{Palette, Semantic};
 pub use scale::{
     border, control, motion, radius, space, Border, Control, Motion, Radius, Space, TextSize,
