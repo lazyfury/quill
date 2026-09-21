@@ -75,6 +75,8 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   “当前范围 ∪ 文档范围”，于是拖动画布之后：图层移空、重新露在文档里的区域是
   透明像素、可以继续画（“画布外／canvas 内也能画”），而**移出画布的像素不裁掉**，
   留在缓冲区里还能再移回来（补空间是左侧 / 上方，历史命令的区域会跟着平移）。
+  要回收被移动撑大的缓冲区，用图层菜单的「裁到文档」（按 `position` 摆好后裁回
+  文档尺寸、丢弃画布外像素）。
   框选拖出选区（`canvas::pixel_selection` 把两个角点
   裁剪成整数 `PixelRegion`，存在 `AppState.selection`），画笔落笔按选区裁剪，
   选中时画一圈描边，Esc 清空；吸管用 `renderer::sample_pixel` 取**合成后**的

@@ -757,12 +757,34 @@ impl EditorView {
             menu::MenuAction::ClearSelection => {
                 self.clear_selection();
             }
+            menu::MenuAction::CropLayerToDocument => self.crop_layer_to_document(),
             menu::MenuAction::About => {
                 *self.message.borrow_mut() = Some(menu::about_text());
             }
             menu::MenuAction::Placeholder(note) => {
                 *self.message.borrow_mut() = Some(note.to_string());
             }
+        }
+    }
+
+    /// 把当前图层裁到文档大小（丢弃画布外像素，回收缓冲区）。
+    fn crop_layer_to_document(&mut self) {
+        let Some(id) = self
+            .state
+            .borrow()
+            .document
+            .active_layer()
+            .map(|layer| layer.id)
+        else {
+            *self.message.borrow_mut() = Some("没有可裁剪的图层".to_string());
+            return;
+        };
+        let changed = self.state.borrow_mut().document.crop_layer_to_document(id);
+        if changed {
+            self.texture_dirty = true;
+            *self.message.borrow_mut() = Some("已裁到文档大小".to_string());
+        } else {
+            *self.message.borrow_mut() = Some("图层已经在文档范围内".to_string());
         }
     }
 
@@ -2134,6 +2156,28 @@ mod tests {
             texts.iter().any(|text| text.contains("缓冲 128×128")),
             "texts = {texts:?}"
         );
+    }
+
+    #[test]
+    fn the_crop_action_shrinks_a_moved_layer_back_to_the_document() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let id = view.state.borrow().document.active_layer().unwrap().id;
+        {
+            let mut state = view.state.borrow_mut();
+            state.document.set_layer_position(id, Point::new(10, 0));
+            state.document.ensure_layer_covers_document(id);
+        }
+        assert!(view.state.borrow().document.layer(id).unwrap().pixels.width > 128);
+
+        view.apply_menu_action(super::menu::MenuAction::CropLayerToDocument);
+        {
+            let state = view.state.borrow();
+            let layer = state.document.layer(id).unwrap();
+            assert_eq!((layer.pixels.width, layer.pixels.height), (128, 128));
+            assert_eq!(layer.position, Point::ZERO);
+        }
+        assert!(view.take_texture_upload().is_some(), "裁剪后要重合成");
     }
 
     #[test]

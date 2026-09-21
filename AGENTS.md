@@ -134,7 +134,8 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   the union of its extent and the document, so strokes land under
                   the cursor, the vacated document area stays drawable, and pixels
                   moved off-canvas are kept (not cropped) — the history regions are
-                  shifted to match. Verified headlessly
+                  shifted to match; the 图层 menu's 「裁到文档」 reclaims the grown
+                  buffer. Verified headlessly
                   with `--selfcheck` (undo/redo, a real export->decode + import
                   round-trip, the three tools, the menu open -> item -> close
                   loop, and an icon/FillCircle check))

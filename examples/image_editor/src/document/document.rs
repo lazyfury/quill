@@ -240,6 +240,29 @@ impl Document {
         (dx, dy)
     }
 
+    /// 把图层缓冲裁回文档大小：可见部分按 `position` 摆放，`position` 归零，
+    /// 画布外的像素丢弃。已经对齐（文档大小 + `position = 0`）时返回 `false`。
+    pub fn crop_layer_to_document(&mut self, id: LayerId) -> bool {
+        let Some(index) = self.layer_index(id) else {
+            return false;
+        };
+        let layer = &self.layers[index];
+        if layer.position == Point::ZERO
+            && layer.pixels.width == self.width
+            && layer.pixels.height == self.height
+        {
+            return false;
+        }
+        let placed =
+            layer
+                .pixels
+                .placed(self.width, self.height, layer.position.x, layer.position.y);
+        self.layers[index].pixels = placed;
+        self.layers[index].position = Point::ZERO;
+        self.touch();
+        true
+    }
+
     /// 把图层移到 `new_index`（超出范围时夹到末尾）。
     pub fn move_layer(&mut self, id: LayerId, new_index: usize) -> bool {
         let Some(old_index) = self.layer_index(id) else {
@@ -390,6 +413,25 @@ mod tests {
         let layer = document.layer(id).unwrap();
         assert_eq!(layer.position, Point::new(-3, 0));
         assert_eq!(layer.pixels.get_pixel(2, 0), Color::RED, "内容保留在缓冲区");
+    }
+
+    #[test]
+    fn cropping_a_layer_to_the_document_drops_off_canvas_pixels() {
+        let mut document = Document::new("d", 4, 2);
+        let id = document.layers[0].id;
+        document.layers[0].pixels.set_pixel(0, 0, Color::RED);
+        // 右移 2 并扩到覆盖文档，缓冲会比文档大。
+        assert!(document.set_layer_position(id, Point::new(2, 0)));
+        document.ensure_layer_covers_document(id);
+        assert!(document.layer(id).unwrap().pixels.width > 4);
+
+        assert!(document.crop_layer_to_document(id));
+        let layer = document.layer(id).unwrap();
+        assert_eq!((layer.pixels.width, layer.pixels.height), (4, 2));
+        assert_eq!(layer.position, Point::ZERO);
+        assert_eq!(layer.pixels.get_pixel(2, 0), Color::RED, "可见的红像素还在");
+        // 已经对齐 -> no-op。
+        assert!(!document.crop_layer_to_document(id));
     }
 
     #[test]

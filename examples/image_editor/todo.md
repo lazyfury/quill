@@ -49,7 +49,8 @@
   格子或加开关。文件：`src/canvas/checkerboard.rs`、`src/ui/mod.rs`。
 - **最近邻只在 wgpu**（**暂不做，canvas 先不管**）：给 `draw_backend_canvas` 加
   `imageSmoothingEnabled` 等价开关。文件：`crates/draw_backend_canvas`（quill 主仓）。
-- **图层缓冲只增不减**：加上限 / 回收，或提供「裁到文档」的命令。
+- [x] **图层缓冲回收**：图层菜单加「裁到文档」（`Document::crop_layer_to_document`）：
+  按 `position` 摆好后裁回文档尺寸、`position` 归零，丢掉画布外像素。
 - **`--selfcheck` 覆盖**：棋盘格 / 最近邻 / 移动映射目前只有单元测试。
 - [~] **UI 暴露**：属性面板已显示图层 `position` / 缓冲尺寸；还剩棋盘格 /
   最近邻（canvas 后端）的开关。
@@ -69,6 +70,8 @@
 
 ## Done（近期）
 
+- **图层菜单「裁到文档」**：`Document::crop_layer_to_document` 回收被移动撑大的缓冲
+  （`cropping_a_layer_to_the_document_drops_off_canvas_pixels`）。
 - **属性面板显示图层几何**：`偏移 (x, y) · 缓冲 W×H`（`the_properties_panel_shows_layer_geometry`）。
 - **CPU 合成只遍历可见范围**（`src/renderer/cpu.rs`）：合成成本不再随图层缓冲尺寸
   增长（`a_layer_larger_than_the_document_composites_only_the_visible_part`）。

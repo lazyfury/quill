@@ -35,6 +35,8 @@ pub enum MenuAction {
     ZoomReset,
     ZoomFit,
     ClearSelection,
+    /// 把当前图层裁到文档大小（丢掉画布外像素）。
+    CropLayerToDocument,
     About,
     /// 尚未实现的菜单项：只把提示写进状态栏。
     Placeholder(&'static str),
@@ -173,6 +175,14 @@ pub fn menu_content(
                     theme,
                     &action,
                     "下移一层：用右侧图层面板",
+                ))
+                .separator()
+                .item(menu_item(
+                    "裁到文档",
+                    None,
+                    theme,
+                    &action,
+                    MenuAction::CropLayerToDocument,
                 ));
         }
         4 => {
