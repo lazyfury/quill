@@ -6,7 +6,9 @@
 //! 打开多个文件的阶段；现在一个 `document` 就够表达"创建文档"。
 
 use crate::canvas::CanvasCamera;
-use crate::document::{Color, Document, History, PixelRegion, DEFAULT_HEIGHT, DEFAULT_WIDTH};
+use crate::document::{
+    Color, Command, Document, History, PixelRegion, DEFAULT_HEIGHT, DEFAULT_WIDTH,
+};
 
 /// 当前激活的工具，与 `AGENTS.md` 的 MVP 列表一致。
 ///
@@ -133,6 +135,14 @@ impl AppState {
 
     pub fn can_redo(&self) -> bool {
         self.history.can_redo()
+    }
+
+    /// 执行一条命令并压入撤销栈（图层的增删 / 可见性 / 移动等走它）。
+    pub fn execute(&mut self, command: Box<dyn Command>) {
+        let AppState {
+            document, history, ..
+        } = self;
+        history.execute(command, document);
     }
 }
 

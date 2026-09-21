@@ -7,7 +7,7 @@
 use draw_core::Vec2;
 
 use super::tool::{PointerEvent, Tool, ToolContext};
-use crate::document::{LayerId, Point};
+use crate::document::{LayerId, Point, SetLayerPositionCommand};
 
 /// 拖动当前图层。落笔记录图层与起点，移动时按指针位移设置 `position`。
 #[derive(Debug, Clone, Default)]
@@ -57,8 +57,20 @@ impl Tool for MoveTool {
         ctx.document.set_layer_position(id, position);
     }
 
-    fn on_pointer_up(&mut self, _ctx: &mut ToolContext, _event: PointerEvent) {
-        self.layer = None;
+    fn on_pointer_up(&mut self, ctx: &mut ToolContext, _event: PointerEvent) {
+        let Some(id) = self.layer.take() else {
+            return;
+        };
+        let after = ctx
+            .document
+            .layer(id)
+            .map(|layer| layer.position)
+            .unwrap_or(self.start);
+        // 一次拖动 = 一步 undo（只记录 position 的前后值）。
+        if after != self.start {
+            let command = SetLayerPositionCommand::new(id, self.start, after);
+            ctx.history.execute(Box::new(command), ctx.document);
+        }
     }
 }
 
@@ -73,6 +85,27 @@ mod tests {
             position,
             button: PointerButton::Left,
         }
+    }
+
+    #[test]
+    fn a_move_drag_is_one_undo_step() {
+        let mut document = Document::new("d", 32, 32);
+        let mut history = History::new();
+        let mut tool = MoveTool::new();
+        let mut ctx = ToolContext {
+            document: &mut document,
+            history: &mut history,
+        };
+        tool.on_pointer_down(&mut ctx, left(Vec2::new(10.0, 10.0)));
+        tool.on_pointer_move(&mut ctx, left(Vec2::new(15.0, 12.0)));
+        tool.on_pointer_up(&mut ctx, left(Vec2::new(15.0, 12.0)));
+
+        assert_eq!(document.active_layer().unwrap().position, Point::new(5, 2));
+        assert_eq!(history.undo_len(), 1, "一次拖动只入一步");
+        assert_eq!(history.undo(&mut document), Some("移动图层"));
+        assert_eq!(document.active_layer().unwrap().position, Point::ZERO);
+        assert_eq!(history.redo(&mut document), Some("移动图层"));
+        assert_eq!(document.active_layer().unwrap().position, Point::new(5, 2));
     }
 
     #[test]

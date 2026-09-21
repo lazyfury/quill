@@ -20,6 +20,9 @@ use draw_theme::{space, TextSize, Theme, Tone};
 use draw_ui::MouseFilter;
 
 use crate::app::state::AppState;
+use crate::document::{
+    AddLayerCommand, Document, Layer, LayerMetaCommand, PixelBuffer, RemoveLayerCommand,
+};
 
 /// 图层行高（逻辑像素）。列表的池大小按它算。
 pub const LAYER_ROW_HEIGHT: f32 = 28.0;
@@ -97,7 +100,7 @@ pub fn layer_panel(
         .child(action_buttons(theme, state, rename_request))
 }
 
-/// 两排按钮，全部作用于“当前图层”。
+/// 两排按钮，全部作用于“当前图层”。所有动作都走 [`AppState::execute`]，所以可撤销。
 fn action_buttons(
     theme: Theme,
     state: Rc<RefCell<AppState>>,
@@ -107,8 +110,14 @@ fn action_buttons(
         let state = state.clone();
         button(theme, "+ 图层", move || {
             let mut state = state.borrow_mut();
-            let name = format!("图层 {}", state.document.layers.len() + 1);
-            state.document.add_layer(name);
+            let index = state.document.layers.len();
+            let before_active = state.document.active_layer;
+            let (width, height) = (state.document.width, state.document.height);
+            let layer = Layer::new(
+                format!("图层 {}", index + 1),
+                PixelBuffer::new(width, height),
+            );
+            state.execute(Box::new(AddLayerCommand::new(layer, index, before_active)));
         })
     };
     let delete = {
@@ -116,7 +125,7 @@ fn action_buttons(
         button(theme, "− 删除", move || {
             let mut state = state.borrow_mut();
             if let Some(id) = state.document.active_layer {
-                state.document.remove_layer(id);
+                state.execute(Box::new(RemoveLayerCommand::new(id, Some(id))));
             }
         })
     };
@@ -136,7 +145,9 @@ fn action_buttons(
                 .layer(id)
                 .map(|layer| layer.visible)
                 .unwrap_or(true);
-            state.document.set_layer_visible(id, !visible);
+            meta_edit(&mut state, "显示/隐藏", |document| {
+                document.set_layer_visible(id, !visible);
+            });
         })
     };
     let less = {
@@ -151,7 +162,9 @@ fn action_buttons(
                 .layer(id)
                 .map(|layer| layer.opacity)
                 .unwrap_or(1.0);
-            state.document.set_layer_opacity(id, opacity - 0.1);
+            meta_edit(&mut state, "不透明度", |document| {
+                document.set_layer_opacity(id, opacity - 0.1);
+            });
         })
     };
     let more = {
@@ -166,7 +179,9 @@ fn action_buttons(
                 .layer(id)
                 .map(|layer| layer.opacity)
                 .unwrap_or(1.0);
-            state.document.set_layer_opacity(id, opacity + 0.1);
+            meta_edit(&mut state, "不透明度", |document| {
+                document.set_layer_opacity(id, opacity + 0.1);
+            });
         })
     };
     let up = {
@@ -177,7 +192,9 @@ fn action_buttons(
                 return;
             };
             if let Some(index) = state.document.layer_index(id) {
-                state.document.move_layer(id, index + 1);
+                meta_edit(&mut state, "上移一层", |document| {
+                    document.move_layer(id, index + 1);
+                });
             }
         })
     };
@@ -189,7 +206,9 @@ fn action_buttons(
                 return;
             };
             if let Some(index) = state.document.layer_index(id) {
-                state.document.move_layer(id, index.saturating_sub(1));
+                meta_edit(&mut state, "下移一层", |document| {
+                    document.move_layer(id, index.saturating_sub(1));
+                });
             }
         })
     };
@@ -216,6 +235,14 @@ fn action_buttons(
                 .child(up)
                 .child(down),
         )
+}
+
+/// 做一次“只改图层元数据”的编辑，并压入一步可撤销的命令。
+fn meta_edit(state: &mut AppState, label: &'static str, mutate: impl FnOnce(&mut Document)) {
+    let before = LayerMetaCommand::capture(&state.document);
+    mutate(&mut state.document);
+    let after = LayerMetaCommand::capture(&state.document);
+    state.execute(Box::new(LayerMetaCommand::new(before, after, label)));
 }
 
 fn button(theme: Theme, label: &'static str, action: impl FnMut() + 'static) -> Button {

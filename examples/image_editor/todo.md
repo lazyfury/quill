@@ -70,6 +70,11 @@
 
 ## Done（近期）
 
+- **撤销补全 + 右侧栏可调**：移动工具（`SetLayerPositionCommand`）、新建 / 删除图层
+  （`AddLayerCommand`/`RemoveLayerCommand`）、重命名 / 可见性 / 不透明度 / 排序
+  （`LayerMetaCommand`，不克隆像素）、裁到文档（`CropLayerCommand`）全部入历史；
+  「文件 / 图层 / 属性」三块之间加 `ResizeHandle::horizontal` 分隔条（可拖高度，
+  `clamp_panel_heights` 保证图层不被挤没）。
 - **棋盘格开关**：视图菜单「显示棋盘格」（可关，导出不受影响）。
 - **图层菜单「裁到文档」**：`Document::crop_layer_to_document` 回收被移动撑大的缓冲
   （`cropping_a_layer_to_the_document_drops_off_canvas_pixels`）。

@@ -238,6 +238,13 @@ pub fn check() -> (usize, String) {
     if !view.can_undo() {
         failures.push("一笔画笔之后应该能撤销".to_string());
     }
+    // 一笔 = 一步 undo：此刻栈里应该只有这一笔。
+    if view.history_len() != (1, 0) {
+        failures.push(format!(
+            "一笔之后应为 undo=1/redo=0，实际 {:?}",
+            view.history_len()
+        ));
+    }
 
     // Phase 6：一笔 = 一步 undo。点工具栏的“撤销”回到白底，点“重做”再画回来。
     let undo_button = view.history_center(HistoryAction::Undo).expect("撤销按钮");
@@ -462,6 +469,48 @@ pub fn check() -> (usize, String) {
         failures.push("拖分隔条后右栏没变宽".to_string());
     }
 
+    // 右侧栏内部：面板之间的分隔条也能拖动。
+    let file_before = view.file_panel_height();
+    match view.file_handle_center() {
+        Some(start) => {
+            let end = start + Vec2::new(0.0, 24.0);
+            view.event(&InputEvent::PointerDown {
+                position: start,
+                button: PointerButton::Left,
+            });
+            view.event(&InputEvent::PointerMove { position: end });
+            view.event(&InputEvent::PointerUp {
+                position: end,
+                button: PointerButton::Left,
+            });
+            view.layout(viewport());
+        }
+        None => failures.push("找不到「文件」分隔条".to_string()),
+    }
+    if view.file_panel_height() <= file_before {
+        failures.push("拖「文件」分隔条没有改变高度".to_string());
+    }
+    let props_before = view.props_panel_height();
+    match view.props_handle_center() {
+        Some(start) => {
+            let end = start - Vec2::new(0.0, 24.0);
+            view.event(&InputEvent::PointerDown {
+                position: start,
+                button: PointerButton::Left,
+            });
+            view.event(&InputEvent::PointerMove { position: end });
+            view.event(&InputEvent::PointerUp {
+                position: end,
+                button: PointerButton::Left,
+            });
+            view.layout(viewport());
+        }
+        None => failures.push("找不到「属性」分隔条".to_string()),
+    }
+    if view.props_panel_height() <= props_before {
+        failures.push("拖「属性」分隔条没有改变高度".to_string());
+    }
+
     let (view, frame) = record(view);
     let camera = view.canvas_camera();
 
@@ -518,10 +567,12 @@ pub fn check() -> (usize, String) {
         failures.push("状态栏缺少撤销/重做提示".to_string());
     }
     let (undo_len, redo_len) = view.history_len();
-    if undo_len != 1 || redo_len != 0 {
-        failures.push(format!(
-            "一笔之后的栈应为 undo=1, redo=0，实际 undo={undo_len}, redo={redo_len}"
-        ));
+    // 后续的导入 / 移动也各入了一步；这里只要求“重做栈已清空、还有可撤销的”。
+    if redo_len != 0 {
+        failures.push(format!("重做栈应为空，实际 redo={redo_len}"));
+    }
+    if undo_len < 1 {
+        failures.push("撤销栈不应为空".to_string());
     }
 
     // 附加：Lucide 图标包已加载（覆盖工具栏的工具与撤销 / 重做），且图标真的

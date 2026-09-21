@@ -47,7 +47,9 @@ use crate::canvas::{
     document_to_pixel, paint_backdrop, pixel_selection, screen_to_document, CanvasCamera,
     DOCUMENT_TEXTURE,
 };
-use crate::document::{LayerId, PixelBuffer};
+use crate::document::{
+    AddLayerCommand, CropLayerCommand, Layer, LayerId, LayerMetaCommand, PixelBuffer,
+};
 use crate::icons::IconSet;
 use crate::renderer::{sample_pixel, CpuRenderer, RenderTarget, Renderer};
 use crate::tools::{BrushMode, BrushShape, BrushTool, MoveTool, PointerEvent, Tool, ToolContext};
@@ -68,6 +70,15 @@ const FIT_PADDING: f32 = 24.0;
 const ZOOM_STEP: f32 = 1.25;
 /// 像素模式下，出现像素网格的最小缩放。
 const GRID_MIN_ZOOM: f32 = 6.0;
+/// 右侧栏各面板的默认高度 / 拖拽钳制（逻辑像素）。
+const FILE_PANEL_HEIGHT: f32 = 168.0;
+const FILE_PANEL_MIN: f32 = 96.0;
+const FILE_PANEL_MAX: f32 = 420.0;
+const PROPS_PANEL_HEIGHT: f32 = 120.0;
+const PROPS_PANEL_MIN: f32 = 80.0;
+const PROPS_PANEL_MAX: f32 = 360.0;
+/// 中间「图层」面板保留的最小高度（两个分隔条不能把它挤没）。
+const LAYER_PANEL_MIN: f32 = 120.0;
 
 /// 需要在构建后回写的节点槽位。
 #[derive(Default)]
@@ -79,6 +90,10 @@ struct Refs {
     props_name: NodeRef,
     props_detail: NodeRef,
     props_geometry: NodeRef,
+    file_panel: NodeRef,
+    props_panel: NodeRef,
+    file_handle: NodeRef,
+    props_handle: NodeRef,
     path: NodeRef,
     sidebar: NodeRef,
     sidebar_handle: NodeRef,
@@ -146,6 +161,13 @@ pub struct EditorView {
     sidebar_node: NodeId,
     /// 右侧栏分隔条的节点。
     sidebar_handle_node: NodeId,
+    /// 右侧栏「文件」/「属性」面板的共享高度（各自的分隔条写、布局读）。
+    file_height: Rc<Cell<f32>>,
+    props_height: Rc<Cell<f32>>,
+    file_panel_node: NodeId,
+    props_panel_node: NodeId,
+    file_handle_node: NodeId,
+    props_handle_node: NodeId,
     /// 路径标签节点，以及上一次写入的内容（避免每帧刷文本）。
     path_label: NodeId,
     shown_path: Option<String>,
@@ -252,6 +274,8 @@ impl EditorView {
         let square_mode = Rc::new(Cell::new(true));
         let mut toggle_refs: Vec<(BrushToggle, NodeRef)> = Vec::new();
         let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
+        let file_height = Rc::new(Cell::new(FILE_PANEL_HEIGHT));
+        let props_height = Rc::new(Cell::new(PROPS_PANEL_HEIGHT));
 
         // 布局根（SceneTree 根）的子节点是按 anchors 摆的，flex 从下一层才开始 ——
         // 所以页面 column 必须是根的唯一子节点（demo_app / file_browser 同款形状）。
@@ -289,23 +313,50 @@ impl EditorView {
                         Flex::column()
                             .basis(SizeBasis::Px(sidebar_width.get()))
                             .shrink(0.0)
-                            .gap(space::SM)
+                            .gap(space::XXS)
                             .padding(Edges::all(space::SM))
                             .background(theme.surface(SurfaceLevel::Surface))
                             .mouse_filter(MouseFilter::Ignore)
-                            .child(file_panel)
+                            .child(
+                                file_panel
+                                    .basis(SizeBasis::Px(file_height.get()))
+                                    .shrink(0.0)
+                                    .ref_(&refs.file_panel),
+                            )
+                            .child(
+                                ResizeHandle::horizontal(theme)
+                                    .target(refs.file_panel.clone())
+                                    .width(file_height.clone())
+                                    .min(FILE_PANEL_MIN)
+                                    .max(FILE_PANEL_MAX)
+                                    .ref_(&refs.file_handle),
+                            )
                             .child(layer_panel::layer_panel(
                                 theme,
                                 state.clone(),
                                 layer_list,
                                 rename_request.clone(),
                             ))
-                            .child(properties_panel::properties_panel(
-                                theme,
-                                &refs.props_name,
-                                &refs.props_detail,
-                                &refs.props_geometry,
-                            ))
+                            .child(
+                                ResizeHandle::horizontal(theme)
+                                    .target(refs.props_panel.clone())
+                                    .width(props_height.clone())
+                                    .invert()
+                                    .min(PROPS_PANEL_MIN)
+                                    .max(PROPS_PANEL_MAX)
+                                    .ref_(&refs.props_handle),
+                            )
+                            .child(
+                                properties_panel::properties_panel(
+                                    theme,
+                                    &refs.props_name,
+                                    &refs.props_detail,
+                                    &refs.props_geometry,
+                                )
+                                .basis(SizeBasis::Px(props_height.get()))
+                                .shrink(0.0)
+                                .ref_(&refs.props_panel),
+                            )
                             .ref_(&refs.sidebar),
                     ),
             )
@@ -394,6 +445,12 @@ impl EditorView {
             sidebar_width,
             sidebar_node: refs.sidebar.get().expect("sidebar mounted"),
             sidebar_handle_node: refs.sidebar_handle.get().expect("sidebar handle mounted"),
+            file_height,
+            props_height,
+            file_panel_node: refs.file_panel.get().expect("file panel mounted"),
+            props_panel_node: refs.props_panel.get().expect("props panel mounted"),
+            file_handle_node: refs.file_handle.get().expect("file handle mounted"),
+            props_handle_node: refs.props_handle.get().expect("props handle mounted"),
             path_label: refs.path.get().expect("path label mounted"),
             shown_path: None,
             path_edit: None,
@@ -589,10 +646,11 @@ impl EditorView {
         };
         let name = rename.buffer.trim().to_string();
         if !name.is_empty() {
-            self.state
-                .borrow_mut()
-                .document
-                .rename_layer(rename.id, name);
+            let mut state = self.state.borrow_mut();
+            let before = LayerMetaCommand::capture(&state.document);
+            state.document.rename_layer(rename.id, name);
+            let after = LayerMetaCommand::capture(&state.document);
+            state.execute(Box::new(LayerMetaCommand::new(before, after, "重命名图层")));
         }
         set_text(&mut self.tree, self.message_label, "");
     }
@@ -781,23 +839,24 @@ impl EditorView {
 
     /// 把当前图层裁到文档大小（丢弃画布外像素，回收缓冲区）。
     fn crop_layer_to_document(&mut self) {
-        let Some(id) = self
-            .state
-            .borrow()
-            .document
-            .active_layer()
-            .map(|layer| layer.id)
-        else {
+        let mut state = self.state.borrow_mut();
+        let Some(layer) = state.document.active_layer() else {
             *self.message.borrow_mut() = Some("没有可裁剪的图层".to_string());
             return;
         };
-        let changed = self.state.borrow_mut().document.crop_layer_to_document(id);
-        if changed {
-            self.texture_dirty = true;
-            *self.message.borrow_mut() = Some("已裁到文档大小".to_string());
-        } else {
+        if layer.position == crate::document::Point::ZERO
+            && layer.pixels.width == state.document.width
+            && layer.pixels.height == state.document.height
+        {
             *self.message.borrow_mut() = Some("图层已经在文档范围内".to_string());
+            return;
         }
+        let id = layer.id;
+        let before = layer.pixels.clone();
+        let position = layer.position;
+        state.execute(Box::new(CropLayerCommand::new(id, before, position)));
+        self.texture_dirty = true;
+        *self.message.borrow_mut() = Some("已裁到文档大小".to_string());
     }
 
     /// 路径编辑中的按键 / 文本输入；返回是否消费了事件。
@@ -853,10 +912,12 @@ impl EditorView {
         let pixels = crate::io::read_png(Path::new(path))?;
         let size = (pixels.width, pixels.height);
         let name = crate::io::file_label(Path::new(path));
-        self.state
-            .borrow_mut()
-            .document
-            .add_layer_with_pixels(name, pixels);
+        let mut state = self.state.borrow_mut();
+        let index = state.document.layers.len();
+        let before_active = state.document.active_layer;
+        let layer = Layer::new(name, pixels);
+        state.execute(Box::new(AddLayerCommand::new(layer, index, before_active)));
+        drop(state);
         self.texture_dirty = true;
         Ok(size)
     }
@@ -867,6 +928,10 @@ impl EditorView {
         self.tree.set_viewport_size(viewport.logical_size());
         self.clamp_sidebar_width();
         draw_ui::layout(&mut self.tree, viewport);
+        // 面板高度按刚拿到的侧栏矩形钳制一次；变了就再排一遍。
+        if self.clamp_panel_heights() {
+            draw_ui::layout(&mut self.tree, viewport);
+        }
         // 第一次布局拿到画布区域的真实矩形，才能做适配。
         if !self.fitted {
             self.fit_to_canvas();
@@ -1160,6 +1225,44 @@ impl EditorView {
                 data.layout.basis = SizeBasis::Px(next);
             });
         }
+    }
+
+    /// 保证「文件 + 属性」两个可拖面板不会把中间「图层」面板挤没。
+    /// 返回是否调整过（调用方需要再排一次）。
+    fn clamp_panel_heights(&mut self) -> bool {
+        let Some(sidebar) = draw_ui::control(&self.tree, self.sidebar_node) else {
+            return false;
+        };
+        let inner = (sidebar.rect.size.height - 2.0 * space::SM).max(0.0);
+        // 预留：图层最小高度 + 两条分隔条 + 4 个列间距。
+        let overhead = LAYER_PANEL_MIN + 2.0 * RESIZE_GUTTER + 4.0 * space::XXS;
+        let budget = (inner - overhead).max(FILE_PANEL_MIN + PROPS_PANEL_MIN);
+        let mut file = self.file_height.get().clamp(FILE_PANEL_MIN, FILE_PANEL_MAX);
+        let mut props = self
+            .props_height
+            .get()
+            .clamp(PROPS_PANEL_MIN, PROPS_PANEL_MAX);
+        if file + props > budget {
+            let scale = budget / (file + props);
+            file = (file * scale).max(FILE_PANEL_MIN);
+            props = (props * scale).max(PROPS_PANEL_MIN);
+        }
+        let mut changed = false;
+        if (file - self.file_height.get()).abs() > f32::EPSILON {
+            self.file_height.set(file);
+            update_control(&mut self.tree, self.file_panel_node, |data| {
+                data.layout.basis = SizeBasis::Px(file);
+            });
+            changed = true;
+        }
+        if (props - self.props_height.get()).abs() > f32::EPSILON {
+            self.props_height.set(props);
+            update_control(&mut self.tree, self.props_panel_node, |data| {
+                data.layout.basis = SizeBasis::Px(props);
+            });
+            changed = true;
+        }
+        changed
     }
 
     fn canvas_area_contains(&self, position: Vec2) -> bool {
@@ -1581,6 +1684,24 @@ impl EditorView {
         draw_ui::control(&self.tree, self.sidebar_handle_node).map(|control| control.rect.center())
     }
 
+    /// 右侧栏「文件」/「属性」面板的当前高度（逻辑像素）。
+    pub fn file_panel_height(&self) -> f32 {
+        self.file_height.get()
+    }
+
+    pub fn props_panel_height(&self) -> f32 {
+        self.props_height.get()
+    }
+
+    /// 右侧栏面板之间分隔条的中心点（逻辑坐标）；测试与自检模拟拖动用。
+    pub fn file_handle_center(&self) -> Option<Vec2> {
+        draw_ui::control(&self.tree, self.file_handle_node).map(|control| control.rect.center())
+    }
+
+    pub fn props_handle_center(&self) -> Option<Vec2> {
+        draw_ui::control(&self.tree, self.props_handle_node).map(|control| control.rect.center())
+    }
+
     /// 菜单标题按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
     pub fn menu_center(&self, index: usize) -> Option<Vec2> {
         let id = *self.menu_nodes.get(index)?;
@@ -1947,6 +2068,66 @@ mod tests {
             "{} should have grown from {before}",
             view.sidebar_width()
         );
+    }
+
+    #[test]
+    fn dragging_a_panel_handle_resizes_that_panel() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+
+        let file_before = view.file_panel_height();
+        let start = view.file_handle_center().expect("file handle");
+        let end = start + Vec2::new(0.0, 24.0);
+        view.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerMove { position: end });
+        view.event(&InputEvent::PointerUp {
+            position: end,
+            button: PointerButton::Left,
+        });
+        view.layout(viewport());
+        assert!(view.file_panel_height() > file_before, "文件面板应变高");
+
+        let props_before = view.props_panel_height();
+        let start = view.props_handle_center().expect("props handle");
+        let end = start - Vec2::new(0.0, 24.0);
+        view.event(&InputEvent::PointerDown {
+            position: start,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerMove { position: end });
+        view.event(&InputEvent::PointerUp {
+            position: end,
+            button: PointerButton::Left,
+        });
+        view.layout(viewport());
+        assert!(view.props_panel_height() > props_before, "属性面板应变高");
+    }
+
+    #[test]
+    fn a_layer_panel_edit_is_undoable() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        // 走和面板按钮一样的路径：AppState::execute + LayerMetaCommand。
+        {
+            let mut state = view.state.borrow_mut();
+            let id = state.document.active_layer().unwrap().id;
+            let before = crate::document::LayerMetaCommand::capture(&state.document);
+            state.document.set_layer_visible(id, false);
+            let after = crate::document::LayerMetaCommand::capture(&state.document);
+            state.execute(Box::new(crate::document::LayerMetaCommand::new(
+                before,
+                after,
+                "显示/隐藏",
+            )));
+        }
+        view.update();
+        assert!(view.can_undo());
+        assert!(view.undo());
+        let visible = view.state.borrow().document.layers[0].visible;
+        assert!(visible, "撤销后图层恢复可见");
     }
 
     #[test]

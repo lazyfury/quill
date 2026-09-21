@@ -95,13 +95,17 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                  (standalone demo: own workspace, NOT a workspace member;
                   the Photoshop-style editor demo whose UI is built with the
                   quill stack instead of egui. Landed: menu/toolbar/tool-options
-                  bar/status bar, a resizable right sidebar (`ResizeHandle`),
+                  bar/status bar, a resizable right sidebar whose file/layer/
+                  properties sections are split by `ResizeHandle::horizontal`
+                  dividers (`ResizeHandle`),
                   `document` model (`Document`/`Layer`/`PixelBuffer`, plus
                   `PixelRegion`), `canvas` (a `Node2D` + `Visual::Image`, camera
                   zoom/pan, coordinate conversion), `renderer` (CPU compositor),
                   a working layer panel, `tools` (`BrushTool` paint/erase in the
-                  active layer), `history` (`Command`/`History`/
-                  `PaintCommand`: one stroke = one undo, toolbar buttons +
+                  active layer), `history` (`Command`/`History`: one stroke = one
+                  undo, and layer edits are undoable too — paint, move
+                  (`SetLayerPositionCommand`), add/remove, rename/visibility/
+                  opacity/order (`LayerMetaCommand`), crop; toolbar buttons +
                   `Ctrl/Cmd+Z`), and Lucide icons (toolbar tool + undo/redo
                   buttons) built as an `Icon` component that strokes straight
                   into the IR via `draw_svg` (no rasterization, no texture;

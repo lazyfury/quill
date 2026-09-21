@@ -62,6 +62,10 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   跟笔画大小成正比，不是整层快照；新命令清空 redo 栈，栈有上限（默认 32 步）。
   工具栏加了 `↶ 撤销` / `↷ 重做` 按钮，快捷键 `Ctrl/Cmd+Z` 撤销、
   `Shift+Ctrl/Cmd+Z`（或 `Ctrl+Y`）重做，结果写状态栏。
+  除了画笔，图层的编辑也入历史：移动工具（`SetLayerPositionCommand`）、新建 / 删除
+  （`AddLayerCommand` / `RemoveLayerCommand`）、重命名 / 可见性 / 不透明度 / 排序
+  （`LayerMetaCommand`，只存元数据 + 顺序，不克隆像素）、裁到文档
+  （`CropLayerCommand`）。
 - [x] **Phase 7 — 导入导出**：`src/io/` 用 `png` crate 做编码与解码，拆成
   两个关注点：`codec`（`PixelBuffer <-> PNG 字节`）与 `file`
   （`路径 <-> PNG 字节` + 默认命名）。右侧「文件」面板可改路径（内联编辑，
@@ -95,7 +99,10 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   （`ui/options_bar.rs`）：画笔 / 橡皮显示笔刷大小、不透明度与 `−` / `+`
   按钮，其余工具显示一句操作提示；`−` / `+` 只写请求格，`update` 统一调整。
   右侧栏宽度改用 `ResizeHandle::vertical(..).invert()`（目标在把手右边）拖动，
-  并在 `layout` 里 `clamp_sidebar_width`，保证画布不被挤没。
+  并在 `layout` 里 `clamp_sidebar_width`，保证画布不被挤没。右栏内部的
+  「文件 / 图层 / 属性」三块之间也用 `ResizeHandle::horizontal(..)` 分隔，可以拖动
+  调整各自高度（`文件` 驱动上面的面板、`属性` 用 `invert()` 驱动下面的面板，中间
+  图层面板 `grow(1)` 吸收剩余）；`clamp_panel_heights` 预留图层最小高度。
 
 ### 计划（Phase 10+）
 

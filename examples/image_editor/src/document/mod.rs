@@ -28,7 +28,10 @@ mod region;
 
 pub use color::Color;
 pub use document::{Document, DEFAULT_HEIGHT, DEFAULT_WIDTH};
-pub use history::{Command, History, PaintCommand};
+pub use history::{
+    AddLayerCommand, Command, CropLayerCommand, History, LayerMetaCommand, LayerStackMeta,
+    PaintCommand, RemoveLayerCommand, SetLayerPositionCommand,
+};
 pub use id::{DocumentId, LayerId};
 pub use layer::{BlendMode, Layer};
 pub use pixel_buffer::PixelBuffer;
