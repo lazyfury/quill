@@ -9,6 +9,6 @@ mod brush;
 mod move_tool;
 mod tool;
 
-pub use brush::{BrushMode, BrushTool};
+pub use brush::{BrushMode, BrushShape, BrushTool};
 pub use move_tool::MoveTool;
 pub use tool::{PointerEvent, Tool, ToolContext};

@@ -120,8 +120,10 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   are labeled placeholders; the reusable `Menu`/`MenuItem` live
                   in `draw_components`), and a compact custom theme
                   (`theme::editor_theme`, `Density::COMPACT`). The default canvas
-                  is a 128×128 pixel-art document with a 1px hard-edged brush,
-                  displayed with nearest-neighbour texture filtering
+                  is a 128×128 pixel-art document with a **pixel mode**
+                  (`BrushTool.hard` + `BrushShape::{Round, Square}`, both toggled
+                  from the tool-options bar: hard edges at any size, snapped to the
+                  pixel grid), displayed with nearest-neighbour texture filtering
                   (`WgpuBackend::set_texture_filter` + `TextureFilter::Nearest`)
                   and a checkerboard transparency backdrop. The move tool drags a
                   layer's `position` (its pixel-buffer origin, possibly negative);

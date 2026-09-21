@@ -10,7 +10,9 @@ mod checkerboard;
 mod coordinate;
 
 pub use camera::CanvasCamera;
-pub use checkerboard::{color_at, paint_backdrop};
+#[cfg(test)]
+pub use checkerboard::color_at;
+pub use checkerboard::paint_backdrop;
 pub use coordinate::{document_to_pixel, pixel_selection, screen_to_document};
 
 use draw_render::TextureId;

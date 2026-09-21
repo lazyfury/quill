@@ -19,6 +19,14 @@ pub enum BrushMode {
     Erase,
 }
 
+/// 笔刷形状。`Square` 更适合像素画（偶数尺寸是整数边长，不会出十字 / 多一格）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BrushShape {
+    Round,
+    #[default]
+    Square,
+}
+
 /// 落笔时记下的快照，抬笔时用它算出差异区域。
 #[derive(Debug, Clone, PartialEq)]
 struct PendingStroke {
@@ -38,6 +46,10 @@ pub struct BrushTool {
     /// 可选选区：只有落在里面的像素会被写（Phase 8 的框选裁剪）。
     /// 视图在落笔前从编辑器状态同步过来。
     pub clip: Option<PixelRegion>,
+    /// 像素模式：边缘不做抗锯齿（`coverage` 只有 0 / 1）。
+    pub hard: bool,
+    /// 笔刷形状。
+    pub shape: BrushShape,
     drawing: bool,
     last: Option<Vec2>,
     /// 当前笔触落笔时的图层快照；不在笔画中时为 `None`。
@@ -48,9 +60,9 @@ impl BrushTool {
     pub const MIN_SIZE: f32 = 1.0;
     pub const MAX_SIZE: f32 = 200.0;
 
-    /// 默认的绘画画笔（黑、1px、不透明）。
+    /// 默认的绘画画笔（黑、1px、不透明、硬边方形）。
     ///
-    /// 1px 是像素图默认值：配合最近邻纹理过滤，放大后画出的就是硬边单像素。
+    /// 1px + 硬边 + 最近邻过滤是像素图默认值：放大后画出的就是硬边单像素。
     pub fn paint() -> Self {
         Self {
             size: 1.0,
@@ -58,6 +70,8 @@ impl BrushTool {
             color: Color::BLACK,
             mode: BrushMode::Paint,
             clip: None,
+            hard: true,
+            shape: BrushShape::Square,
             drawing: false,
             last: None,
             pending: None,
@@ -110,15 +124,21 @@ impl BrushTool {
         self.last = Some(to);
     }
 
-    /// 在文档坐标 `center` 压一个圆形 stamp；落在 `offset`（图层缓冲区原点）
+    /// 在文档坐标 `center` 压一个 stamp；落在 `offset`（图层缓冲区原点）
     /// 之外的像素被裁掉。
     fn dab(&self, buffer: &mut PixelBuffer, offset: Point, mut center: Vec2) {
-        // 像素笔（size <= 1）：把落点吸附到光标下的那个像素，压出一个实心
-        // 像素，不做边缘抗锯齿——像素图的线条才干净。
-        if self.size <= 1.0 {
+        // 像素模式（hard）：圆心吸附到光标下的像素中心，对所有尺寸生效。
+        if self.hard {
             center = Vec2::new(center.x.floor() + 0.5, center.y.floor() + 0.5);
         }
         let radius = (self.size * 0.5).max(0.5);
+        // 方形硬边的整数边长：奇数 n×n 居中，偶数把光标像素放左上（避免多一格）。
+        let side = self.size.round().max(1.0) as i64;
+        let half = side / 2;
+        let square_min = -half + i64::from(side % 2 == 0);
+        let square_max = half;
+        let center_px = (center.x.floor() as i64, center.y.floor() as i64);
+
         let min_x = (center.x - radius - 1.0).floor() as i64;
         let max_x = (center.x + radius + 1.0).ceil() as i64;
         let min_y = (center.y - radius - 1.0).floor() as i64;
@@ -132,11 +152,39 @@ impl BrushTool {
                         continue;
                     }
                 }
-                // 像素中心相对 stamp 圆心的距离；边缘 1px 抗锯齿。
                 let dx = x as f32 + 0.5 - center.x;
                 let dy = y as f32 + 0.5 - center.y;
-                let distance = (dx * dx + dy * dy).sqrt();
-                let coverage = (radius + 0.5 - distance).clamp(0.0, 1.0);
+                let coverage = if self.hard {
+                    match self.shape {
+                        BrushShape::Round => {
+                            if (dx * dx + dy * dy).sqrt() <= radius {
+                                1.0
+                            } else {
+                                0.0
+                            }
+                        }
+                        BrushShape::Square => {
+                            let ix = x - center_px.0;
+                            let iy = y - center_px.1;
+                            if ix >= square_min
+                                && ix <= square_max
+                                && iy >= square_min
+                                && iy <= square_max
+                            {
+                                1.0
+                            } else {
+                                0.0
+                            }
+                        }
+                    }
+                } else {
+                    // 软边：圆用欧氏距离，方形用切比雪夫距离（软方形）。
+                    let metric = match self.shape {
+                        BrushShape::Round => (dx * dx + dy * dy).sqrt(),
+                        BrushShape::Square => dx.abs().max(dy.abs()),
+                    };
+                    (radius + 0.5 - metric).clamp(0.0, 1.0)
+                };
                 if coverage <= 0.0 {
                     continue;
                 }
@@ -260,6 +308,53 @@ mod tests {
         assert_eq!(at(&document, 9, 20), Color::WHITE, "左邻不沾");
         assert_eq!(at(&document, 10, 19), Color::WHITE, "上邻不沾");
         assert_eq!(at(&document, 11, 21), Color::WHITE, "右下不沾");
+    }
+
+    #[test]
+    fn hard_edges_paint_only_solid_pixels() {
+        let mut document = document();
+        let mut brush = BrushTool::paint().with_color(Color::RED);
+        brush.size = 3.0;
+        brush.stroke_to(&mut document, Vec2::new(16.0, 16.0));
+        // 硬边方形 3×3：全是实心红，没有半透明边。
+        for y in 15..=17 {
+            for x in 15..=17 {
+                assert_eq!(at(&document, x, y), Color::RED, "({x}, {y})");
+            }
+        }
+        assert_eq!(at(&document, 14, 16), Color::WHITE);
+        assert_eq!(at(&document, 18, 16), Color::WHITE);
+    }
+
+    #[test]
+    fn the_soft_brush_keeps_anti_aliased_edges() {
+        let mut document = document();
+        let mut brush = BrushTool::paint().with_color(Color::RED);
+        brush.size = 3.0;
+        brush.hard = false;
+        brush.stroke_to(&mut document, Vec2::new(16.0, 16.0));
+        // 负向对照：软笔会产生中间色（既不是纯红也不是纯白）。
+        let partial = (14..=18).any(|y| {
+            (14..=18).any(|x| {
+                let color = at(&document, x, y);
+                color != Color::RED && color != Color::WHITE && color.a != 0
+            })
+        });
+        assert!(partial, "软笔应产生抗锯齿边");
+    }
+
+    #[test]
+    fn an_even_square_brush_of_size_two_paints_four_pixels() {
+        let mut document = document();
+        let mut brush = BrushTool::paint().with_color(Color::RED);
+        brush.size = 2.0;
+        brush.stroke_to(&mut document, Vec2::new(16.0, 16.0));
+        // n=2：光标像素放左上，(16,16)..(17,17)。
+        for (x, y) in [(16, 16), (17, 16), (16, 17), (17, 17)] {
+            assert_eq!(at(&document, x, y), Color::RED, "({x}, {y})");
+        }
+        assert_eq!(at(&document, 15, 16), Color::WHITE);
+        assert_eq!(at(&document, 18, 16), Color::WHITE);
     }
 
     #[test]

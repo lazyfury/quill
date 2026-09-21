@@ -9,9 +9,9 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use draw_components::{Button, Component, Flex, NodeRef, Text};
-use draw_core::Edges;
-use draw_theme::{space, SurfaceLevel, Theme, Tone};
-use draw_ui::{Align, MouseFilter};
+use draw_core::{Color, Edges};
+use draw_theme::{radius, space, SurfaceLevel, Theme, Tone};
+use draw_ui::{Align, MouseFilter, SurfaceStyle};
 
 use crate::app::state::ActiveTool;
 
@@ -36,6 +36,25 @@ impl BrushAdjust {
     }
 }
 
+/// 选项栏里的布尔开关（像素模式 / 方形笔）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrushToggle {
+    /// 像素模式：硬边（不做抗锯齿）。
+    Hard,
+    /// 方形笔（否则圆头）。
+    Square,
+}
+
+impl BrushToggle {
+    /// 按钮上的短标签 / 自检报告里的名字。
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Hard => "像素",
+            Self::Square => "方形",
+        }
+    }
+}
+
 /// 选项栏里需要回写的文本 / 容器槽位。
 #[derive(Default)]
 pub struct OptionsRefs {
@@ -51,8 +70,11 @@ pub struct OptionsRefs {
 pub fn options_bar(
     theme: Theme,
     request: Rc<Cell<Option<BrushAdjust>>>,
+    hard_state: Rc<Cell<bool>>,
+    square_state: Rc<Cell<bool>>,
     refs: &OptionsRefs,
     buttons: &mut Vec<(BrushAdjust, NodeRef)>,
+    toggles: &mut Vec<(BrushToggle, NodeRef)>,
 ) -> impl Component {
     let brush = Flex::row()
         .align(Align::Center)
@@ -90,6 +112,13 @@ pub fn options_bar(
             request.clone(),
             BrushAdjust::OpacityUp,
             buttons,
+        ))
+        .child(toggle_button(theme, BrushToggle::Hard, hard_state, toggles))
+        .child(toggle_button(
+            theme,
+            BrushToggle::Square,
+            square_state,
+            toggles,
         ));
 
     Flex::row()
@@ -129,6 +158,30 @@ fn step_button(
     buttons.push((adjust, slot.clone()));
     Button::ghost(label, theme)
         .on_click(move || request.set(Some(adjust)))
+        .ref_(&slot)
+}
+
+/// 一个布尔开关：点击翻转共享状态，`dynamic_background` 直接读它显示激活态。
+fn toggle_button(
+    theme: Theme,
+    toggle: BrushToggle,
+    state: Rc<Cell<bool>>,
+    toggles: &mut Vec<(BrushToggle, NodeRef)>,
+) -> impl Component {
+    let slot = NodeRef::new();
+    toggles.push((toggle, slot.clone()));
+    let click_state = state.clone();
+    Button::ghost(toggle.label(), theme)
+        .on_click(move || click_state.set(!click_state.get()))
+        .dynamic_background(move |interact| {
+            if state.get() {
+                SurfaceStyle::new(theme.palette.selection).radius(radius::SM)
+            } else if interact.hovered || interact.pressed {
+                SurfaceStyle::new(theme.palette.surface_hover).radius(radius::SM)
+            } else {
+                SurfaceStyle::new(Color::TRANSPARENT)
+            }
+        })
         .ref_(&slot)
 }
 

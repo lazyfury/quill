@@ -14,66 +14,31 @@
 
 ## 1. 主线：像素模式
 
-现状：`src/tools/brush.rs` 的 `BrushTool::dab` 只有 `size <= 1.0` 走硬边 / 吸附
-分支，`> 1` 一律 `coverage = (radius + 0.5 - distance).clamp(0, 1)`（抗锯齿）。
 目标：任意尺寸都能画**硬边像素**，可选**方形笔**，并接到选项栏。
+已定：默认 `hard = true`、`shape = Square`；两个独立开关（「像素」+「方形」）；
+状态用 `Rc<Cell>` 管显示、`self.brush` 管绘制、每帧同步。
 
-### P1 — `BrushTool` 硬边 + 形状（核心 API）
+- [x] **P1 — `BrushTool` 硬边 + 形状**（`src/tools/brush.rs`）：
+  `BrushShape { Round, Square }` + `BrushTool { hard, shape }`；`hard` 时圆心吸附
+  像素网格（所有尺寸），`coverage` 二值（Round 比距离、Square 比整数边长 n，
+  奇数居中 / 偶数把光标像素放左上）。测试：硬边只有纯色、软边有灰边、
+  方形 3×3 / 2×2、size 1 不变。
+- [x] **P2 — 选项栏开关**（`src/ui/options_bar.rs` + `src/ui/mod.rs`）：
+  画笔配置加「像素」「方形」两个开关（`Rc<Cell>` + `dynamic_background`），
+  `update` 同步进 `self.brush`；`EditorView` 暴露
+  `pixel_mode`/`square_mode`/`brush_hard`/`brush_shape`/`brush_toggle_center`。
+  `--selfcheck` 用一个新视图验证 size 3 硬边无灰边、软边（圆头）有灰边。
+- [x] **P5 — 文档**：README / `AGENTS.md` 已补像素模式。
+- [ ] **P3 — 像素网格叠加（可选）**：像素模式开启且 `zoom >= 4` 时，在画布上
+  画文档像素边界的 1px 线（`DrawCommand::Line`，屏幕空间、不随缩放变粗），位置照
+  `EditorView::paint_selection`；测试用 `RecordedFrame` 断言线的数量 / 位置随缩放
+  变化，关闭或低缩放不画。
+- [ ] **P4 — 像素完美连线（可选）**：1px 硬边笔改用 Bresenham 连接采样点，去掉
+  重复压点导致的 `<100%` 加深与斜线 L 型加粗；测试 45° 斜线只覆盖 Bresenham
+  上的像素。
 
-文件：`src/tools/brush.rs`
-
-- API：
-  - `pub enum BrushShape { Round, Square }`
-  - `BrushTool { pub hard: bool, pub shape: BrushShape }`；默认 `hard = true`、
-    `shape = Square`（demo 已是像素编辑器）。
-- 行为：
-  - `hard` 时圆心吸附到像素网格（`floor + 0.5`），对所有尺寸生效（现在只对 1px）。
-  - `coverage` 二值：`Round → distance <= radius`；`Square → 整数边长
-    n = size.round().max(1)`，奇数 `n×n` 居中、偶数把光标像素放在四个中心之一
-    （避免偶数尺寸多一格 / 十字）。
-  - `opacity` 照乘；`< 100%` 叠加会加深（P4 才彻底解决）。
-- 测试（`brush.rs`）：
-  - size 3 + `hard` 只产生 `a ∈ {0, 255}`；`hard = false` 负向对照会出中间 alpha。
-  - `Square` size 3 = 9 px、size 2 = 4 px。
-  - size 1 现有行为不变（现有测试继续绿）。
-
-### P2 — 选项栏开关（集成）
-
-文件：`src/ui/options_bar.rs`、`src/ui/mod.rs`
-
-- 画笔配置里加「像素」开关：`Rc<Cell<bool>>` + `dynamic_background`（照
-  `src/ui/toolbar.rs` 的 active 高亮范式），点击翻转 cell；`EditorView::update`
-  把 cell 同步进 `self.brush.hard`（cell 管显示、`brush` 管绘制，每帧对齐）。
-- 切到橡皮同样生效（共用 `self.brush`）。
-- 测试（`ui/mod.rs`）：点开关 → `view.brush_hard()` 翻转；再点回；切工具后保持；
-  像素模式下 size 3 的笔画没有半透明边。
-- `--selfcheck`：真实点一次开关 + 画一笔，断言区域内无部分 alpha。
-
-### P3 — 像素网格叠加（可选）
-
-- 像素模式开启 **且** `zoom >= 4` 时，在画布上画文档像素边界的 1px 线
-  （`DrawCommand::Line`），屏幕空间、不随缩放变粗；只画可见文档范围。
-- 位置照 `EditorView::paint_selection`（世界之上、UI 之下）。
-- 测试：`RecordedFrame` 断言线的数量 / 位置随缩放变化；关闭或低缩放不画。
-
-### P4 — 像素完美连线（可选）
-
-- 1px 硬边笔改用 Bresenham 连接采样点，去掉重复压点导致的 `<100%` 加深、以及
-  斜线的 L 型加粗。
-- 测试：45° 斜线只覆盖 Bresenham 上的像素。
-
-### P5 — 文档 / 自检
-
-- 本 README 的 Phase 5 / 新 Phase 9.x、`AGENTS.md` 补像素模式。
-- 全量 `fmt / check / test / selfcheck`。
-
-### 待拍板（开工前确认）
-
-1. 默认 `hard = true` + `Square`？
-2. 一个「像素」开关，还是「硬边」+「方形」两个独立开关？
-3. P3 像素网格：现在做还是缓？
-4. 状态归属：`Rc<Cell>` + `self.brush` 每帧同步（推荐），还是把笔刷设置搬进
-   `AppState`（改动更大）？
+已知取舍：软方形在整数尺寸上 `coverage` 会饱和成实心（没有灰边）；需要柔和方形
+时再调整过渡带公式。
 
 ---
 
@@ -104,6 +69,10 @@
 
 ## Done（近期）
 
+- **像素模式 P1/P2**：`BrushShape { Round, Square }` + `BrushTool { hard, shape }`
+  （默认硬边方形，任意尺寸圆心吸附像素网格、`coverage` 二值）；选项栏加「像素」
+  「方形」两个开关（`Rc<Cell>` + `dynamic_background`，`update` 同步进画笔）；
+  `--selfcheck` 验证硬边无灰边 / 软边有灰边。
 - 透明棋盘格背景（显示用合成，导出 PNG 仍保留 alpha）。
 - 默认 128×128 像素画布 + 1px 硬边笔 + `TextureFilter::Nearest`。
 - 移动图层后画笔对准光标；图层缓冲按「当前范围 ∪ 文档范围」扩展，

@@ -79,6 +79,87 @@ fn click_at(view: &mut EditorView, position: Vec2) {
     });
 }
 
+/// 点一下选项栏的布尔开关，并 `update` 让状态同步进画笔。
+fn click_toggle(view: &mut EditorView, toggle: crate::ui::BrushToggle) {
+    let center = view
+        .brush_toggle_center(toggle)
+        .expect("toggle button mounted");
+    click_at(view, center);
+    view.update();
+}
+
+/// 在一个新视图上验证像素模式：size 3 硬边无灰边，关掉后软边（圆头）有灰边。
+fn check_pixel_mode_edges(failures: &mut Vec<String>) {
+    let mut view = EditorView::new(crate::theme::editor_theme(false), AppState::default());
+    view.layout(viewport());
+    view.event(&InputEvent::KeyDown {
+        key: Key::Character('b'),
+    });
+    view.update();
+    view.layout(viewport());
+
+    if !view.pixel_mode() {
+        failures.push("像素模式默认应为开".to_string());
+    }
+    while view.brush_size() < 3.0 {
+        match view.brush_adjust_center(crate::ui::BrushAdjust::SizeUp) {
+            Some(center) => {
+                click_at(&mut view, center);
+                view.update();
+            }
+            None => break,
+        }
+    }
+
+    // 硬边：size 3 不该有抗锯齿灰边。
+    let hard = view
+        .canvas_camera()
+        .document_to_screen(Vec2::new(40.0, 40.0));
+    click_at(&mut view, hard);
+    view.update();
+    view.mark_texture_dirty();
+    let frame = view.take_texture_upload().expect("应产出合成结果");
+    let gray = gray_pixels(&frame, 40, 40, 3);
+    if gray != 0 {
+        failures.push(format!("像素模式仍有 {gray} 个抗锯齿灰边像素"));
+    }
+
+    // 软边：关掉像素模式，并用圆头（方形的软边在整数尺寸上会饱和成实心）。
+    click_toggle(&mut view, crate::ui::BrushToggle::Hard);
+    click_toggle(&mut view, crate::ui::BrushToggle::Square);
+    if view.pixel_mode() || view.square_mode() {
+        failures.push("选项栏开关没有关掉".to_string());
+    }
+    if view.brush_hard() || view.brush_shape() != crate::tools::BrushShape::Round {
+        failures.push("画笔没有同步成软边圆头".to_string());
+    }
+    let soft = view
+        .canvas_camera()
+        .document_to_screen(Vec2::new(40.0, 50.0));
+    click_at(&mut view, soft);
+    view.update();
+    view.mark_texture_dirty();
+    let frame = view.take_texture_upload().expect("应产出合成结果");
+    if gray_pixels(&frame, 40, 50, 3) == 0 {
+        failures.push("关掉像素模式后应出现抗锯齿灰边".to_string());
+    }
+}
+
+fn gray_pixels(pixels: &PixelBuffer, cx: u32, cy: u32, radius: u32) -> usize {
+    let mut count = 0;
+    let y_end = (cy + radius).min(pixels.height.saturating_sub(1));
+    let x_end = (cx + radius).min(pixels.width.saturating_sub(1));
+    for y in cy.saturating_sub(radius)..=y_end {
+        for x in cx.saturating_sub(radius)..=x_end {
+            let color = pixels.get_pixel(x, y);
+            if color.r == color.g && color.g == color.b && color.r != 0 && color.r != 255 {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 /// 所有 `DrawText` 的文字。
 fn texts(frame: &RecordedFrame) -> Vec<String> {
     frame
@@ -346,6 +427,18 @@ pub fn check() -> (usize, String) {
             crate::ui::BrushAdjust::SizeUp.label()
         ));
     }
+
+    // 像素模式：默认开；选项栏有开关。绘制验证单独用一个新视图，避免污染
+    // 主视图的历史（后面还会断言“只有最初那一笔”）。
+    if !view.pixel_mode() {
+        failures.push("像素模式默认应为开".to_string());
+    }
+    for needle in ["像素", "方形"] {
+        if !contains(&options_frame, needle) {
+            failures.push(format!("选项栏缺少「{needle}」开关"));
+        }
+    }
+    check_pixel_mode_edges(&mut failures);
 
     // 可拖动右栏：向左拖分隔条，右栏应变宽。
     let sidebar_before = view.sidebar_width();

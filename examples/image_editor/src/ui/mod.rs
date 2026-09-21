@@ -25,6 +25,7 @@ mod toolbar;
 
 pub use file_panel::IoAction;
 pub use options_bar::BrushAdjust;
+pub use options_bar::BrushToggle;
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -49,7 +50,7 @@ use crate::canvas::{
 use crate::document::{LayerId, PixelBuffer};
 use crate::icons::IconSet;
 use crate::renderer::{sample_pixel, CpuRenderer, RenderTarget, Renderer};
-use crate::tools::{BrushMode, BrushTool, MoveTool, PointerEvent, Tool, ToolContext};
+use crate::tools::{BrushMode, BrushShape, BrushTool, MoveTool, PointerEvent, Tool, ToolContext};
 use crate::ui::options_bar::{options_bar, options_hint, tool_has_brush, OptionsRefs};
 
 /// 工具栏宽度（逻辑像素）。
@@ -130,6 +131,12 @@ pub struct EditorView {
     brush_request: Rc<Cell<Option<BrushAdjust>>>,
     /// `−` / `+` 按钮节点（测试 / 自检点击用）。
     brush_buttons: Vec<(BrushAdjust, NodeId)>,
+    /// 像素模式 / 方形笔的共享开关状态（选项栏按钮直接翻转，`update` 同步进
+    /// `self.brush`）。
+    pixel_mode: Rc<Cell<bool>>,
+    square_mode: Rc<Cell<bool>>,
+    /// 开关按钮节点（测试 / 自检点击用）。
+    brush_toggles: Vec<(BrushToggle, NodeId)>,
     /// 右侧栏共享宽度（分隔条写、`clamp_sidebar_width` 也写）。
     sidebar_width: Rc<Cell<f32>>,
     /// 右侧栏节点（分隔条的目标）。
@@ -235,6 +242,9 @@ impl EditorView {
         let options = OptionsRefs::default();
         let brush_request: Rc<Cell<Option<BrushAdjust>>> = Rc::new(Cell::new(None));
         let mut brush_refs: Vec<(BrushAdjust, NodeRef)> = Vec::new();
+        let pixel_mode = Rc::new(Cell::new(true));
+        let square_mode = Rc::new(Cell::new(true));
+        let mut toggle_refs: Vec<(BrushToggle, NodeRef)> = Vec::new();
         let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
 
         // 布局根（SceneTree 根）的子节点是按 anchors 摆的，flex 从下一层才开始 ——
@@ -247,8 +257,11 @@ impl EditorView {
             .child(options_bar(
                 theme,
                 brush_request.clone(),
+                pixel_mode.clone(),
+                square_mode.clone(),
                 &options,
                 &mut brush_refs,
+                &mut toggle_refs,
             ))
             .child(
                 Flex::row()
@@ -334,6 +347,10 @@ impl EditorView {
             .into_iter()
             .map(|(adjust, slot)| (adjust, slot.get().expect("brush button mounted")))
             .collect();
+        let brush_toggles: Vec<(BrushToggle, NodeId)> = toggle_refs
+            .into_iter()
+            .map(|(toggle, slot)| (toggle, slot.get().expect("brush toggle mounted")))
+            .collect();
 
         // 图标包在构建按钮时已被各 `Icon` 组件解析并持有（decorator 里），这里
         // 只留个数给自检 / 报告用。
@@ -364,6 +381,9 @@ impl EditorView {
             options_hint: options.hint.get().expect("options hint mounted"),
             brush_request,
             brush_buttons,
+            pixel_mode,
+            square_mode,
+            brush_toggles,
             sidebar_width,
             sidebar_node: refs.sidebar.get().expect("sidebar mounted"),
             sidebar_handle_node: refs.sidebar_handle.get().expect("sidebar handle mounted"),
@@ -418,6 +438,13 @@ impl EditorView {
         if let Some(adjust) = self.brush_request.take() {
             self.apply_brush_adjust(adjust);
         }
+        // 选项栏开关是显示源，`brush` 是绘制源，这里每帧对齐。
+        self.brush.hard = self.pixel_mode.get();
+        self.brush.shape = if self.square_mode.get() {
+            BrushShape::Square
+        } else {
+            BrushShape::Round
+        };
         self.sync_options();
 
         let (revision, active) = {
@@ -1415,6 +1442,40 @@ impl EditorView {
         self.brush.size
     }
 
+    /// 画笔当前的硬边状态（像素模式同步后的结果）。
+    pub fn brush_hard(&self) -> bool {
+        self.brush.hard
+    }
+
+    /// 画笔当前的形状。
+    pub fn brush_shape(&self) -> BrushShape {
+        self.brush.shape
+    }
+
+    /// 像素模式开关是否打开（硬边）。
+    pub fn pixel_mode(&self) -> bool {
+        self.pixel_mode.get()
+    }
+
+    /// 方形笔开关是否打开。
+    pub fn square_mode(&self) -> bool {
+        self.square_mode.get()
+    }
+
+    /// 选项栏开关按钮的节点。
+    pub fn brush_toggle_node(&self, toggle: BrushToggle) -> Option<NodeId> {
+        self.brush_toggles
+            .iter()
+            .find(|(candidate, _)| *candidate == toggle)
+            .map(|(_, id)| *id)
+    }
+
+    /// 选项栏开关按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
+    pub fn brush_toggle_center(&self, toggle: BrushToggle) -> Option<Vec2> {
+        let id = self.brush_toggle_node(toggle)?;
+        draw_ui::control(&self.tree, id).map(|control| control.rect.center())
+    }
+
     /// 右栏当前宽度（逻辑像素）。
     pub fn sidebar_width(&self) -> f32 {
         self.sidebar_width.get()
@@ -1722,6 +1783,50 @@ mod tests {
         });
         view.update();
         assert_eq!(view.brush_size(), before + 1.0);
+    }
+
+    #[test]
+    fn the_pixel_mode_toggles_flip_the_brush() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        view.event(&InputEvent::KeyDown {
+            key: Key::Character('b'),
+        });
+        view.update();
+        view.layout(viewport());
+
+        // 默认：像素模式开、方形开。
+        assert!(view.pixel_mode());
+        assert!(view.square_mode());
+        assert!(view.brush_hard());
+        assert_eq!(view.brush_shape(), BrushShape::Square);
+
+        for toggle in [BrushToggle::Hard, BrushToggle::Square] {
+            click_toggle(&mut view, toggle);
+        }
+        assert!(!view.pixel_mode());
+        assert!(!view.square_mode());
+        // 开关同步进了画笔。
+        assert!(!view.brush_hard());
+        assert_eq!(view.brush_shape(), BrushShape::Round);
+
+        for toggle in [BrushToggle::Hard, BrushToggle::Square] {
+            click_toggle(&mut view, toggle);
+        }
+        assert!(view.pixel_mode() && view.square_mode());
+    }
+
+    fn click_toggle(view: &mut EditorView, toggle: BrushToggle) {
+        let center = view.brush_toggle_center(toggle).expect("toggle button");
+        view.event(&InputEvent::PointerDown {
+            position: center,
+            button: PointerButton::Left,
+        });
+        view.event(&InputEvent::PointerUp {
+            position: center,
+            button: PointerButton::Left,
+        });
+        view.update();
     }
 
     #[test]
