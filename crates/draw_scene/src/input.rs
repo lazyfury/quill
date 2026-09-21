@@ -242,6 +242,10 @@ fn hit_visual(visual: Visual, point: Vec2) -> bool {
             point.x >= 0.0 && point.y >= 0.0 && point.x <= size.width && point.y <= size.height
         }
         Visual::Circle { radius, .. } => point.length_squared() <= radius * radius,
+        // An image is a rectangle from the origin; hit-test it like `Rect`.
+        Visual::Image { size, .. } => {
+            point.x >= 0.0 && point.y >= 0.0 && point.x <= size.width && point.y <= size.height
+        }
     }
 }
 

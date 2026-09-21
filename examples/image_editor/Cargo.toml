@@ -1,0 +1,36 @@
+[package]
+name = "image_editor"
+version = "0.1.0"
+edition = "2021"
+# `winit` / `wgpu` (pulled in by `draw_backend_wgpu`) need newer Rust than the
+# workspace default, exactly like `examples/wgpu_demo`.
+rust-version = "1.76"
+publish = false
+
+[[bin]]
+name = "image_editor"
+path = "src/main.rs"
+
+[dependencies]
+# The UI is built with the workspace's own layers (see AGENTS.md):
+# no `egui` here — `draw_ui` / `draw_components` / `draw_theme` replace it.
+draw_core = { path = "../../crates/draw_core" }
+draw_render = { path = "../../crates/draw_render" }
+draw_scene = { path = "../../crates/draw_scene" }
+draw_theme = { path = "../../crates/draw_theme" }
+draw_ui = { path = "../../crates/draw_ui" }
+draw_components = { path = "../../crates/draw_components" }
+# Lucide 图标：核心的 backend-neutral SVG 渲染（零外部依赖）。
+draw_svg = { path = "../../crates/draw_svg" }
+draw_backend_wgpu = { path = "../../crates/draw_backend_wgpu" }
+# Headless self-check (`--selfcheck`): record draw lists + inspect them,
+# so the UI can be verified without a window or a screenshot.
+draw_backend_recording = { path = "../../crates/draw_backend_recording" }
+draw_profile = { path = "../../crates/draw_profile" }
+winit = "0.30"
+# Structured events for the important app actions (AGENTS.md §31).
+tracing = "0.1"
+
+# 独立的桌面应用示例：不加入主 workspace，避免 winit/wgpu 影响
+# `cargo check --workspace`（跟 `examples/file_browser` 同样的取舍）。
+[workspace]

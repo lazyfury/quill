@@ -1,6 +1,7 @@
 use std::any::Any;
 
 use draw_core::{Color, EventResult, InputEvent, NodeId, Size, Transform2D, Vec2};
+use draw_render::TextureId;
 
 use crate::viewport::Viewport;
 
@@ -20,6 +21,17 @@ pub enum Visual {
     Circle {
         radius: f32,
         color: Color,
+    },
+    /// A textured quad drawn from the local origin with `size`, sampled from
+    /// `texture`.
+    ///
+    /// The scene only keeps the backend-neutral [`TextureId`] handle; the
+    /// backend maps it to its own resource (a GPU texture, an `ImageBitmap`,
+    /// or a plain recording). This is what lets a `Node2D` act as an image /
+    /// sprite canvas item (`Sprite2D` grows from here later).
+    Image {
+        texture: TextureId,
+        size: Size,
     },
 }
 

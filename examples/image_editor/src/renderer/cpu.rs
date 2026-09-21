@@ -1,0 +1,201 @@
+//! CPU 合成器：`Normal` 混合 + 图层不透明度 + 图层位置偏移。
+
+use crate::document::{Color, Document, PixelBuffer};
+
+use super::{RenderTarget, Renderer};
+
+/// 第一版合成器。纯 CPU，无依赖，可无头测试。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CpuRenderer;
+
+impl Renderer for CpuRenderer {
+    fn render(&self, document: &Document, target: &mut RenderTarget) {
+        target.resize(document.width, document.height);
+        // 画布底是透明的；白色背景由文档里的“背景”图层提供，这样隐藏背景
+        // 图层时能露出透明（以后的棋盘格）。
+        target.pixels.clear(Color::TRANSPARENT);
+
+        // layers 从下到上，直接顺序 source-over 即可。
+        for layer in &document.layers {
+            if !layer.visible || layer.opacity <= 0.0 {
+                continue;
+            }
+            blend_layer(&mut target.pixels, layer);
+        }
+    }
+}
+
+/// 把一个图层按位置偏移与不透明度合成到目标上。
+fn blend_layer(target: &mut PixelBuffer, layer: &crate::document::Layer) {
+    let opacity = layer.opacity;
+    // 不透明度拉满时，alpha=255 的源像素可以直接覆盖目标（source-over 的
+    // 特例），省掉每像素的浮点混合。背景层与画笔实心部分都走这条路。
+    let opaque = opacity >= 1.0;
+    let aligned = layer.position == crate::document::Point::ZERO
+        && layer.pixels.width == target.width
+        && layer.pixels.height == target.height;
+
+    if aligned {
+        // 快路：同尺寸对齐，逐 4 字节块处理，省掉每像素的坐标与边界检查。
+        for (dst, src) in target
+            .data
+            .chunks_exact_mut(4)
+            .zip(layer.pixels.data.chunks_exact(4))
+        {
+            let alpha = src[3];
+            if alpha == 0 {
+                continue;
+            }
+            if opaque && alpha == 255 {
+                dst.copy_from_slice(src);
+                continue;
+            }
+            crate::document::blend_over(dst, src, opacity);
+        }
+        return;
+    }
+
+    let dx = layer.position.x as i64;
+    let dy = layer.position.y as i64;
+    let width = target.width as i64;
+    let height = target.height as i64;
+    for y in 0..layer.pixels.height {
+        for x in 0..layer.pixels.width {
+            let src = layer.pixels.get_pixel(x, y);
+            if src.is_transparent() {
+                continue;
+            }
+            let dest_x = x as i64 + dx;
+            let dest_y = y as i64 + dy;
+            if dest_x < 0 || dest_y < 0 || dest_x >= width || dest_y >= height {
+                continue;
+            }
+            let (dest_x, dest_y) = (dest_x as u32, dest_y as u32);
+            if opaque && src.a == 255 {
+                target.set_pixel(dest_x, dest_y, src);
+            } else {
+                target.blend_pixel(dest_x, dest_y, src, opacity);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::{Layer, PixelBuffer, Point};
+
+    fn render(document: &Document) -> PixelBuffer {
+        let mut target = RenderTarget::new(0, 0);
+        CpuRenderer.render(document, &mut target);
+        target.pixels
+    }
+
+    #[test]
+    fn a_single_opaque_layer_is_copied_through() {
+        let mut document = Document::empty("d", 2, 1, Color::BLACK);
+        let layer = Layer::new("L", PixelBuffer::filled(2, 1, Color::RED));
+        document.layers.push(layer);
+        let pixels = render(&document);
+        assert_eq!(pixels.get_pixel(0, 0), Color::RED);
+        assert_eq!(pixels.get_pixel(1, 0), Color::RED);
+    }
+
+    #[test]
+    fn hidden_layers_are_skipped() {
+        let mut document = Document::empty("d", 1, 1, Color::BLACK);
+        let mut layer = Layer::new("L", PixelBuffer::filled(1, 1, Color::RED));
+        layer.visible = false;
+        document.layers.push(layer);
+        assert_eq!(render(&document).get_pixel(0, 0), Color::TRANSPARENT);
+    }
+
+    #[test]
+    fn the_top_layer_wins() {
+        let mut document = Document::empty("d", 1, 1, Color::BLACK);
+        document
+            .layers
+            .push(Layer::new("bottom", PixelBuffer::filled(1, 1, Color::RED)));
+        document
+            .layers
+            .push(Layer::new("top", PixelBuffer::filled(1, 1, Color::WHITE)));
+        assert_eq!(render(&document).get_pixel(0, 0), Color::WHITE);
+    }
+
+    #[test]
+    fn opacity_blends_towards_the_background() {
+        let mut document = Document::empty("d", 1, 1, Color::BLACK);
+        document
+            .layers
+            .push(Layer::new("bg", PixelBuffer::filled(1, 1, Color::WHITE)));
+        let mut top = Layer::new("top", PixelBuffer::filled(1, 1, Color::RED));
+        top.opacity = 0.5;
+        document.layers.push(top);
+
+        let color = render(&document).get_pixel(0, 0);
+        assert_eq!(color.a, 255);
+        assert_eq!(color.r, 255);
+        assert!((color.g as i32 - 128).abs() <= 1, "g = {}", color.g);
+        assert!((color.b as i32 - 128).abs() <= 1, "b = {}", color.b);
+    }
+
+    #[test]
+    fn layer_position_offsets_the_pixels() {
+        let mut document = Document::empty("d", 3, 1, Color::BLACK);
+        let mut layer = Layer::new("L", PixelBuffer::filled(1, 1, Color::RED));
+        layer.position = Point::new(2, 0);
+        document.layers.push(layer);
+
+        let pixels = render(&document);
+        assert_eq!(pixels.get_pixel(0, 0), Color::TRANSPARENT);
+        assert_eq!(pixels.get_pixel(1, 0), Color::TRANSPARENT);
+        assert_eq!(pixels.get_pixel(2, 0), Color::RED);
+    }
+
+    #[test]
+    #[ignore = "perf probe: --ignored --nocapture"]
+    fn probe_composite_and_clone_cost() {
+        use std::time::Instant;
+        let mut document = Document::new("d", 800, 600);
+        document.add_layer("L1");
+        document.add_layer("L2");
+        let mut target = RenderTarget::new(800, 600);
+        CpuRenderer.render(&document, &mut target);
+        let n = 100;
+        let timer = Instant::now();
+        for _ in 0..n {
+            CpuRenderer.render(&document, &mut target);
+        }
+        let render_ms = timer.elapsed().as_secs_f64() / n as f64 * 1000.0;
+        let timer = Instant::now();
+        for _ in 0..n {
+            std::hint::black_box(target.pixels.clone());
+        }
+        let clone_ms = timer.elapsed().as_secs_f64() / n as f64 * 1000.0;
+
+        let one = Document::new("d", 800, 600);
+        let mut target1 = RenderTarget::new(800, 600);
+        CpuRenderer.render(&one, &mut target1);
+        let timer = Instant::now();
+        for _ in 0..n {
+            CpuRenderer.render(&one, &mut target1);
+        }
+        let one_ms = timer.elapsed().as_secs_f64() / n as f64 * 1000.0;
+
+        eprintln!(
+            "render 3 layers {render_ms:.2} ms, 1 layer {one_ms:.2} ms, clone {clone_ms:.2} ms"
+        );
+    }
+
+    #[test]
+    fn negative_positions_clip_at_the_canvas_edge() {
+        let mut document = Document::empty("d", 2, 1, Color::BLACK);
+        let mut layer = Layer::new("L", PixelBuffer::filled(2, 1, Color::RED));
+        layer.position = Point::new(-1, 0);
+        document.layers.push(layer);
+
+        let pixels = render(&document);
+        assert_eq!(pixels.get_pixel(0, 0), Color::RED, "右半部分落到 x=0");
+        assert_eq!(pixels.get_pixel(1, 0), Color::TRANSPARENT);
+    }
+}

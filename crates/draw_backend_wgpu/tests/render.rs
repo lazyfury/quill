@@ -344,6 +344,39 @@ fn draw_image_honours_the_source_subrect() {
 }
 
 #[test]
+fn update_texture_rewrites_an_existing_texture_in_place() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    let id = TextureId::new(3);
+    backend
+        .register_texture(id, 1, 1, &[255, 0, 0, 255])
+        .unwrap();
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        id,
+        Rect::from_min_size(Vec2::ZERO, Size::splat(8.0)),
+        None,
+        Paint::new(Color::WHITE),
+    );
+    let pixels = render(&mut backend, ctx, viewport(8.0, 8.0));
+    assert_pixel(&pixels, 4, 4, [255, 0, 0, 255]);
+
+    // Same size -> in-place rewrite of the same texture id.
+    backend.update_texture(id, 1, 1, &[0, 255, 0, 255]).unwrap();
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        id,
+        Rect::from_min_size(Vec2::ZERO, Size::splat(8.0)),
+        None,
+        Paint::new(Color::WHITE),
+    );
+    let pixels = render(&mut backend, ctx, viewport(8.0, 8.0));
+    assert_pixel(&pixels, 4, 4, [0, 255, 0, 255]);
+}
+
+#[test]
 fn draw_text_rasterizes_visible_glyphs() {
     let Some(mut backend) = backend() else {
         return;

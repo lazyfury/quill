@@ -54,6 +54,11 @@ draw_scene    -> draw_core, draw_render
 draw_ui         -> draw_core, draw_scene, draw_render
 draw_components -> draw_core, draw_scene, draw_render, draw_ui, draw_theme
 draw_render   -> draw_core
+draw_svg      -> draw_core, draw_render
+                 (backend-neutral SVG vector rendering: parses a small SVG subset
+                  into flattened polylines and strokes them with the IR `Line` /
+                  `FillCircle` commands — no external dependency, so an icon pack
+                  like Lucide can be loaded and drawn by any backend)
 draw_profile  -> draw_core, draw_render
 draw_debug_ui -> draw_core, draw_scene, draw_render, draw_ui, draw_components, draw_profile
 draw_backend_* -> draw_render, draw_core
@@ -80,6 +85,26 @@ file_browser   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   the first real consumer of `draw_components::List`, and the
                   first host to translate a platform wheel into
                   `InputEvent::Wheel`)
+image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
+                 draw_components, draw_svg, draw_backend_wgpu, draw_backend_recording,
+                 draw_profile, winit, tracing
+                 (standalone demo: own workspace, NOT a workspace member;
+                  the Photoshop-style editor demo whose UI is built with the
+                  quill stack instead of egui. Landed: menu/toolbar/status bar,
+                  `document` model (`Document`/`Layer`/`PixelBuffer`, plus
+                  `PixelRegion`), `canvas` (a `Node2D` + `Visual::Image`, camera
+                  zoom/pan, coordinate conversion), `renderer` (CPU compositor),
+                  a working layer panel, `tools` (`BrushTool` paint/erase in the
+                  active layer), `history` (`Command`/`History`/
+                  `PaintCommand`: one stroke = one undo, toolbar buttons +
+                  `Ctrl/Cmd+Z`), and Lucide icons (toolbar tool + undo/redo
+                  buttons, plus a sidebar gallery) stroked straight into the IR
+                  via `draw_svg` (no rasterization, no texture; vendored
+                  20-icon subset + `IMAGE_EDITOR_ICON_DIR` to point at a full
+                  pack). Verified headlessly with `--selfcheck`
+                  (including an undo/redo round-trip and an icon/FillCircle
+                  check). Import/export and the move/select/eyedropper tools
+                  land in later phases, one at a time)
 ```
 
 Planned (Stage 25, see `docs/godot-migration.md`):
@@ -356,6 +381,7 @@ The suite is a contract, not a diary. Before adding or keeping a test:
 | **Build an app UI: frame loop, widgets, hosting, conventions, cheat sheet** | **`docs/ui-guide.md`** (read this before scanning crates) |
 | Pipeline, coordinates, stage plan, backend replaceability | `docs/architecture.md` |
 | Backends (Canvas / wgpu / recording), adding a backend, browser boundary | `docs/backend.md` |
+| SVG / vector icons, loading an icon pack (Lucide) | `docs/svg.md` (`crates/draw_svg`) |
 | Controls, layout, components (API reference by name) | `docs/components.md` |
 | Design tokens, theme, component library | `docs/design-system.md` |
 | Roadmap / remaining primitives & components | `docs/plan.md` |

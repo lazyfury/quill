@@ -1,0 +1,11 @@
+[package]
+name = "draw_svg"
+description = "Backend-neutral SVG (vector) rendering for quill: parses a small SVG subset into flattened polylines and strokes them with the draw_render IR."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+draw_core.workspace = true
+draw_render.workspace = true

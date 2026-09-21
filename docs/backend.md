@@ -77,9 +77,17 @@ the GPU pass is a single textured-triangle pipeline (`src/shader.wgsl`):
   converted to device pixels and clamped to the target.
 - `FillRect` / `StrokeRect` / `Line` / `FillCircle` / `StrokeCircle` tessellate
   into triangles and sample a 1x1 white texture. `Line` becomes a thin quad
-  with square caps.
+  with butt caps.
+- The render pass is **4x multisampled**: geometry is drawn into an MSAA texture
+  and resolved into the frame's texture each frame (offscreen and surface alike).
+  Combined with 64-segment circles, 8-segment rounded-rect corners and the SVG
+  vector resolution (`docs/svg.md`), edges are anti-aliased instead of hard.
 - `DrawImage` samples a texture registered with `WgpuBackend::register_texture`
-  (destination and optional source sub-rect map to UVs).
+  (destination and optional source sub-rect map to UVs). A host that changes an
+  image repeatedly (a painting canvas, a live preview) should call
+  `WgpuBackend::update_texture` instead: when the size is unchanged it rewrites
+  the existing GPU texture and keeps its bind group, so the per-update cost is
+  just the pixel copy rather than a fresh texture + view + bind group.
 - `DrawText` uses a real font loaded at startup with `ab_glyph` (`QUILL_FONT`
   if set, otherwise a per-OS candidate list: macOS `Arial Unicode`, Linux
   `DejaVuSans`/Noto CJK, Windows Arial/MSYH) and shaped with `rustybuzz` plus

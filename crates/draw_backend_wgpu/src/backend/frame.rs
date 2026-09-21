@@ -23,9 +23,17 @@ impl WgpuBackend {
         let width = width.max(1);
         let height = height.max(1);
         self.ensure_pipeline(format);
+        self.ensure_msaa(width, height, format);
         self.start_frame(viewport, width, height)?;
+        let msaa_view = self
+            .msaa
+            .as_ref()
+            .expect("msaa target created above")
+            .view
+            .clone();
         self.frame = Some(Frame {
             view,
+            msaa_view,
             width,
             height,
             format,
@@ -99,6 +107,38 @@ impl WgpuBackend {
         });
     }
 
+    /// Ensures a multisampled colour target exists for `width`x`height`/`format`.
+    pub(super) fn ensure_msaa(&mut self, width: u32, height: u32, format: wgpu::TextureFormat) {
+        if matches!(
+            &self.msaa,
+            Some(target)
+                if target.width == width && target.height == height && target.format == format
+        ) {
+            return;
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("draw_backend_wgpu.msaa"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: MSAA_SAMPLES,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        self.msaa = Some(MsaaTarget {
+            width,
+            height,
+            format,
+            view,
+        });
+    }
+
     /// Encodes and submits the render pass for the current frame.
     pub(super) fn render_frame(&self) {
         let Some(frame) = self.frame.as_ref() else {
@@ -137,11 +177,11 @@ impl WgpuBackend {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("draw_backend_wgpu.pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &frame.view,
-                    resolve_target: None,
+                    view: &frame.msaa_view,
+                    resolve_target: Some(&frame.view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(clear),
-                        store: wgpu::StoreOp::Store,
+                        store: wgpu::StoreOp::Discard,
                     },
                 })],
                 depth_stencil_attachment: None,

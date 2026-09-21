@@ -28,7 +28,11 @@ pub(super) fn create_render_pipeline(
         },
         primitive: wgpu::PrimitiveState::default(),
         depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: MSAA_SAMPLES,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
         fragment: Some(wgpu::FragmentState {
             module: shader,
             entry_point: Some("fs_main"),

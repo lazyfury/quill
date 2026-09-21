@@ -441,7 +441,7 @@ pub(super) fn circle_point(center: Vec2, radius: f32, angle: f32) -> Vec2 {
 }
 
 /// Segments per rounded corner (kept small; UI radii are a few pixels).
-const CORNER_SEGMENTS: usize = 5;
+const CORNER_SEGMENTS: usize = 8;
 
 /// Polygon outline of a rounded rectangle, clockwise in y-down space.
 ///

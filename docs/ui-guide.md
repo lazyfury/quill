@@ -207,6 +207,7 @@ reading its own data instead:
 | Full UI app pattern | `examples/demo_app/src/lib.rs` |
 | Minimal winit + wgpu host | `examples/wgpu_demo/src/app.rs` |
 | Virtualized list, resize gutter, tabs, worker results | `examples/file_browser` |
+| Photoshop-style editor using quill instead of egui (Phase 1) | `examples/image_editor` |
 | Menu-bar panel, two tabs, content-sized window, self-check | `examples/deepseek_balance` |
 | Backends, adding one, browser boundary | `docs/backend.md` |
 

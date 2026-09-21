@@ -21,9 +21,9 @@ it monochrome/solid-paint only until a real need appears.
 | `FillRect` / `StrokeRect` | done | axis-aligned |
 | `FillCircle` / `StrokeCircle` | done | tessellated fan / ring |
 | `FillRoundedRect` / `StrokeRoundedRect` | done | radius clamped to half the smaller side |
-| `Line` | done | `from`/`to`/`width`; square caps; thin quad on wgpu |
+| `Line` | done | `from`/`to`/`width`; butt caps; thin quad on wgpu |
 | `Arc` / `Ellipse` | planned | spinners, progress rings, gauges |
-| `Path` (polyline/polygon) | planned | charts, icons, freeform shapes |
+| `Path` (polyline/polygon) | partial | `draw_svg` strokes SVG paths with `Line` + `FillCircle`; a native `Path` IR primitive is still planned |
 | Rounded `ClipRect` | planned | rounded image masks / cards |
 | Gradients / patterns | later | `Paint` grows variants without changing command shapes |
 
@@ -145,6 +145,17 @@ priority order and add native tests.
 
 ## Done
 
+- `draw_svg` (`crates/draw_svg`): backend-neutral SVG vector rendering with **no
+external dependency**. It parses a small SVG subset (the Lucide grammar:
+`path`/`rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, full path data
+incl. arcs, `stroke`/`stroke-width`/`stroke-linecap`/`stroke-linejoin`/`viewBox`)
+into flattened polylines and strokes them with the existing `Line` +
+`FillCircle` IR, so it works with any backend. `IconPack` indexes a directory of
+`.svg` files by name. Validated against the whole Lucide pack: 2 112 icons parse
+into 8 605 shapes / ~224 K commands with none empty
+(`DRAW_SVG_ICON_DIR=… cargo test -p draw_svg -- --ignored every_icon`). See
+`docs/svg.md`. Fills are not rendered yet (stroke-only), which is exactly the
+Lucide case.
 - `List` + the core increments it needed: `ControlData.clip` (the first and only
   source of `DrawCommand::ClipRect`, resolved in the layout pass, emitted as one
   save/clip/restore per clipped region, respected by hit testing),

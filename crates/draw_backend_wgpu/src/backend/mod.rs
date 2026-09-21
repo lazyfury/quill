@@ -52,8 +52,10 @@ use pipeline::{bind_group, upload_texture};
 
 /// Formats the offscreen render target uses.
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// Multisample count for the render target (geometry anti-aliasing).
+const MSAA_SAMPLES: u32 = 4;
 /// Circle tessellation resolution.
-const CIRCLE_SEGMENTS: u32 = 48;
+const CIRCLE_SEGMENTS: u32 = 64;
 /// UVs used when sampling the 1x1 white texture (any UV works).
 const SOLID_UV: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
 
@@ -190,12 +192,25 @@ pub(super) struct OffscreenTarget {
     pub(super) view: wgpu::TextureView,
 }
 
+/// A multisampled colour target that resolves into the frame's texture.
+///
+/// Kept per size/format and reused across frames; the requested `view` holds the
+/// texture alive, so the texture handle itself does not need to be stored.
+pub(super) struct MsaaTarget {
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) format: wgpu::TextureFormat,
+    pub(super) view: wgpu::TextureView,
+}
+
 /// The render target of the frame currently being built.
 ///
 /// Offscreen frames point at [`OffscreenTarget::view`]; window frames point at
 /// the surface texture view supplied by the caller.
 pub(super) struct Frame {
     pub(super) view: wgpu::TextureView,
+    /// Multisampled colour attachment; resolves into [`Frame::view`].
+    pub(super) msaa_view: wgpu::TextureView,
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) format: wgpu::TextureFormat,
@@ -222,8 +237,12 @@ pub struct WgpuBackend {
     pub(super) image_sampler: wgpu::Sampler,
     pub(super) textures: HashMap<TextureId, wgpu::BindGroup>,
     pub(super) texture_sizes: HashMap<TextureId, (u32, u32)>,
+    /// Kept so [`WgpuBackend::update_texture`] can rewrite pixels in place
+    /// instead of allocating a new GPU texture every frame.
+    pub(super) texture_objects: HashMap<TextureId, wgpu::Texture>,
 
     pub(super) offscreen: Option<OffscreenTarget>,
+    pub(super) msaa: Option<MsaaTarget>,
     pub(super) frame: Option<Frame>,
 
     // Per-frame CPU staging.
@@ -367,6 +386,58 @@ impl WgpuBackend {
         );
         self.textures.insert(id, group);
         self.texture_sizes.insert(id, (width, height));
+        self.texture_objects.insert(id, texture);
+        Ok(())
+    }
+
+    /// Uploads new pixels for a texture, reusing the GPU texture and its bind
+    /// group when the size has not changed.
+    ///
+    /// [`register_texture`](Self::register_texture) allocates a fresh texture,
+    /// view and bind group every call. A host that changes an image repeatedly
+    /// (a painting canvas, a live preview) should call this instead, so the only
+    /// per-update GPU work is the pixel copy into the existing texture.
+    pub fn update_texture(
+        &mut self,
+        id: TextureId,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<(), WgpuError> {
+        let Some(expected) = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4))
+        else {
+            return self.register_texture(id, width, height, rgba);
+        };
+        if width == 0 || height == 0 || rgba.len() < expected {
+            return self.register_texture(id, width, height, rgba);
+        }
+        if self.texture_sizes.get(&id) != Some(&(width, height)) {
+            return self.register_texture(id, width, height, rgba);
+        }
+        let Some(texture) = self.texture_objects.get(&id) else {
+            return self.register_texture(id, width, height, rgba);
+        };
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba[..expected],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
         Ok(())
     }
 
@@ -490,6 +561,7 @@ impl RenderBackend for WgpuBackend {
         let width = size.width.round().max(1.0) as u32;
         let height = size.height.round().max(1.0) as u32;
         self.ensure_offscreen(width, height);
+        self.ensure_msaa(width, height, TARGET_FORMAT);
         self.ensure_pipeline(TARGET_FORMAT);
         self.start_frame(viewport, width, height)?;
         let view = self
@@ -498,8 +570,15 @@ impl RenderBackend for WgpuBackend {
             .expect("offscreen target created above")
             .view
             .clone();
+        let msaa_view = self
+            .msaa
+            .as_ref()
+            .expect("msaa target created above")
+            .view
+            .clone();
         self.frame = Some(Frame {
             view,
+            msaa_view,
             width,
             height,
             format: TARGET_FORMAT,

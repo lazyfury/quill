@@ -56,6 +56,14 @@ impl SceneTree {
                     Visual::Circle { radius, color } => {
                         ctx.fill_circle(Vec2::ZERO, radius, Paint::new(color));
                     }
+                    Visual::Image { texture, size } => {
+                        ctx.draw_image(
+                            texture,
+                            Rect::from_min_size(Vec2::ZERO, size),
+                            None,
+                            Paint::default(),
+                        );
+                    }
                 }
                 ctx.restore();
             }
@@ -156,6 +164,37 @@ mod tests {
         assert_eq!(paint(&tree), expected);
         // repeated painting of the same scene is identical
         assert_eq!(paint(&tree), paint(&tree));
+    }
+
+    #[test]
+    fn an_image_visual_emits_a_draw_image_under_the_node_transform() {
+        let mut tree = SceneTree::new();
+        let id = tree.add_node2d(tree.root(), "image");
+        let texture = draw_render::TextureId::new(7);
+        tree.set_visual(
+            id,
+            Visual::Image {
+                texture,
+                size: Size::new(4.0, 2.0),
+            },
+        );
+        tree.set_transform(id, Transform2D::from_translation(Vec2::new(10.0, 20.0)));
+        tree.update();
+
+        assert_eq!(
+            paint(&tree),
+            vec![
+                DrawCommand::Save,
+                DrawCommand::SetTransform(Transform2D::from_translation(Vec2::new(10.0, 20.0))),
+                DrawCommand::DrawImage {
+                    texture,
+                    destination: Rect::from_min_size(Vec2::ZERO, Size::new(4.0, 2.0)),
+                    source: None,
+                    paint: Paint::default(),
+                },
+                DrawCommand::Restore,
+            ]
+        );
     }
 
     #[test]
