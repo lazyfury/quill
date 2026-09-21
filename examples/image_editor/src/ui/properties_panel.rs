@@ -6,12 +6,18 @@
 use draw_components::{Card, Component, Divider, NodeRef, Text};
 use draw_theme::{space, Theme, Tone};
 
-/// 属性面板。两个文本槽位由 [`EditorView`](crate::ui::EditorView) 回写。
-pub fn properties_panel(theme: Theme, name: &NodeRef, detail: &NodeRef) -> impl Component {
+/// 属性面板。三个文本槽位由 [`EditorView`](crate::ui::EditorView) 回写。
+pub fn properties_panel(
+    theme: Theme,
+    name: &NodeRef,
+    detail: &NodeRef,
+    geometry: &NodeRef,
+) -> impl Component {
     Card::new(theme)
         .gap(space::SM)
         .child(Text::subheading("属性", theme))
         .child(Divider::horizontal(theme))
         .child(Text::small("", theme).ref_(name))
         .child(Text::caption("", theme).tone(Tone::Muted).ref_(detail))
+        .child(Text::caption("", theme).tone(Tone::Muted).ref_(geometry))
 }

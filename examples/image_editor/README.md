@@ -43,7 +43,8 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
 - [x] **Phase 4 — 图层管理**：图层面板接真实 `Document`：虚拟化图层列表
   （眼睛 / 名字 / 不透明度、点选当前图层）+ 增删 / 显示隐藏 / 不透明度 ±10% /
   上移下移 / 重命名（键盘内联编辑，Enter 确认・Esc 取消）；任何改动后重新合成
-  并重传纹理。属性面板实时显示当前图层。
+  并重传纹理。属性面板实时显示当前图层：名字 / 不透明度 / 混合模式，以及图层
+  的 `position` 偏移与缓冲区尺寸（移动画布外内容后缓冲会变大，这里能看到）。
 - [x] **Phase 5 — Brush / Eraser**：`src/tools/` 的 `Tool` 接口 +
   `BrushTool`（`BrushMode::{Paint, Erase}` 共用一个引擎，§11）；在画布上
   左键拖动即在当前图层绘制 / 擦除，实时重合成。默认是**像素模式**

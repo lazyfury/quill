@@ -78,6 +78,7 @@ struct Refs {
     canvas: NodeRef,
     props_name: NodeRef,
     props_detail: NodeRef,
+    props_geometry: NodeRef,
     path: NodeRef,
     sidebar: NodeRef,
     sidebar_handle: NodeRef,
@@ -186,6 +187,7 @@ pub struct EditorView {
     renaming: Option<Rename>,
     props_name: NodeId,
     props_detail: NodeId,
+    props_geometry: NodeId,
     last_active: Option<LayerId>,
 }
 
@@ -300,6 +302,7 @@ impl EditorView {
                                 theme,
                                 &refs.props_name,
                                 &refs.props_detail,
+                                &refs.props_geometry,
                             ))
                             .ref_(&refs.sidebar),
                     ),
@@ -414,6 +417,7 @@ impl EditorView {
             renaming: None,
             props_name: refs.props_name.get().expect("props name mounted"),
             props_detail: refs.props_detail.get().expect("props detail mounted"),
+            props_geometry: refs.props_geometry.get().expect("props geometry mounted"),
             last_active: None,
         };
         view.update();
@@ -537,18 +541,27 @@ impl EditorView {
 
     /// 当前图层 -> 属性面板。
     fn sync_properties(&mut self) {
-        let (name, detail) = {
+        let (name, detail, geometry) = {
             let state = self.state.borrow();
             match state.document.active_layer() {
                 Some(layer) => (
                     layer.name.clone(),
                     format!("不透明度 {:.0}%  ·  Normal", layer.opacity * 100.0),
+                    format!(
+                        "偏移 ({}, {})  ·  缓冲 {}×{}",
+                        layer.position.x, layer.position.y, layer.pixels.width, layer.pixels.height
+                    ),
                 ),
-                None => ("无图层".to_string(), "点「+ 图层」新建一层".to_string()),
+                None => (
+                    "无图层".to_string(),
+                    "点「+ 图层」新建一层".to_string(),
+                    String::new(),
+                ),
             }
         };
         set_text(&mut self.tree, self.props_name, name);
         set_text(&mut self.tree, self.props_detail, detail);
+        set_text(&mut self.tree, self.props_geometry, geometry);
     }
 
     fn begin_rename(&mut self) {
@@ -2099,6 +2112,28 @@ mod tests {
         view.update();
         view.layout(viewport());
         assert!(frame_texts(&view).iter().any(|text| text.contains("上层")));
+    }
+
+    #[test]
+    fn the_properties_panel_shows_layer_geometry() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let id = view.state.borrow().document.active_layer().unwrap().id;
+        view.state
+            .borrow_mut()
+            .document
+            .set_layer_position(id, Point::new(3, -2));
+        view.update();
+        view.layout(viewport());
+        let texts = frame_texts(&view);
+        assert!(
+            texts.iter().any(|text| text.contains("偏移 (3, -2)")),
+            "texts = {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.contains("缓冲 128×128")),
+            "texts = {texts:?}"
+        );
     }
 
     #[test]
