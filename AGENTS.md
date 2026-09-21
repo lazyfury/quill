@@ -163,6 +163,29 @@ through a winit `EventLoopProxy`). `wgpu` only in
 (`rustybuzz`, `unicode-bidi`) and system-font discovery live only in
 `draw_backend_wgpu`; the core stays text-free.
 
+## Demo workspace modes & how to test
+
+Root `cargo check --workspace` / `cargo test --workspace` only cover the
+**workspace members** below. The **standalone** demos are deliberately kept out
+of the root workspace (their `winit` / `wgpu` / `ureq` / `png` deps must not
+enter the core gate), so they are built and tested with `--manifest-path`.
+None of the demos is a dependency of the core crates.
+
+| Demo | Workspace mode | Scope | Build / test | Reference |
+|---|---|---|---|---|
+| `examples/demo_app` | root member | single crate, backend-neutral (no backend) | `cargo test -p demo_app` | dependency block above |
+| `examples/multi_tree` | root member | single crate, headless (`draw_backend_recording`) | `cargo test -p multi_tree` | dependency block above |
+| `examples/web_demo` | root member | WASM / Canvas host | `cargo test -p web_demo`; build `./examples/web_demo/build.sh` | `examples/web_demo/README.md` |
+| `examples/wgpu_demo` | root member | native `wgpu` + `winit` | `cargo test -p wgpu_demo`; run `cargo run -p wgpu_demo --release` | `examples/wgpu_demo/README.md`, `docs/debug.md` |
+| `examples/deepseek_balance` | **standalone** (own workspace) | own `util` sub-crate (member of that workspace); native `wgpu` + `winit` + `ureq` | `cargo test --manifest-path examples/deepseek_balance/Cargo.toml`; `cargo run --manifest-path examples/deepseek_balance/Cargo.toml -- --selfcheck` | dependency block above, crate module docs |
+| `examples/file_browser` | **standalone** (own workspace) | single crate; native `wgpu` + `winit` | `cargo test --manifest-path examples/file_browser/Cargo.toml`; `cargo run --manifest-path examples/file_browser/Cargo.toml -- --selfcheck` (`--dump` too) | dependency block above |
+| `examples/image_editor` | **standalone** (own workspace) | single crate; native `wgpu` + `winit` + `png` + `tracing`; vendored SVG icons | `cargo test --manifest-path examples/image_editor/Cargo.toml`; `cargo run --manifest-path examples/image_editor/Cargo.toml -- --selfcheck` | `examples/image_editor/README.md`, `examples/image_editor/todo.md` |
+
+Headless self-check binaries (`--selfcheck`, and `--dump*` where noted) render
+the same UI into `draw_backend_recording` and print a report; they are the
+no-screenshot verification for the standalone hosts. Workspace members are
+covered by the normal `cargo test --workspace` gate.
+
 ## Code division (one concern per module)
 
 Modules are cut by concern, not by size and not by convenience. A file that
@@ -348,6 +371,11 @@ cargo check --workspace
 cargo test --workspace
 cargo bench --workspace --no-run
 ```
+
+`--workspace` excludes the **standalone** demos (`examples/deepseek_balance`,
+`examples/file_browser`, `examples/image_editor`). When you touch one, also run
+its own gate with `--manifest-path` (fmt / check / test) and its `--selfcheck`;
+see "Demo workspace modes & how to test" above.
 
 Then emit the report and stop for approval.
 
