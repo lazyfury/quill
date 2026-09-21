@@ -12,7 +12,7 @@
 
 ---
 
-## 1. 主线：像素模式
+## 1. 主线：像素模式（已完成）
 
 目标：任意尺寸都能画**硬边像素**，可选**方形笔**，并接到选项栏。
 已定：默认 `hard = true`、`shape = Square`；两个独立开关（「像素」+「方形」）；
@@ -29,13 +29,11 @@
   `pixel_mode`/`square_mode`/`brush_hard`/`brush_shape`/`brush_toggle_center`。
   `--selfcheck` 用一个新视图验证 size 3 硬边无灰边、软边（圆头）有灰边。
 - [x] **P5 — 文档**：README / `AGENTS.md` 已补像素模式。
-- [ ] **P3 — 像素网格叠加（可选）**：像素模式开启且 `zoom >= 4` 时，在画布上
-  画文档像素边界的 1px 线（`DrawCommand::Line`，屏幕空间、不随缩放变粗），位置照
-  `EditorView::paint_selection`；测试用 `RecordedFrame` 断言线的数量 / 位置随缩放
-  变化，关闭或低缩放不画。
-- [ ] **P4 — 像素完美连线（可选）**：1px 硬边笔改用 Bresenham 连接采样点，去掉
-  重复压点导致的 `<100%` 加深与斜线 L 型加粗；测试 45° 斜线只覆盖 Bresenham
-  上的像素。
+- [x] **P3 — 像素网格叠加**：像素模式开启且 `zoom >= GRID_MIN_ZOOM`(6) 时，在画布上
+  画文档像素边界的 1px 线（`DrawCommand::Line`，屏幕空间、不随缩放变粗），只画
+  「文档矩形 ∩ 画布区域」；测试断言放大+像素模式会多出网格线、缩小后不画。
+- [x] **P4 — 像素完美连线**：1px 硬边笔改用 Bresenham 连接采样点（每个像素只压
+  一次），去掉重复压点加深与斜线 L 型加粗；测试 45° 斜线正好 8 个像素。
 
 已知取舍：软方形在整数尺寸上 `coverage` 会饱和成实心（没有灰边）；需要柔和方形
 时再调整过渡带公式。
@@ -69,10 +67,11 @@
 
 ## Done（近期）
 
-- **像素模式 P1/P2**：`BrushShape { Round, Square }` + `BrushTool { hard, shape }`
+- **像素模式 P1–P4**：`BrushShape { Round, Square }` + `BrushTool { hard, shape }`
   （默认硬边方形，任意尺寸圆心吸附像素网格、`coverage` 二值）；选项栏加「像素」
   「方形」两个开关（`Rc<Cell>` + `dynamic_background`，`update` 同步进画笔）；
-  `--selfcheck` 验证硬边无灰边 / 软边有灰边。
+  像素模式 + `zoom >= 6` 画屏幕空间像素网格；1px 硬边笔走 Bresenham（无重复压点 /
+  斜线加粗）。`--selfcheck` 验证硬边无灰边 / 软边有灰边。
 - 透明棋盘格背景（显示用合成，导出 PNG 仍保留 alpha）。
 - 默认 128×128 像素画布 + 1px 硬边笔 + `TextureFilter::Nearest`。
 - 移动图层后画笔对准光标；图层缓冲按「当前范围 ∪ 文档范围」扩展，

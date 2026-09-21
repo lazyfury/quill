@@ -66,6 +66,8 @@ const RESIZE_GUTTER: f32 = 6.0;
 const FIT_PADDING: f32 = 24.0;
 /// 一个滚轮刻度 / `+`/`-` 的缩放倍率。
 const ZOOM_STEP: f32 = 1.25;
+/// 像素模式下，出现像素网格的最小缩放。
+const GRID_MIN_ZOOM: f32 = 6.0;
 
 /// 需要在构建后回写的节点槽位。
 #[derive(Default)]
@@ -833,12 +835,56 @@ impl EditorView {
         self.tree.update();
     }
 
-    /// 发出这一帧的绘制命令：先世界（文档图像），再选区描边，UI 覆盖在上层。
+    /// 发出这一帧的绘制命令：先世界（文档图像 + 像素网格），再选区描边，
+    /// UI 覆盖在上层。
     pub fn paint(&self, ctx: &mut PaintContext) {
         self.tree.paint(ctx);
+        self.paint_pixel_grid(ctx);
         self.paint_selection(ctx);
         draw_ui::paint(&self.tree, ctx);
         self.overlays.paint(ctx);
+    }
+
+    /// 像素模式 + 放大到 [`GRID_MIN_ZOOM`] 以上时，在文档上画像素网格。
+    ///
+    /// 网格画在屏幕空间（相机换算后的坐标），线宽 1 逻辑像素、不随缩放变粗；
+    /// 只画「文档矩形 ∩ 画布区域」里的那部分，所以命令数有界。
+    fn paint_pixel_grid(&self, ctx: &mut PaintContext) {
+        if !self.pixel_mode.get() {
+            return;
+        }
+        let state = self.state.borrow();
+        let camera = state.canvas;
+        if camera.zoom < GRID_MIN_ZOOM {
+            return;
+        }
+        let Some(area) = self.canvas_area_rect() else {
+            return;
+        };
+        let origin = camera.document_to_screen(Vec2::ZERO);
+        let corner = camera.document_to_screen(Vec2::new(
+            state.document.width as f32,
+            state.document.height as f32,
+        ));
+        let Some(visible) = Rect::from_min_max(origin, corner).intersection(area) else {
+            return;
+        };
+        let (min, max) = (visible.min(), visible.max());
+        let color = self.theme.palette.border.with_alpha(0.3);
+        let zoom = camera.zoom;
+
+        let x_first = ((min.x - origin.x) / zoom).ceil() as i64;
+        let x_last = ((max.x - origin.x) / zoom).floor() as i64;
+        for x in x_first..=x_last {
+            let sx = origin.x + x as f32 * zoom;
+            ctx.draw_line(Vec2::new(sx, min.y), Vec2::new(sx, max.y), 1.0, color);
+        }
+        let y_first = ((min.y - origin.y) / zoom).ceil() as i64;
+        let y_last = ((max.y - origin.y) / zoom).floor() as i64;
+        for y in y_first..=y_last {
+            let sy = origin.y + y as f32 * zoom;
+            ctx.draw_line(Vec2::new(min.x, sy), Vec2::new(max.x, sy), 1.0, color);
+        }
     }
 
     /// 框选选区的描边：把文档像素矩形换算成屏幕坐标，画一圈 1px 线。
@@ -1900,6 +1946,36 @@ mod tests {
         let revealed = view.take_texture_upload().expect("应产出合成结果");
         assert_eq!(revealed.get_pixel(0, 0), crate::canvas::color_at(0, 0));
         assert_eq!(revealed.get_pixel(8, 0), crate::canvas::color_at(8, 0));
+    }
+
+    #[test]
+    fn the_pixel_grid_shows_only_when_zoomed_in_and_in_pixel_mode() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        let line_count = |view: &EditorView| {
+            paint_commands(view)
+                .iter()
+                .filter(|command| matches!(command, DrawCommand::Line { .. }))
+                .count()
+        };
+
+        // 像素模式关：放大也不画网格。
+        view.pixel_mode.set(false);
+        view.state.borrow_mut().canvas.zoom = 12.0;
+        view.state.borrow_mut().canvas.offset = Vec2::new(120.0, 120.0);
+        let without = line_count(&view);
+
+        // 打开像素模式：多出网格线。
+        view.pixel_mode.set(true);
+        let with = line_count(&view);
+        assert!(
+            with > without,
+            "放大 + 像素模式应画网格（{with} vs {without}）"
+        );
+
+        // 缩到阈值以下：回到没有网格。
+        view.state.borrow_mut().canvas.zoom = 1.0;
+        assert_eq!(line_count(&view), without, "缩小后不应画网格");
     }
 
     #[test]

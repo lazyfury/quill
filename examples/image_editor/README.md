@@ -50,7 +50,9 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   （`hard = true` + `BrushShape::Square`）：任意尺寸圆心都吸附到像素网格、
   `coverage` 二值（边缘不抗锯齿），适合画像素图；工具选项栏可切换「像素」
   与「方形」两个开关。关掉像素模式后，圆形笔走 1px 抗锯齿、方形笔走切比雪夫
-  距离的软边。笔刷按半径插值避免断线；`[`/`]` 调大小，`,`/`.` 调不透明度。
+  距离的软边。1px 硬边笔走 Bresenham 连线（每个像素只压一次，斜线不会加粗）；
+  像素模式 + `zoom >= 6` 时在画布上叠加屏幕空间的像素网格。`[`/`]` 调大小，
+  `,`/`.` 调不透明度。
   “一笔 = 一次 Undo”：抬笔时提交成一条 [`PaintCommand`]，由 Phase 6 的历史栈接管。
 - [x] **Phase 6 — History**：`Command` 模式 + 两条栈
   （`src/document/history.rs`），一笔画笔 / 橡皮 = 一步 undo。命令只记录**差异

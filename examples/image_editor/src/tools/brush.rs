@@ -112,6 +112,12 @@ impl BrushTool {
         let buffer = &mut layer.pixels;
 
         let last = self.last.unwrap_or(to);
+        // 1px 硬边笔走 Bresenham：每个像素只压一次，斜线不会出 L 型加粗。
+        if self.hard && self.size <= 1.0 {
+            self.stroke_line_pixels(buffer, offset, last, to);
+            self.last = Some(to);
+            return;
+        }
         let delta = to - last;
         let distance = delta.length();
         // 步长取半径的一半，保证相邻 stamp 有重叠、线段不断开。
@@ -122,6 +128,51 @@ impl BrushTool {
             self.dab(buffer, offset, last + delta * t);
         }
         self.last = Some(to);
+    }
+
+    /// 用 Bresenham 把文档像素 `from -> to` 连成一条 1px 线（硬边笔用）。
+    fn stroke_line_pixels(&self, buffer: &mut PixelBuffer, offset: Point, from: Vec2, to: Vec2) {
+        let (mut x, mut y) = (from.x.floor() as i64, from.y.floor() as i64);
+        let (target_x, target_y) = (to.x.floor() as i64, to.y.floor() as i64);
+        let dx = (target_x - x).abs();
+        let dy = -(target_y - y).abs();
+        let step_x = if x < target_x { 1 } else { -1 };
+        let step_y = if y < target_y { 1 } else { -1 };
+        let mut err = dx + dy;
+        loop {
+            self.stamp_doc_pixel(buffer, offset, x, y);
+            if x == target_x && y == target_y {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += step_x;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += step_y;
+            }
+        }
+    }
+
+    /// 往文档坐标 `(doc_x, doc_y)` 对应的图层像素压一个实心点（硬边 1px 线用）。
+    fn stamp_doc_pixel(&self, buffer: &mut PixelBuffer, offset: Point, doc_x: i64, doc_y: i64) {
+        if let Some(clip) = self.clip {
+            if doc_x < 0 || doc_y < 0 || !clip.contains(doc_x as u32, doc_y as u32) {
+                return;
+            }
+        }
+        let bx = doc_x - offset.x as i64;
+        let by = doc_y - offset.y as i64;
+        if bx < 0 || by < 0 || bx >= buffer.width as i64 || by >= buffer.height as i64 {
+            return;
+        }
+        let (bx, by) = (bx as u32, by as u32);
+        match self.mode {
+            BrushMode::Paint => buffer.blend_pixel(bx, by, self.color, self.opacity),
+            BrushMode::Erase => buffer.erase_pixel(bx, by, self.opacity),
+        }
     }
 
     /// 在文档坐标 `center` 压一个 stamp；落在 `offset`（图层缓冲区原点）
@@ -355,6 +406,20 @@ mod tests {
         }
         assert_eq!(at(&document, 15, 16), Color::WHITE);
         assert_eq!(at(&document, 18, 16), Color::WHITE);
+    }
+
+    #[test]
+    fn a_one_pixel_hard_line_is_a_clean_bresenham_line() {
+        let mut document = document();
+        let mut brush = BrushTool::paint().with_color(Color::RED);
+        brush.stroke_to(&mut document, Vec2::new(4.0, 4.0));
+        // 45° 斜线：正好 8 个像素，不会因重复压角 / 插值而加粗成 L 型。
+        brush.stroke_to(&mut document, Vec2::new(11.0, 11.0));
+        let painted: Vec<(u32, u32)> = (0..32)
+            .flat_map(|y| (0..32).map(move |x| (x, y)))
+            .filter(|(x, y)| at(&document, *x, *y) != Color::WHITE)
+            .collect();
+        assert_eq!(painted.len(), 8, "45° 1px 斜线应只有 8 个像素");
     }
 
     #[test]
