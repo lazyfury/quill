@@ -519,29 +519,14 @@ pub fn check() -> (usize, String) {
         failures.push("拖调色盘分隔条没有变宽".to_string());
     }
 
-    // 右侧栏内部：面板之间的分隔条也能拖动（往里拖，给图层列表留位置）。
-    let file_before = view.file_panel_height();
-    match view.file_handle_center() {
-        Some(start) => {
-            let end = start - Vec2::new(0.0, 24.0);
-            view.event(&InputEvent::PointerDown {
-                position: start,
-                button: PointerButton::Left,
-            });
-            view.event(&InputEvent::PointerMove { position: end });
-            view.event(&InputEvent::PointerUp {
-                position: end,
-                button: PointerButton::Left,
-            });
-            view.layout(viewport());
-        }
-        None => failures.push("找不到「文件」分隔条".to_string()),
+    // 右侧栏标签页：「文件 / 历史 / 属性」共用一个面板。点标签切换内容，
+    // 面板与「图层」之间的分隔条可以拖动调高。
+    let tabs_tab = crate::ui::SidebarTab::History;
+    if view.active_tab() != crate::ui::SidebarTab::File {
+        failures.push("标签页默认应停在「文件」".to_string());
     }
-    if view.file_panel_height() >= file_before {
-        failures.push("拖「文件」分隔条没有改变高度".to_string());
-    }
-    let props_before = view.props_panel_height();
-    match view.props_handle_center() {
+    let tabs_before = view.tabs_height();
+    match view.tabs_handle_center() {
         Some(start) => {
             let end = start + Vec2::new(0.0, 24.0);
             view.event(&InputEvent::PointerDown {
@@ -555,30 +540,31 @@ pub fn check() -> (usize, String) {
             });
             view.layout(viewport());
         }
-        None => failures.push("找不到「属性」分隔条".to_string()),
+        None => failures.push("找不到标签页分隔条".to_string()),
     }
-    if view.props_panel_height() >= props_before {
-        failures.push("拖「属性」分隔条没有改变高度".to_string());
+    if view.tabs_height() <= tabs_before {
+        failures.push("拖标签页分隔条没有改变高度".to_string());
     }
-    let history_before = view.history_panel_height();
-    match view.history_handle_center() {
-        Some(start) => {
-            let end = start + Vec2::new(0.0, 16.0);
-            view.event(&InputEvent::PointerDown {
-                position: start,
-                button: PointerButton::Left,
-            });
-            view.event(&InputEvent::PointerMove { position: end });
-            view.event(&InputEvent::PointerUp {
-                position: end,
-                button: PointerButton::Left,
-            });
+    match view.tab_center(tabs_tab) {
+        Some(center) => {
+            click_at(&mut view, center);
+            view.update();
             view.layout(viewport());
         }
-        None => failures.push("找不到「历史」分隔条".to_string()),
+        None => failures.push("找不到「历史」标签".to_string()),
     }
-    if view.history_panel_height() >= history_before {
-        failures.push("拖「历史」分隔条没有改变高度".to_string());
+    if view.active_tab() != tabs_tab
+        || !view.tab_content_visible(tabs_tab)
+        || view.tab_content_visible(crate::ui::SidebarTab::File)
+        || view.tab_content_visible(crate::ui::SidebarTab::Properties)
+    {
+        failures.push("点「历史」标签没有切换面板".to_string());
+    }
+    // 回到「文件」标签再录帧：下面的语义检查要看到文件面板的按钮文字。
+    if let Some(center) = view.tab_center(crate::ui::SidebarTab::File) {
+        click_at(&mut view, center);
+        view.update();
+        view.layout(viewport());
     }
 
     let (view, frame) = record(view);

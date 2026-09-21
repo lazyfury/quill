@@ -95,9 +95,14 @@ image_editor   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                  (standalone demo: own workspace, NOT a workspace member;
                   the Photoshop-style editor demo whose UI is built with the
                   quill stack instead of egui. Landed: menu/toolbar/tool-options
-                  bar/status bar, a resizable right sidebar whose file/layer/
-                  properties/history sections are split by `ResizeHandle::horizontal`
-                  dividers and share one look via the project-local `ui/card.rs`
+                  bar/status bar, a resizable right sidebar whose file/history/
+                  properties panels are grouped into one project-local tabs card
+                  (`ui/tabs.rs`: `TabsView` owns the tab bar and the three content
+                  containers, `SidebarTab` is the shared active-tab state, and
+                  `EditorView` syncs visibility with `SceneTree::set_visible` so a
+                  closed tab costs no layout/paint) sitting above the layer panel,
+                  split by a single `ResizeHandle::horizontal`; the panels share one
+                  look via the project-local `ui/card.rs`
                   (`Card`: surface + padding + gap, no border/radius, like the
                   palette), a resizable colour-palette panel on the
                   left (`ui/palette.rs`: an HSV picker built from `Component::on_pointer`

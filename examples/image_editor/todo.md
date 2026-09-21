@@ -79,8 +79,15 @@
 - **撤销补全 + 右侧栏可调**：移动工具（`SetLayerPositionCommand`）、新建 / 删除图层
   （`AddLayerCommand`/`RemoveLayerCommand`）、重命名 / 可见性 / 不透明度 / 排序
   （`LayerMetaCommand`，不克隆像素）、裁到文档（`CropLayerCommand`）全部入历史；
-  「文件 / 图层 / 属性」三块之间加 `ResizeHandle::horizontal` 分隔条（可拖高度，
+  标签页面板与「图层」之间加 `ResizeHandle::horizontal` 分隔条（可拖高度，
   `clamp_panel_heights` 保证图层不被挤没）。
+- **侧栏标签页（`ui/tabs.rs`）**：文件 / 历史 / 属性三块内容收进一个卡片，
+  上面 `TabsView` 的标签按钮（选中态底色 + accent 下划线），下面只显示当前页；
+  激活态是 `Rc<Cell<SidebarTab>>`，`EditorView` 在激活页变化时调
+  `tabs::show_active`（`set_visible` + `mark_dirty`，可见性变化不会自动让布局
+  失效，不标脏内容会停在 `(0, 0)`），所以没打开的标签不参与布局 / 绘制
+  （历史 `List` 也不建行池）。`ui/tabs.rs` 的单元测试覆盖只有一页可见与
+  「隐藏后再露出会重新排布」，`--selfcheck` 覆盖真实点击切换。
 - **棋盘格开关**：视图菜单「显示棋盘格」（可关，导出不受影响）。
 - **图层菜单「裁到文档」**：`Document::crop_layer_to_document` 回收被移动撑大的缓冲
   （`cropping_a_layer_to_the_document_drops_off_canvas_pixels`）。

@@ -8,12 +8,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use draw_components::{Button, Component, Divider, Flex, NodeRef, Text};
+use draw_components::{Button, Component, Flex, NodeRef, Text};
 use draw_core::Edges;
 use draw_theme::{space, TextSize, Theme, Tone};
 use draw_ui::MouseFilter;
-
-use crate::ui::card::Card;
 
 /// 文件面板上的动作。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +35,8 @@ impl IoAction {
     }
 }
 
-/// 完整的文件面板。`buttons` 收集三个按钮的节点，测试与自检靠它们真的点一下。
+/// 文件标签页的内容（标题由 [`TabsView`](crate::ui::tabs::TabsView) 的标签提供）。
+/// `buttons` 收集三个按钮的节点，测试与自检靠它们真的点一下。
 pub fn file_panel(
     theme: Theme,
     path: Rc<RefCell<String>>,
@@ -57,10 +56,10 @@ pub fn file_panel(
     }
     let initial_path = path.borrow().clone();
 
-    Card::new(theme)
+    Flex::column()
         .gap(space::SM)
-        .child(Text::subheading("文件", theme))
-        .child(Divider::horizontal(theme))
+        .padding(Edges::ZERO)
+        .mouse_filter(MouseFilter::Ignore)
         .child(Text::caption("路径（点「改路径」编辑）", theme).tone(Tone::Muted))
         .child(
             Text::caption(initial_path, theme)

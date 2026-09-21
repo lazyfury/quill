@@ -24,11 +24,13 @@ mod options_bar;
 mod palette;
 mod properties_panel;
 mod status_bar;
+mod tabs;
 mod toolbar;
 
 pub use file_panel::IoAction;
 pub use options_bar::BrushAdjust;
 pub use options_bar::BrushToggle;
+pub use tabs::SidebarTab;
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -57,6 +59,7 @@ use crate::icons::IconSet;
 use crate::renderer::{sample_pixel, CpuRenderer, RenderTarget, Renderer};
 use crate::tools::{BrushMode, BrushShape, BrushTool, MoveTool, PointerEvent, Tool, ToolContext};
 use crate::ui::options_bar::{options_bar, options_hint, tool_has_brush, OptionsRefs};
+use crate::ui::tabs::TabsView;
 
 /// 工具栏宽度（逻辑像素）。
 const TOOLBAR_WIDTH: f32 = 52.0;
@@ -77,19 +80,12 @@ const FIT_PADDING: f32 = 24.0;
 const ZOOM_STEP: f32 = 1.25;
 /// 像素模式下，出现像素网格的最小缩放。
 const GRID_MIN_ZOOM: f32 = 6.0;
-/// 右侧栏各面板的默认高度 / 拖拽钳制（逻辑像素）。
-const FILE_PANEL_HEIGHT: f32 = 168.0;
-const FILE_PANEL_MIN: f32 = 96.0;
-const FILE_PANEL_MAX: f32 = 420.0;
-const PROPS_PANEL_HEIGHT: f32 = 120.0;
-const PROPS_PANEL_MIN: f32 = 80.0;
-const PROPS_PANEL_MAX: f32 = 360.0;
-/// 中间「图层」面板保留的最小高度（两个分隔条不能把它挤没）。
+/// 右侧栏「文件 / 历史 / 属性」标签页面板的默认高度 / 拖拽钳制（逻辑像素）。
+const TABS_PANEL_HEIGHT: f32 = 220.0;
+const TABS_PANEL_MIN: f32 = 120.0;
+const TABS_PANEL_MAX: f32 = 480.0;
+/// 「图层」面板保留的最小高度（上面的分隔条不能把它挤没）。
 const LAYER_PANEL_MIN: f32 = 120.0;
-/// 右侧栏「历史」面板的默认高度 / 拖拽钳制。
-const HISTORY_PANEL_HEIGHT: f32 = 150.0;
-const HISTORY_PANEL_MIN: f32 = 72.0;
-const HISTORY_PANEL_MAX: f32 = 420.0;
 
 /// 需要在构建后回写的节点槽位。
 #[derive(Default)]
@@ -101,14 +97,10 @@ struct Refs {
     props_name: NodeRef,
     props_detail: NodeRef,
     props_geometry: NodeRef,
-    file_panel: NodeRef,
-    props_panel: NodeRef,
-    history_panel: NodeRef,
+    tabs_panel: NodeRef,
+    tabs_handle: NodeRef,
     palette_panel: NodeRef,
     palette_picker: NodeRef,
-    file_handle: NodeRef,
-    props_handle: NodeRef,
-    history_handle: NodeRef,
     palette_handle: NodeRef,
     path: NodeRef,
     sidebar: NodeRef,
@@ -183,16 +175,16 @@ pub struct EditorView {
     palette_panel_node: NodeId,
     palette_picker_node: NodeId,
     palette_handle_node: NodeId,
-    /// 右侧栏「文件」/「属性」/「历史」面板的共享高度（各自的分隔条写、布局读）。
-    file_height: Rc<Cell<f32>>,
-    props_height: Rc<Cell<f32>>,
-    history_height: Rc<Cell<f32>>,
-    file_panel_node: NodeId,
-    props_panel_node: NodeId,
-    history_panel_node: NodeId,
-    file_handle_node: NodeId,
-    props_handle_node: NodeId,
-    history_handle_node: NodeId,
+    /// 侧栏标签页：当前页（按钮写）、面板高度 / 节点 / 分隔条。
+    active_tab: Rc<Cell<SidebarTab>>,
+    /// 上一次同步到树的标签页；变了才重设可见性 + 标脏重排。
+    shown_tab: Option<SidebarTab>,
+    tabs_height: Rc<Cell<f32>>,
+    tabs_panel_node: NodeId,
+    tabs_handle_node: NodeId,
+    /// 标签按钮 / 内容容器节点，测试与自检靠它们真的点一下。
+    tab_buttons: Vec<(SidebarTab, NodeId)>,
+    tab_contents: Vec<(SidebarTab, NodeId)>,
     /// 路径标签节点，以及上一次写入的内容（避免每帧刷文本）。
     path_label: NodeId,
     shown_path: Option<String>,
@@ -316,9 +308,41 @@ impl EditorView {
         let mut toggle_refs: Vec<(BrushToggle, NodeRef)> = Vec::new();
         let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
         let palette_width = Rc::new(Cell::new(PALETTE_WIDTH));
-        let file_height = Rc::new(Cell::new(FILE_PANEL_HEIGHT));
-        let props_height = Rc::new(Cell::new(PROPS_PANEL_HEIGHT));
-        let history_height = Rc::new(Cell::new(HISTORY_PANEL_HEIGHT));
+        let active_tab: Rc<Cell<SidebarTab>> = Rc::new(Cell::new(SidebarTab::default()));
+        let tabs_height = Rc::new(Cell::new(TABS_PANEL_HEIGHT));
+
+        // 侧栏标签页：文件 / 历史 / 属性共用一个卡片。按钮与内容容器各留一个
+        // `NodeRef`，建完后收进 `tab_buttons` / `tab_contents` 供交互与可见性同步。
+        let properties = properties_panel::properties_panel(
+            theme,
+            &refs.props_name,
+            &refs.props_detail,
+            &refs.props_geometry,
+        );
+        let mut tab_refs: Vec<(SidebarTab, NodeRef, NodeRef)> = Vec::new();
+        let mut tabs_view = TabsView::new(theme, active_tab.clone());
+        let file_button = NodeRef::new();
+        let file_content = NodeRef::new();
+        tabs_view = tabs_view.tab(SidebarTab::File, &file_button, &file_content, file_panel);
+        tab_refs.push((SidebarTab::File, file_button, file_content));
+        let history_button = NodeRef::new();
+        let history_content = NodeRef::new();
+        tabs_view = tabs_view.tab(
+            SidebarTab::History,
+            &history_button,
+            &history_content,
+            history_list,
+        );
+        tab_refs.push((SidebarTab::History, history_button, history_content));
+        let props_button = NodeRef::new();
+        let props_content = NodeRef::new();
+        tabs_view = tabs_view.tab(
+            SidebarTab::Properties,
+            &props_button,
+            &props_content,
+            properties,
+        );
+        tab_refs.push((SidebarTab::Properties, props_button, props_content));
 
         // 布局根（SceneTree 根）的子节点是按 anchors 摆的，flex 从下一层才开始 ——
         // 所以页面 column 必须是根的唯一子节点（demo_app / file_browser 同款形状）。
@@ -391,18 +415,18 @@ impl EditorView {
                                     .padding(Edges::ZERO)
                                     .mouse_filter(MouseFilter::Ignore)
                                     .child(
-                                        file_panel
-                                            .basis(SizeBasis::Px(file_height.get()))
+                                        tabs_view
+                                            .basis(SizeBasis::Px(tabs_height.get()))
                                             .shrink(0.0)
-                                            .ref_(&refs.file_panel),
+                                            .ref_(&refs.tabs_panel),
                                     )
                                     .child(
                                         ResizeHandle::horizontal(theme)
-                                            .target(refs.file_panel.clone())
-                                            .width(file_height.clone())
-                                            .min(FILE_PANEL_MIN)
-                                            .max(FILE_PANEL_MAX)
-                                            .ref_(&refs.file_handle),
+                                            .target(refs.tabs_panel.clone())
+                                            .width(tabs_height.clone())
+                                            .min(TABS_PANEL_MIN)
+                                            .max(TABS_PANEL_MAX)
+                                            .ref_(&refs.tabs_handle),
                                     )
                                     .child(layer_panel::layer_panel(
                                         theme,
@@ -410,41 +434,6 @@ impl EditorView {
                                         layer_list,
                                         rename_request.clone(),
                                     ))
-                                    .child(
-                                        ResizeHandle::horizontal(theme)
-                                            .target(refs.props_panel.clone())
-                                            .width(props_height.clone())
-                                            .invert()
-                                            .min(PROPS_PANEL_MIN)
-                                            .max(PROPS_PANEL_MAX)
-                                            .ref_(&refs.props_handle),
-                                    )
-                                    .child(
-                                        properties_panel::properties_panel(
-                                            theme,
-                                            &refs.props_name,
-                                            &refs.props_detail,
-                                            &refs.props_geometry,
-                                        )
-                                        .basis(SizeBasis::Px(props_height.get()))
-                                        .shrink(0.0)
-                                        .ref_(&refs.props_panel),
-                                    )
-                                    .child(
-                                        ResizeHandle::horizontal(theme)
-                                            .target(refs.history_panel.clone())
-                                            .width(history_height.clone())
-                                            .invert()
-                                            .min(HISTORY_PANEL_MIN)
-                                            .max(HISTORY_PANEL_MAX)
-                                            .ref_(&refs.history_handle),
-                                    )
-                                    .child(
-                                        history_panel::history_panel(theme, history_list)
-                                            .basis(SizeBasis::Px(history_height.get()))
-                                            .shrink(0.0)
-                                            .ref_(&refs.history_panel),
-                                    )
                                     .ref_(&refs.sidebar),
                             ),
                     ),
@@ -502,6 +491,14 @@ impl EditorView {
             .into_iter()
             .map(|(toggle, slot)| (toggle, slot.get().expect("brush toggle mounted")))
             .collect();
+        let tab_buttons: Vec<(SidebarTab, NodeId)> = tab_refs
+            .iter()
+            .map(|(tab, button, _)| (*tab, button.get().expect("tab button mounted")))
+            .collect();
+        let tab_contents: Vec<(SidebarTab, NodeId)> = tab_refs
+            .iter()
+            .map(|(tab, _, content)| (*tab, content.get().expect("tab content mounted")))
+            .collect();
 
         // 图标包在构建按钮时已被各 `Icon` 组件解析并持有（decorator 里），这里
         // 只留个数给自检 / 报告用。
@@ -543,15 +540,13 @@ impl EditorView {
             palette_panel_node: refs.palette_panel.get().expect("palette panel mounted"),
             palette_picker_node: refs.palette_picker.get().expect("palette picker mounted"),
             palette_handle_node: refs.palette_handle.get().expect("palette handle mounted"),
-            file_height,
-            props_height,
-            history_height,
-            file_panel_node: refs.file_panel.get().expect("file panel mounted"),
-            props_panel_node: refs.props_panel.get().expect("props panel mounted"),
-            history_panel_node: refs.history_panel.get().expect("history panel mounted"),
-            file_handle_node: refs.file_handle.get().expect("file handle mounted"),
-            props_handle_node: refs.props_handle.get().expect("props handle mounted"),
-            history_handle_node: refs.history_handle.get().expect("history handle mounted"),
+            active_tab,
+            shown_tab: None,
+            tabs_height,
+            tabs_panel_node: refs.tabs_panel.get().expect("tabs panel mounted"),
+            tabs_handle_node: refs.tabs_handle.get().expect("tabs handle mounted"),
+            tab_buttons,
+            tab_contents,
             path_label: refs.path.get().expect("path label mounted"),
             shown_path: None,
             path_edit: None,
@@ -659,6 +654,23 @@ impl EditorView {
         } else if let Some(message) = self.message.borrow_mut().take() {
             set_text(&mut self.tree, self.message_label, message);
         }
+        self.sync_tabs();
+    }
+
+    /// 标签页切换：只让当前内容参与布局与绘制（隐藏内容不可见，也不命中）。
+    /// 激活页没变时是空操作，避免每帧重排。
+    fn sync_tabs(&mut self) {
+        let active = self.active_tab.get();
+        if self.shown_tab == Some(active) {
+            return;
+        }
+        self.shown_tab = Some(active);
+        tabs::show_active(
+            &mut self.tree,
+            self.tabs_panel_node,
+            active,
+            &self.tab_contents,
+        );
     }
 
     /// 工具 / 缩放 / 指针像素 -> 状态栏。
@@ -1371,59 +1383,25 @@ impl EditorView {
         }
     }
 
-    /// 保证「文件 + 属性」两个可拖面板不会把中间「图层」面板挤没。
+    /// 保证可拖的标签页面板不会把下面的「图层」面板挤没。
     /// 返回是否调整过（调用方需要再排一次）。
     fn clamp_panel_heights(&mut self) -> bool {
         let Some(sidebar) = draw_ui::control(&self.tree, self.sidebar_node) else {
             return false;
         };
-        let inner = (sidebar.rect.size.height - 2.0 * space::SM).max(0.0);
-        let panels: [(Rc<Cell<f32>>, NodeId, f32, f32); 3] = [
-            (
-                self.file_height.clone(),
-                self.file_panel_node,
-                FILE_PANEL_MIN,
-                FILE_PANEL_MAX,
-            ),
-            (
-                self.props_height.clone(),
-                self.props_panel_node,
-                PROPS_PANEL_MIN,
-                PROPS_PANEL_MAX,
-            ),
-            (
-                self.history_height.clone(),
-                self.history_panel_node,
-                HISTORY_PANEL_MIN,
-                HISTORY_PANEL_MAX,
-            ),
-        ];
-        // 预留：图层最小高度 + 每条分隔条 + 每个列间距（间距数 = 2 × 分隔条数）。
-        let handles = panels.len() as f32;
-        let overhead = LAYER_PANEL_MIN + handles * RESIZE_GUTTER + 2.0 * handles * space::XXS;
-        let budget = (inner - overhead).max(0.0);
-        let mut heights: Vec<f32> = panels
-            .iter()
-            .map(|(cell, _, min, max)| cell.get().clamp(*min, *max))
-            .collect();
-        let total: f32 = heights.iter().sum();
-        if total > budget && total > 0.0 {
-            let scale = budget / total;
-            for (height, (_, _, min, _)) in heights.iter_mut().zip(&panels) {
-                *height = (*height * scale).max(*min);
-            }
+        // 预留：图层最小高度 + 分隔条 + 两个子节点之间的列间距。
+        let overhead = LAYER_PANEL_MIN + RESIZE_GUTTER + space::XXXS;
+        let max = (sidebar.rect.size.height - overhead).clamp(TABS_PANEL_MIN, TABS_PANEL_MAX);
+        let current = self.tabs_height.get();
+        let next = current.clamp(TABS_PANEL_MIN, max);
+        if (next - current).abs() <= f32::EPSILON {
+            return false;
         }
-        let mut changed = false;
-        for (height, (cell, node, _, _)) in heights.iter().zip(&panels) {
-            if (*height - cell.get()).abs() > f32::EPSILON {
-                cell.set(*height);
-                update_control(&mut self.tree, *node, |data| {
-                    data.layout.basis = SizeBasis::Px(*height);
-                });
-                changed = true;
-            }
-        }
-        changed
+        self.tabs_height.set(next);
+        update_control(&mut self.tree, self.tabs_panel_node, |data| {
+            data.layout.basis = SizeBasis::Px(next);
+        });
+        true
     }
 
     fn canvas_area_contains(&self, position: Vec2) -> bool {
@@ -1870,36 +1848,43 @@ impl EditorView {
         draw_ui::control(&self.tree, self.palette_handle_node).map(|control| control.rect.center())
     }
 
-    /// 右侧栏「文件」/「属性」面板的当前高度（逻辑像素）。
-    pub fn file_panel_height(&self) -> f32 {
-        self.file_height.get()
+    /// 右侧栏标签页面板的当前高度（逻辑像素）。
+    pub fn tabs_height(&self) -> f32 {
+        self.tabs_height.get()
     }
 
-    pub fn props_panel_height(&self) -> f32 {
-        self.props_height.get()
+    /// 标签页面板与「图层」面板之间分隔条的中心点（逻辑坐标）。
+    pub fn tabs_handle_center(&self) -> Option<Vec2> {
+        draw_ui::control(&self.tree, self.tabs_handle_node).map(|control| control.rect.center())
     }
 
-    /// 右侧栏面板之间分隔条的中心点（逻辑坐标）；测试与自检模拟拖动用。
-    pub fn file_handle_center(&self) -> Option<Vec2> {
-        draw_ui::control(&self.tree, self.file_handle_node).map(|control| control.rect.center())
+    /// 当前标签页。
+    pub fn active_tab(&self) -> SidebarTab {
+        self.active_tab.get()
     }
 
-    pub fn props_handle_center(&self) -> Option<Vec2> {
-        draw_ui::control(&self.tree, self.props_handle_node).map(|control| control.rect.center())
+    /// 某个标签按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
+    pub fn tab_center(&self, tab: SidebarTab) -> Option<Vec2> {
+        let id = self
+            .tab_buttons
+            .iter()
+            .find(|(candidate, _)| *candidate == tab)
+            .map(|(_, id)| *id)?;
+        draw_ui::control(&self.tree, id).map(|control| control.rect.center())
     }
 
-    /// 右侧栏「历史」面板高度 / 分隔条中心。
-    pub fn history_panel_height(&self) -> f32 {
-        self.history_height.get()
+    /// 某个标签页内容当前是否可见。
+    pub fn tab_content_visible(&self, tab: SidebarTab) -> bool {
+        self.tab_contents
+            .iter()
+            .find(|(candidate, _)| *candidate == tab)
+            .and_then(|(_, id)| self.tree.is_visible(*id))
+            .unwrap_or(false)
     }
 
     /// 历史面板的行数（撤销栈 + 「当前」+ 重做栈）。
     pub fn history_rows(&self) -> usize {
         self.history_count.get()
-    }
-
-    pub fn history_handle_center(&self) -> Option<Vec2> {
-        draw_ui::control(&self.tree, self.history_handle_node).map(|control| control.rect.center())
     }
 
     /// 菜单标题按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
@@ -2350,41 +2335,11 @@ mod tests {
     }
 
     #[test]
-    fn dragging_a_panel_handle_resizes_that_panel() {
+    fn dragging_the_palette_handle_resizes_it() {
         let mut view = EditorView::new(Theme::dark(), AppState::default());
         view.layout(viewport());
 
-        let file_before = view.file_panel_height();
-        let start = view.file_handle_center().expect("file handle");
-        let end = start + Vec2::new(0.0, 24.0);
-        view.event(&InputEvent::PointerDown {
-            position: start,
-            button: PointerButton::Left,
-        });
-        view.event(&InputEvent::PointerMove { position: end });
-        view.event(&InputEvent::PointerUp {
-            position: end,
-            button: PointerButton::Left,
-        });
-        view.layout(viewport());
-        assert!(view.file_panel_height() > file_before, "文件面板应变高");
-
-        let props_before = view.props_panel_height();
-        let start = view.props_handle_center().expect("props handle");
-        let end = start - Vec2::new(0.0, 24.0);
-        view.event(&InputEvent::PointerDown {
-            position: start,
-            button: PointerButton::Left,
-        });
-        view.event(&InputEvent::PointerMove { position: end });
-        view.event(&InputEvent::PointerUp {
-            position: end,
-            button: PointerButton::Left,
-        });
-        view.layout(viewport());
-        assert!(view.props_panel_height() > props_before, "属性面板应变高");
-
-        let palette_before = view.palette_width();
+        let before = view.palette_width();
         let start = view.palette_handle_center().expect("palette handle");
         let end = start + Vec2::new(24.0, 0.0);
         view.event(&InputEvent::PointerDown {
@@ -2397,7 +2352,7 @@ mod tests {
             button: PointerButton::Left,
         });
         view.layout(viewport());
-        assert!(view.palette_width() > palette_before, "调色盘面板应变宽");
+        assert!(view.palette_width() > before, "调色盘面板应变宽");
     }
 
     #[test]
@@ -2605,6 +2560,13 @@ mod tests {
         assert_eq!(view.canvas_camera().zoom, 1.0);
     }
 
+    /// 切到某个标签页（等同点标签：写共享状态后 `update` + `layout`）。
+    fn select_tab(view: &mut EditorView, tab: SidebarTab) {
+        view.active_tab.set(tab);
+        view.update();
+        view.layout(viewport());
+    }
+
     fn frame_texts(view: &EditorView) -> Vec<String> {
         paint_commands(view)
             .iter()
@@ -2639,8 +2601,7 @@ mod tests {
         view.layout(viewport());
         // 新图层成为当前图层，属性面板应显示它的名字。
         view.state.borrow_mut().document.add_layer("上层");
-        view.update();
-        view.layout(viewport());
+        select_tab(&mut view, SidebarTab::Properties);
         assert!(frame_texts(&view).iter().any(|text| text.contains("上层")));
     }
 
@@ -2653,8 +2614,7 @@ mod tests {
             .borrow_mut()
             .document
             .set_layer_position(id, Point::new(3, -2));
-        view.update();
-        view.layout(viewport());
+        select_tab(&mut view, SidebarTab::Properties);
         let texts = frame_texts(&view);
         assert!(
             texts.iter().any(|text| text.contains("偏移 (3, -2)")),

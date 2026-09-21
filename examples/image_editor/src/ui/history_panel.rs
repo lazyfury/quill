@@ -9,11 +9,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use draw_components::{Component, Divider, List, ListColumn, Text};
-use draw_theme::{space, Theme};
+use draw_components::{Component, List, ListColumn};
+use draw_theme::Theme;
 
 use crate::app::state::AppState;
-use crate::ui::card::Card;
 
 /// 历史行高（逻辑像素）。
 pub const HISTORY_ROW_HEIGHT: f32 = 24.0;
@@ -62,14 +61,4 @@ pub fn history_list(theme: Theme, state: Rc<RefCell<AppState>>, count: Rc<Cell<u
         .count(count)
         .on_activate(activate)
         .grow(1.0)
-}
-
-/// 历史面板外壳（标题 + 列表）。
-pub fn history_panel(theme: Theme, list: List) -> impl Component {
-    Card::new(theme)
-        .gap(space::SM)
-        .grow(1.0)
-        .child(Text::subheading("历史", theme))
-        .child(Divider::horizontal(theme))
-        .child(list)
 }
