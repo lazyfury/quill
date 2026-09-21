@@ -484,29 +484,9 @@ pub fn check() -> (usize, String) {
         failures.push("拖分隔条后右栏没变宽".to_string());
     }
 
-    // 右侧栏内部：面板之间的分隔条也能拖动。
+    // 右侧栏内部：面板之间的分隔条也能拖动（往里拖，给图层列表留位置）。
     let file_before = view.file_panel_height();
     match view.file_handle_center() {
-        Some(start) => {
-            let end = start + Vec2::new(0.0, 24.0);
-            view.event(&InputEvent::PointerDown {
-                position: start,
-                button: PointerButton::Left,
-            });
-            view.event(&InputEvent::PointerMove { position: end });
-            view.event(&InputEvent::PointerUp {
-                position: end,
-                button: PointerButton::Left,
-            });
-            view.layout(viewport());
-        }
-        None => failures.push("找不到「文件」分隔条".to_string()),
-    }
-    if view.file_panel_height() <= file_before {
-        failures.push("拖「文件」分隔条没有改变高度".to_string());
-    }
-    let props_before = view.props_panel_height();
-    match view.props_handle_center() {
         Some(start) => {
             let end = start - Vec2::new(0.0, 24.0);
             view.event(&InputEvent::PointerDown {
@@ -520,10 +500,50 @@ pub fn check() -> (usize, String) {
             });
             view.layout(viewport());
         }
+        None => failures.push("找不到「文件」分隔条".to_string()),
+    }
+    if view.file_panel_height() >= file_before {
+        failures.push("拖「文件」分隔条没有改变高度".to_string());
+    }
+    let props_before = view.props_panel_height();
+    match view.props_handle_center() {
+        Some(start) => {
+            let end = start + Vec2::new(0.0, 24.0);
+            view.event(&InputEvent::PointerDown {
+                position: start,
+                button: PointerButton::Left,
+            });
+            view.event(&InputEvent::PointerMove { position: end });
+            view.event(&InputEvent::PointerUp {
+                position: end,
+                button: PointerButton::Left,
+            });
+            view.layout(viewport());
+        }
         None => failures.push("找不到「属性」分隔条".to_string()),
     }
-    if view.props_panel_height() <= props_before {
+    if view.props_panel_height() >= props_before {
         failures.push("拖「属性」分隔条没有改变高度".to_string());
+    }
+    let history_before = view.history_panel_height();
+    match view.history_handle_center() {
+        Some(start) => {
+            let end = start + Vec2::new(0.0, 16.0);
+            view.event(&InputEvent::PointerDown {
+                position: start,
+                button: PointerButton::Left,
+            });
+            view.event(&InputEvent::PointerMove { position: end });
+            view.event(&InputEvent::PointerUp {
+                position: end,
+                button: PointerButton::Left,
+            });
+            view.layout(viewport());
+        }
+        None => failures.push("找不到「历史」分隔条".to_string()),
+    }
+    if view.history_panel_height() >= history_before {
+        failures.push("拖「历史」分隔条没有改变高度".to_string());
     }
 
     let (view, frame) = record(view);
@@ -588,6 +608,9 @@ pub fn check() -> (usize, String) {
     }
     if undo_len < 1 {
         failures.push("撤销栈不应为空".to_string());
+    }
+    if view.history_rows() != undo_len + 1 + redo_len {
+        failures.push("历史面板行数与栈长度不一致".to_string());
     }
 
     // 附加：Lucide 图标包已加载（覆盖工具栏的工具与撤销 / 重做），且图标真的

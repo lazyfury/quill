@@ -16,6 +16,7 @@
 
 mod canvas;
 mod file_panel;
+mod history_panel;
 mod layer_panel;
 pub mod menu;
 mod options_bar;
@@ -80,6 +81,10 @@ const PROPS_PANEL_MIN: f32 = 80.0;
 const PROPS_PANEL_MAX: f32 = 360.0;
 /// 中间「图层」面板保留的最小高度（两个分隔条不能把它挤没）。
 const LAYER_PANEL_MIN: f32 = 120.0;
+/// 右侧栏「历史」面板的默认高度 / 拖拽钳制。
+const HISTORY_PANEL_HEIGHT: f32 = 150.0;
+const HISTORY_PANEL_MIN: f32 = 72.0;
+const HISTORY_PANEL_MAX: f32 = 420.0;
 
 /// 需要在构建后回写的节点槽位。
 #[derive(Default)]
@@ -93,8 +98,10 @@ struct Refs {
     props_geometry: NodeRef,
     file_panel: NodeRef,
     props_panel: NodeRef,
+    history_panel: NodeRef,
     file_handle: NodeRef,
     props_handle: NodeRef,
+    history_handle: NodeRef,
     path: NodeRef,
     sidebar: NodeRef,
     sidebar_handle: NodeRef,
@@ -163,13 +170,16 @@ pub struct EditorView {
     sidebar_node: NodeId,
     /// 右侧栏分隔条的节点。
     sidebar_handle_node: NodeId,
-    /// 右侧栏「文件」/「属性」面板的共享高度（各自的分隔条写、布局读）。
+    /// 右侧栏「文件」/「属性」/「历史」面板的共享高度（各自的分隔条写、布局读）。
     file_height: Rc<Cell<f32>>,
     props_height: Rc<Cell<f32>>,
+    history_height: Rc<Cell<f32>>,
     file_panel_node: NodeId,
     props_panel_node: NodeId,
+    history_panel_node: NodeId,
     file_handle_node: NodeId,
     props_handle_node: NodeId,
+    history_handle_node: NodeId,
     /// 路径标签节点，以及上一次写入的内容（避免每帧刷文本）。
     path_label: NodeId,
     shown_path: Option<String>,
@@ -206,6 +216,11 @@ pub struct EditorView {
     layer_count: Rc<Cell<usize>>,
     layer_selected: Rc<Cell<Option<usize>>>,
     layer_state: ListState,
+    /// 历史列表的共享行数 / 状态；历史长度变了就刷新。
+    history_count: Rc<Cell<usize>>,
+    history_state: ListState,
+    /// 最近一次见到的 (undo, redo) 长度；变了就刷新历史面板。
+    last_history: Option<(usize, usize)>,
     /// 最近一次见到的文档 `revision`；变了就重合成 + 刷新图层列表。
     last_revision: u64,
     /// “重命名”按钮点过之后置位，由 `update` 取走。
@@ -270,6 +285,10 @@ impl EditorView {
         );
         let layer_state = layer_list.state();
 
+        let history_count = Rc::new(Cell::new(0usize));
+        let history_list = history_panel::history_list(theme, state.clone(), history_count.clone());
+        let history_state = history_list.state();
+
         // 工具选项栏（菜单栏下面一行）+ 可拖动的右栏。
         let options = OptionsRefs::default();
         let brush_request: Rc<Cell<Option<BrushAdjust>>> = Rc::new(Cell::new(None));
@@ -280,6 +299,7 @@ impl EditorView {
         let sidebar_width = Rc::new(Cell::new(SIDEBAR_WIDTH));
         let file_height = Rc::new(Cell::new(FILE_PANEL_HEIGHT));
         let props_height = Rc::new(Cell::new(PROPS_PANEL_HEIGHT));
+        let history_height = Rc::new(Cell::new(HISTORY_PANEL_HEIGHT));
 
         // 布局根（SceneTree 根）的子节点是按 anchors 摆的，flex 从下一层才开始 ——
         // 所以页面 column 必须是根的唯一子节点（demo_app / file_browser 同款形状）。
@@ -360,6 +380,21 @@ impl EditorView {
                                 .basis(SizeBasis::Px(props_height.get()))
                                 .shrink(0.0)
                                 .ref_(&refs.props_panel),
+                            )
+                            .child(
+                                ResizeHandle::horizontal(theme)
+                                    .target(refs.history_panel.clone())
+                                    .width(history_height.clone())
+                                    .invert()
+                                    .min(HISTORY_PANEL_MIN)
+                                    .max(HISTORY_PANEL_MAX)
+                                    .ref_(&refs.history_handle),
+                            )
+                            .child(
+                                history_panel::history_panel(theme, history_list)
+                                    .basis(SizeBasis::Px(history_height.get()))
+                                    .shrink(0.0)
+                                    .ref_(&refs.history_panel),
                             )
                             .ref_(&refs.sidebar),
                     ),
@@ -456,10 +491,13 @@ impl EditorView {
             sidebar_handle_node: refs.sidebar_handle.get().expect("sidebar handle mounted"),
             file_height,
             props_height,
+            history_height,
             file_panel_node: refs.file_panel.get().expect("file panel mounted"),
             props_panel_node: refs.props_panel.get().expect("props panel mounted"),
+            history_panel_node: refs.history_panel.get().expect("history panel mounted"),
             file_handle_node: refs.file_handle.get().expect("file handle mounted"),
             props_handle_node: refs.props_handle.get().expect("props handle mounted"),
+            history_handle_node: refs.history_handle.get().expect("history handle mounted"),
             path_label: refs.path.get().expect("path label mounted"),
             shown_path: None,
             path_edit: None,
@@ -481,6 +519,9 @@ impl EditorView {
             layer_count,
             layer_selected,
             layer_state,
+            history_count,
+            history_state,
+            last_history: None,
             last_revision: u64::MAX,
             rename_request,
             renaming: None,
@@ -535,6 +576,14 @@ impl EditorView {
         if active != self.last_active {
             self.last_active = active;
             self.sync_properties();
+        }
+        let history = {
+            let state = self.state.borrow();
+            (state.history.undo_len(), state.history.redo_len())
+        };
+        if self.last_history != Some(history) {
+            self.last_history = Some(history);
+            self.refresh_history();
         }
 
         if self.rename_request.replace(false) {
@@ -596,6 +645,16 @@ impl EditorView {
         self.layer_count.set(count);
         self.layer_selected.set(self.active_list_index());
         self.layer_state.invalidate();
+    }
+
+    /// 历史长度变化后刷新历史面板的行数。
+    fn refresh_history(&mut self) {
+        let (undo, redo) = {
+            let state = self.state.borrow();
+            (state.history.undo_len(), state.history.redo_len())
+        };
+        self.history_count.set(undo + 1 + redo);
+        self.history_state.invalidate();
     }
 
     /// 当前图层在“最上面为 0”的列表里的下标。
@@ -950,6 +1009,9 @@ impl EditorView {
         if self.layer_state.sync(&mut self.tree) {
             draw_ui::layout(&mut self.tree, viewport);
         }
+        if self.history_state.sync(&mut self.tree) {
+            draw_ui::layout(&mut self.tree, viewport);
+        }
         // 覆盖层用自己的树，必须在主树排完之后定位。
         self.overlays.layout(&self.tree, viewport);
         self.sync_document_node();
@@ -1243,33 +1305,50 @@ impl EditorView {
             return false;
         };
         let inner = (sidebar.rect.size.height - 2.0 * space::SM).max(0.0);
-        // 预留：图层最小高度 + 两条分隔条 + 4 个列间距。
-        let overhead = LAYER_PANEL_MIN + 2.0 * RESIZE_GUTTER + 4.0 * space::XXS;
-        let budget = (inner - overhead).max(FILE_PANEL_MIN + PROPS_PANEL_MIN);
-        let mut file = self.file_height.get().clamp(FILE_PANEL_MIN, FILE_PANEL_MAX);
-        let mut props = self
-            .props_height
-            .get()
-            .clamp(PROPS_PANEL_MIN, PROPS_PANEL_MAX);
-        if file + props > budget {
-            let scale = budget / (file + props);
-            file = (file * scale).max(FILE_PANEL_MIN);
-            props = (props * scale).max(PROPS_PANEL_MIN);
+        let panels: [(Rc<Cell<f32>>, NodeId, f32, f32); 3] = [
+            (
+                self.file_height.clone(),
+                self.file_panel_node,
+                FILE_PANEL_MIN,
+                FILE_PANEL_MAX,
+            ),
+            (
+                self.props_height.clone(),
+                self.props_panel_node,
+                PROPS_PANEL_MIN,
+                PROPS_PANEL_MAX,
+            ),
+            (
+                self.history_height.clone(),
+                self.history_panel_node,
+                HISTORY_PANEL_MIN,
+                HISTORY_PANEL_MAX,
+            ),
+        ];
+        // 预留：图层最小高度 + 每条分隔条 + 每个列间距（间距数 = 2 × 分隔条数）。
+        let handles = panels.len() as f32;
+        let overhead = LAYER_PANEL_MIN + handles * RESIZE_GUTTER + 2.0 * handles * space::XXS;
+        let budget = (inner - overhead).max(0.0);
+        let mut heights: Vec<f32> = panels
+            .iter()
+            .map(|(cell, _, min, max)| cell.get().clamp(*min, *max))
+            .collect();
+        let total: f32 = heights.iter().sum();
+        if total > budget && total > 0.0 {
+            let scale = budget / total;
+            for (height, (_, _, min, _)) in heights.iter_mut().zip(&panels) {
+                *height = (*height * scale).max(*min);
+            }
         }
         let mut changed = false;
-        if (file - self.file_height.get()).abs() > f32::EPSILON {
-            self.file_height.set(file);
-            update_control(&mut self.tree, self.file_panel_node, |data| {
-                data.layout.basis = SizeBasis::Px(file);
-            });
-            changed = true;
-        }
-        if (props - self.props_height.get()).abs() > f32::EPSILON {
-            self.props_height.set(props);
-            update_control(&mut self.tree, self.props_panel_node, |data| {
-                data.layout.basis = SizeBasis::Px(props);
-            });
-            changed = true;
+        for (height, (cell, node, _, _)) in heights.iter().zip(&panels) {
+            if (*height - cell.get()).abs() > f32::EPSILON {
+                cell.set(*height);
+                update_control(&mut self.tree, *node, |data| {
+                    data.layout.basis = SizeBasis::Px(*height);
+                });
+                changed = true;
+            }
         }
         changed
     }
@@ -1722,6 +1801,20 @@ impl EditorView {
         draw_ui::control(&self.tree, self.props_handle_node).map(|control| control.rect.center())
     }
 
+    /// 右侧栏「历史」面板高度 / 分隔条中心。
+    pub fn history_panel_height(&self) -> f32 {
+        self.history_height.get()
+    }
+
+    /// 历史面板的行数（撤销栈 + 「当前」+ 重做栈）。
+    pub fn history_rows(&self) -> usize {
+        self.history_count.get()
+    }
+
+    pub fn history_handle_center(&self) -> Option<Vec2> {
+        draw_ui::control(&self.tree, self.history_handle_node).map(|control| control.rect.center())
+    }
+
     /// 菜单标题按钮的中心点（逻辑坐标）；测试与自检模拟点击用。
     pub fn menu_center(&self, index: usize) -> Option<Vec2> {
         let id = *self.menu_nodes.get(index)?;
@@ -2019,6 +2112,17 @@ mod tests {
         });
         view.update();
         assert_eq!(view.foreground(), Color::RED);
+    }
+
+    #[test]
+    fn the_history_panel_tracks_the_command_count() {
+        let mut view = EditorView::new(Theme::dark(), AppState::default());
+        view.layout(viewport());
+        view.update();
+        assert_eq!(view.history_rows(), 1, "空历史只有「当前」一行");
+        paint_a_stroke(&mut view);
+        view.update();
+        assert_eq!(view.history_rows(), 2, "一笔之后多一行");
     }
 
     #[test]

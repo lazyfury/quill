@@ -102,6 +102,20 @@ impl History {
         self.redo.len()
     }
 
+    /// 撤销栈里的命令名，从最旧到最新（历史面板显示用）。
+    pub fn undo_labels(&self) -> Vec<&'static str> {
+        self.undo.iter().map(|command| command.label()).collect()
+    }
+
+    /// 重做栈里的命令名，**下一个要重做的在最前**。
+    pub fn redo_labels(&self) -> Vec<&'static str> {
+        self.redo
+            .iter()
+            .rev()
+            .map(|command| command.label())
+            .collect()
+    }
+
     /// 图层缓冲区重新对齐后，平移该图层上所有命令记录的区域，使它们在新的
     /// buffer 坐标系里仍指向同一块内容。`dx` / `dy` 非负。
     pub fn translate_layer(&mut self, layer: LayerId, dx: i32, dy: i32) {
@@ -570,6 +584,20 @@ mod tests {
         let revision = document.revision();
         history.undo(&mut document);
         assert_eq!(document.revision(), revision + 1, "撤销要让视图重合成");
+    }
+
+    #[test]
+    fn labels_track_the_undo_and_redo_stacks() {
+        let mut document = document();
+        let mut history = History::new();
+        let command = paint_command(&mut document);
+        history.execute(Box::new(command), &mut document);
+        assert_eq!(history.undo_labels(), vec!["画笔"]);
+        assert!(history.redo_labels().is_empty());
+
+        history.undo(&mut document);
+        assert!(history.undo_labels().is_empty());
+        assert_eq!(history.redo_labels(), vec!["画笔"]);
     }
 
     #[test]

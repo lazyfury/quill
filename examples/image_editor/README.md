@@ -103,6 +103,8 @@ cargo run --manifest-path examples/image_editor/Cargo.toml -- --pixel-font
   「文件 / 图层 / 属性」三块之间也用 `ResizeHandle::horizontal(..)` 分隔，可以拖动
   调整各自高度（`文件` 驱动上面的面板、`属性` 用 `invert()` 驱动下面的面板，中间
   图层面板 `grow(1)` 吸收剩余）；`clamp_panel_heights` 预留图层最小高度。
+  右栏还多了「历史」面板（`ui/history_panel.rs`）：一条虚拟化 `List` 显示
+  撤销 / 重做栈（旧→新 → 「● 当前」→ 重做下一个），点某一步就撤 / 重做到那里。
 
 ### 计划（Phase 10+）
 
@@ -195,6 +197,7 @@ src/
 │   ├── canvas.rs        # 透明画布区域（命中 / 定位用）
 │   ├── file_panel.rs    # Phase 7：文件面板（路径 + 导入 / 导出按钮）
 │   ├── layer_panel.rs   # 图层面板（List + 操作按钮）
+│   ├── history_panel.rs # 历史面板（List：undo/redo 栈，点一步跳过去）
 │   ├── properties_panel.rs  # 当前图层属性（只读）
 │   └── status_bar.rs
 └── selfcheck.rs         # 无头自检（录制 DrawList + draw_profile 体检）
