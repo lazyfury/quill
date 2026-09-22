@@ -320,9 +320,6 @@ def cmd_brief(_args: argparse.Namespace) -> None:
     nxt = conn.execute(
         "SELECT id, name FROM stages WHERE status = 'planned' ORDER BY id LIMIT 1"
     ).fetchone()
-    in_progress = conn.execute(
-        "SELECT COUNT(*) AS n FROM tasks WHERE status = 'in_progress'"
-    ).fetchone()["n"]
     conn.close()
 
     if cur:
@@ -331,9 +328,6 @@ def cmd_brief(_args: argparse.Namespace) -> None:
         line = f"- **Current stage:** none — next up {nxt['name']} (#{nxt['id']}, planned)"
     else:
         line = "- **Current stage:** none"
-    if in_progress:
-        plural = "s" if in_progress != 1 else ""
-        line += f" — {in_progress} task{plural} in progress"
     print(line)
 
 
