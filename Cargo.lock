@@ -335,6 +335,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "demoapp_ffi"
+version = "0.1.0"
+dependencies = [
+ "demo_app",
+ "draw_core",
+ "draw_ffi",
+ "draw_render",
+ "draw_theme",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -447,6 +458,14 @@ dependencies = [
  "draw_render",
  "draw_scene",
  "draw_ui",
+]
+
+[[package]]
+name = "draw_ffi"
+version = "0.1.0"
+dependencies = [
+ "draw_core",
+ "draw_render",
 ]
 
 [[package]]

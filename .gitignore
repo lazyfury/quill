@@ -4,6 +4,9 @@
 examples/*/dist
 node_modules
 
+# C++/CMake build tree for the FFI demo (includes the fetched GLFW).
+examples/cpp_ffi/build
+
 # Benchmark baselines are machine-specific; generate them locally or on CI.
 *.baseline.txt
 bench-baselines/

@@ -243,6 +243,11 @@ impl DemoApp {
         self.state.group.get()
     }
 
+    /// The number of catalog groups (the router's view count).
+    pub fn group_count() -> usize {
+        catalog::GROUPS.len()
+    }
+
     /// Selects a group and applies it to the preview router.
     pub fn show_group(&mut self, index: usize) {
         let index = index.min(catalog::GROUPS.len().saturating_sub(1));

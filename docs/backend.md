@@ -155,6 +155,11 @@ fail) when no GPU adapter is available.
 2. Implement `RenderBackend` for your type.
 3. Do not modify Scene/UI: the same `DrawList` must drive the new backend.
 
+A backend does not have to be Rust. `examples/cpp_ffi` implements an OpenGL 3.3
+backend in C++ over the `draw_ffi` C ABI: it consumes the same `DrawList`
+command stream, resolves transform/opacity/clip on the CPU and tessellates into
+triangles. See `docs/cpp-ffi.md`.
+
 ## Where browser-specific code lives
 
 Only `draw_backend_canvas`, `draw_wasm`, and `examples/web_demo` may reference

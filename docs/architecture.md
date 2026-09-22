@@ -132,7 +132,10 @@ logical size plus the world -> screen `canvas_transform`.)
   GUI state/layout cache). Phases 1-5 and sub-stages 25.1-25.16 landed; Phases
   6-9 are future stages. Details: `docs/godot-migration.md`.
 - Post-Stage-25 (un-numbered): `draw_font` (system-font service + numeric
-  `FontWeight`) and `Theme` as a trait + `DefaultTheme`.
+  `FontWeight`), `Theme` as a trait + `DefaultTheme`, and `draw_ffi` (a C ABI
+  over the core so a non-Rust host can build a `DrawList` and bring its own
+  backend — `examples/cpp_ffi` is a C++ UI + OpenGL 3.3 renderer on top of it,
+  see `docs/cpp-ffi.md`).
 
 ## Debugging & performance inspection
 
@@ -166,6 +169,8 @@ Validated by three independent renderers consuming the same IR:
 - `draw_backend_wgpu` (native `wgpu`, offscreen target + pixel readback, and
   window-surface presentation) — `crates/draw_backend_wgpu/tests/render.rs`,
   `examples/wgpu_demo`.
+- A C++ OpenGL 3.3 backend (not Rust) consuming `draw_ffi`'s command stream —
+  `examples/cpp_ffi`, verified by reading its own framebuffer back.
 
 Reused unchanged by both: `draw_core`, `draw_scene`, `draw_ui`, and the
 `DrawList` / `RenderBackend` contract in `draw_render`.

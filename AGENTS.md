@@ -74,6 +74,17 @@ draw_scene    -> draw_core, draw_render
 draw_ui         -> draw_core, draw_scene, draw_render
 draw_components -> draw_core, draw_scene, draw_render, draw_ui, draw_theme
 draw_render   -> draw_core
+draw_ffi      -> draw_core, draw_render
+                 (C ABI over the core: the value types plus a `DrawList`
+                  builder/iterator. No scene/UI and no backend — a
+                  foreign-language host organizes its own UI and implements
+                  its own backend. Header: `crates/draw_ffi/include/quill.h`.)
+demoapp_ffi   -> demo_app, draw_ffi, draw_core, draw_render, draw_theme
+                 (C ABI over the *real* `demo_app` gallery: a foreign host
+                  creates a DemoApp, drives its frame and reads the resulting
+                  DrawList through `draw_ffi`'s command record. The only crate
+                  that depends on `demo_app`, which is an example, not a core
+                  crate.)
 draw_font     -> draw_core
                  (backend-neutral font service: system-font discovery, family +
                   weight resolution with per-character fallback, `rustybuzz`
@@ -111,6 +122,12 @@ file_browser   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   the first real consumer of `draw_components::List`, and the
                   first host to translate a platform wheel into
                   `InputEvent::Wheel`)
+cpp_ffi (C++/CMake) -> draw_ffi + demoapp_ffi (staticlibs), GLFW, OpenGL 3.3
+                 (standalone C++ host: NOT a Cargo workspace and not a member;
+                  `draw_ffi` is the workspace member it links, and
+                  `demoapp_ffi` lets its `--demoapp` mode load the real gallery.
+                  The UI and the OpenGL backend are C++ — see
+                  `examples/cpp_ffi` and `docs/cpp-ffi.md`.)
 ```
 
 `image_editor` (the Photoshop-style app) used to live in `examples/image_editor`:
@@ -161,11 +178,16 @@ None of the demos is a dependency of the core crates.
 | `examples/wgpu_demo` | root member | native `wgpu` + `winit` | `cargo test -p wgpu_demo`; run `cargo run -p wgpu_demo --release` | `examples/wgpu_demo/README.md`, `docs/debug.md` |
 | `examples/deepseek_balance` | **standalone** (own workspace) | own `util` sub-crate (member of that workspace); native `wgpu` + `winit` + `ureq` | `cargo test --manifest-path examples/deepseek_balance/Cargo.toml`; `cargo run --manifest-path examples/deepseek_balance/Cargo.toml -- --selfcheck` | dependency block above, crate module docs |
 | `examples/file_browser` | **standalone** (own workspace) | single crate; native `wgpu` + `winit` | `cargo test --manifest-path examples/file_browser/Cargo.toml`; `cargo run --manifest-path examples/file_browser/Cargo.toml -- --selfcheck` (`--dump` too) | dependency block above |
+| `examples/cpp_ffi` | **standalone** (C++/CMake; no Cargo workspace) | C++17 UI + OpenGL 3.3 backend; links `draw_ffi` + `demoapp_ffi` | `./examples/cpp_ffi/build.sh`; `./examples/cpp_ffi/build/cpp_ffi --selfcheck` (`--dump`, `--gallery`, `--demoapp` too) | `examples/cpp_ffi/README.md`, `docs/cpp-ffi.md` |
+| `examples/demoapp_ffi` | root member | `staticlib`/`cdylib` C ABI over `demo_app`; loaded by `cpp_ffi --demoapp` | `cargo test -p demoapp_ffi` | `docs/cpp-ffi.md` |
 
 Headless self-check binaries (`--selfcheck`, and `--dump*` where noted) render
 the same UI into `draw_backend_recording` and print a report; they are the
 no-screenshot verification for the standalone hosts. Workspace members are
-covered by the normal `cargo test --workspace` gate.
+covered by the normal `cargo test --workspace` gate. `cpp_ffi` is the exception:
+it has no recording backend, so its `--selfcheck` reads its own OpenGL
+framebuffer back with `glReadPixels`, and `--dump` prints the `DrawList` command
+stream with no GPU at all.
 
 ## Code division (one concern per module)
 
@@ -284,6 +306,7 @@ The suite is a contract, not a diary. Before adding or keeping a test:
 | **Build an app UI: frame loop, widgets, hosting, conventions, cheat sheet** | **`docs/ui-guide.md`** (read this before scanning crates) |
 | Pipeline, coordinates, stage plan, backend replaceability | `docs/architecture.md` |
 | Backends (Canvas / wgpu / recording), adding a backend, browser boundary | `docs/backend.md` |
+| C ABI, C++ host, foreign-language backend | `docs/cpp-ffi.md` (`crates/draw_ffi`, `examples/cpp_ffi`) |
 | Fonts: discovery, family/weight resolution, fallback, shaping | `docs/font.md` (`crates/draw_font`) |
 | SVG / vector icons, loading an icon pack (Lucide) | `docs/svg.md` (`crates/draw_svg`) |
 | Controls, layout, components (API reference by name) | `docs/components.md` |

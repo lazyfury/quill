@@ -1,0 +1,18 @@
+[package]
+name = "draw_ffi"
+description = "C ABI over the backend-neutral core: draw_core value types plus a draw_render::DrawList builder/iterator, so a foreign-language host can build a scene and drive its own backend."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+# `staticlib` is what a C/C++ host links; `cdylib` is kept for hosts that prefer
+# a shared object; `rlib` keeps the crate usable from Rust tests/benches.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+draw_core = { workspace = true }
+draw_render = { workspace = true }

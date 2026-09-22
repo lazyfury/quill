@@ -7,6 +7,7 @@ members = [
     "crates/draw_theme",
     "crates/draw_components",
     "crates/draw_render",
+    "crates/draw_ffi",
     "crates/draw_font",
     "crates/draw_svg",
     "crates/draw_profile",
@@ -19,6 +20,7 @@ members = [
     "crates/draw_wasm",
     "examples/web_demo",
     "examples/demo_app",
+    "examples/demoapp_ffi",
     "examples/wgpu_demo",
     "examples/multi_tree",
 ]
@@ -37,6 +39,7 @@ draw_ui = { path = "crates/draw_ui" }
 draw_theme = { path = "crates/draw_theme" }
 draw_components = { path = "crates/draw_components" }
 draw_render = { path = "crates/draw_render" }
+draw_ffi = { path = "crates/draw_ffi" }
 draw_font = { path = "crates/draw_font" }
 draw_svg = { path = "crates/draw_svg" }
 draw_profile = { path = "crates/draw_profile" }

@@ -1,0 +1,19 @@
+[package]
+name = "demoapp_ffi"
+description = "C ABI over the real demo_app gallery: a foreign host loads DemoApp through the FFI and renders its DrawList with its own backend."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+draw_core.workspace = true
+draw_render.workspace = true
+draw_theme.workspace = true
+draw_ffi.workspace = true
+demo_app = { path = "../demo_app" }
