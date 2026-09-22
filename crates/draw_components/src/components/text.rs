@@ -160,7 +160,7 @@ mod tests {
     use super::*;
     use draw_theme::{default_theme, DefaultTheme, Mode, Palette, Theme};
 
-    fn weight_of(mut text: Text) -> FontWeight {
+    fn weight_of(text: Text) -> FontWeight {
         match text.widget() {
             Widget::Label { options, .. } => options.weight,
             _ => panic!("Text must build a Label"),
