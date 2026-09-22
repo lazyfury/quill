@@ -35,8 +35,12 @@ winit = "0.30"
 # `winit` has no tray / status-bar API (its scope is windows + the event loop),
 # so the menu-bar icon comes from `tray-icon`, which wraps `NSStatusBar` /
 # `NSStatusItem` on macOS. It also re-exports `muda` for the dropdown menu.
+#
+# 0.25.1 is the floor, not a preference: on macOS 27 earlier releases leave the
+# menu attached to the status item, so AppKit swallows every left click into the
+# dropdown and the panel never opens (tray-icon #365).
 [target.'cfg(target_os = "macos")'.dependencies]
-tray-icon = "0.24"
+tray-icon = "0.25.1"
 
 # 独立的小工具：不加入主 workspace，避免影响 cargo check --workspace 关卡。
 # 它只以 path 依赖引用工作区的 crate，工作区本身看不到这个包。`util` 是它自己的

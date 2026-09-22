@@ -30,6 +30,12 @@
 //! `tray-icon` emits those from its `NSResponder` handlers before it consults
 //! the menu flags.
 //!
+//! On macOS 27 that split needs `tray-icon` >= 0.25.1. Older releases leave the
+//! menu attached to the status item, so AppKit intercepts the left click and
+//! opens the dropdown instead — both buttons then look like a right click and
+//! the panel never appears. The fix attaches the menu only while it is being
+//! presented (tray-icon #365); see the dependency note in `Cargo.toml`.
+//!
 //! ## The item's rectangle is only half trustworthy
 //!
 //! [`MenuBar::rect`] is `NSStatusItem.button.window.frame`, and AppKit moves
