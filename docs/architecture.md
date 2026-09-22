@@ -95,6 +95,11 @@ logical size plus the world -> screen `canvas_transform`.)
   `WgpuBackend::set_font_config` switches at runtime. Advance/line/ascent metrics
   are exposed as `FontMetrics` so hosts can build a matching
   `draw_ui::TextMeasurer`. The core stays text-free.
+- Stage 20 — design system [done]: `draw_theme` tokens (light/dark palettes,
+  spacing/radius/type/motion scales) + the themed `draw_components` library
+  (`Text`, `Card`, `Divider`, `Badge`, `Button`, `CodeBlock`, `Terminal`,
+  `EmptyState`, `Checkbox`, `Switch`) built on frozen `draw_ui` primitives; the
+  shared `demo_app` became a three-column macOS-style notes app.
 - Stage 21 — complex-script shaping [done]: the wgpu backend shapes each line
   with `rustybuzz` (kerning, ligatures, contextual forms) and `unicode-bidi`
   (visual run ordering), rasterizes by glyph id, and aligns runs by the shaped
@@ -116,15 +121,18 @@ logical size plus the world -> screen `canvas_transform`.)
   `draw_ui::{View, BuildContext, ViewExt, Column, Row}` + `Ui::mount`. A view
   tree composes with `.child(..)` and chainable modifiers that post-process the
   built node. Stage 25 replaced this layer with component-native `.child()`.
-- Stage 25 — unified scene + component API [in progress]: one `SceneTree` owns
+- Stage 25 — unified scene + component API [accepted]: one `SceneTree` owns
   world and UI. `draw_scene::{Viewport, Camera2D, CanvasLayer}` drive the world
   and layer UI in viewport coordinates. Components are values built with
   `SceneTree::add_child`; every `draw_components::Component` carries a `Spec` and
   supports `.child()`/`.background()`/`.grow()` natively (no `View`/`ViewExt`
-  layer). The theme is a `Copy` value passed to constructors — it is no longer
-  stored on the tree; the text measurer still lives on the root.
-  `draw_ui` is layout + paint free functions plus per-node runtime
-  (`ControlData`/`Widget`/decorators/GUI state/layout cache).
+  layer). The theme is a value passed to constructors — it is no longer stored on
+  the tree; the text measurer still lives on the root. `draw_ui` is layout +
+  paint free functions plus per-node runtime (`ControlData`/`Widget`/decorators/
+  GUI state/layout cache). Phases 1-5 and sub-stages 25.1-25.16 landed; Phases
+  6-9 are future stages. Details: `docs/godot-migration.md`.
+- Post-Stage-25 (un-numbered): `draw_font` (system-font service + numeric
+  `FontWeight`) and `Theme` as a trait + `DefaultTheme`.
 
 ## Debugging & performance inspection (Stage 10)
 

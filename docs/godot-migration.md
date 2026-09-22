@@ -534,3 +534,61 @@ cargo bench --workspace --no-run
 ```
 
 Then emit the Stage 25.1 report and stop for approval before Phase 2.
+
+---
+
+## Stage 25 sub-stages (25.10-25.16)
+
+**25.10/25.11 (component-native API).** `draw_scene::SceneChild` +
+`SceneTree::add_child`; `draw_components::Component` carries a `Spec` and exposes
+its modifiers (`child`, `background`, `surface`, `dynamic_background`,
+`foreground`, `on_click`, `grow`, `min_size`, …) as methods; components take a
+`&'static dyn Theme`; the theme is no longer stored on the tree.
+
+**25.12 (`Line` primitive).** `DrawCommand::Line { from, to, paint, width }` +
+`PaintContext::draw_line`, implemented in Canvas / wgpu / recording; `Divider`
+and column separators draw a real line.
+
+**25.13 (drag + resize).** `GuiState.dragging` / `Control.drag_callback` with
+pointer capture in `draw_ui::handle_input`; `Component::on_drag`
+(`DragPhase::{Start,Move,End}` + delta) / `draw_components::set_on_drag`;
+`draw_components::ResizeHandle` (a divider-styled gutter that resizes a target
+pane's flex basis). `draw_core::Cursor` + `ControlData.cursor` +
+`Component::dynamic_cursor` + `draw_ui::hovered_cursor`; hosts map it (winit
+`CursorIcon`, canvas CSS `cursor`). `demo_app`'s sidebar and list gutters are
+both draggable.
+
+**25.14 (clip + wheel + `List`).** `ControlData.clip` (opt-in, the only source of
+`DrawCommand::ClipRect`; resolved per layout pass into `ControlData.clip_rect`,
+intersected with the nearest clipping ancestor) + `Ui::paint` emitting one
+save/clip/restore per clipped region + clip-aware hit testing;
+`InputEvent::Wheel` routing in `draw_ui::handle_input` to the nearest
+`Control::scroll_callback` (`draw_components::set_on_scroll` /
+`Component::on_scroll`); and `draw_components::{List, ListState, ListColumn,
+RowSource}` — a virtualized list whose frame cost is flat in the row count (107
+controls / 72 commands per frame at 1 K, 10 K and 100 K rows;
+`docs/benchmarking.md`). Additive to the frozen core. Demo:
+`examples/file_browser` (own workspace), the first real consumer of `List` and
+the first host that turns a platform wheel into `InputEvent::Wheel`
+(`host::wheel_pixels`).
+
+**25.15 (resizable split + binary preview, demo only).** `examples/file_browser`
+splits into two panes like `demo_app`: `Flex::row()` of
+`main(basis Px) | ResizeHandle::vertical(theme).target(main) | preview(grow 1)`.
+A handle's `min`/`max` are build-time constants that cannot see the viewport, so
+`Browser::layout` re-clamps the main width to `viewport - PREVIEW_MIN - gutter`
+every frame; each virtualized list needs its own `ListState::sync` in the same
+three-step frame. The right pane is a second `List` over the selected file's
+first 64 KiB (4096 rows, ~30 mounted), formatted by
+`examples/file_browser/src/preview.rs` and read on a worker thread with a
+generation guard.
+
+**25.16 (preview mode, demo only).** The right pane shows bytes as
+`PreviewMode::Binary` (offset/hex/ascii) or `PreviewMode::Text` (line number +
+content), toggled with `T` or by clicking the pane's two tabs. The bytes are read
+once; the mode only changes how a row is computed. The two modes are two `List`s
+(columns are fixed at build time) chosen by `SceneTree::set_visible`; a hidden
+list has zero height so `ListState::sync` returns early and it owns no pool.
+Tabs are `Flex::row().on_click(..).dynamic_background(..)` writing a shared cell
+that `Browser::update` drains. Known gap: word-based wrapping collapses leading
+whitespace, so text mode cannot show indentation (`docs/plan.md` tracks it).

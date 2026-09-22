@@ -176,152 +176,17 @@ crate/module instead of being embedded where it happens to be used.
 
 ## Stages
 
-- [x] Stage 0 — workspace skeleton
-- [x] Stage 1 — core types / math
-- [x] Stage 2 — SceneTree / Node / CanvasItem
-- [x] Stage 3 — DrawList / render IR
-- [x] Stage 4 — RecordingBackend / headless tests
-- [x] Stage 5 — Canvas2D backend + WASM
-- [x] Stage 6 — Control / layout / input
-- [x] Stage 7 — reusable component demo
-- [x] Stage 8 — second backend validation (`draw_backend_recording`)
-- [x] Stage 9 — wgpu backend (`draw_backend_wgpu`, offscreen + pixel readback)
-- [x] Stage 10 — performance inspection (`draw_profile`) + debug overlay
-      (`draw_debug_ui`)
-- [x] Stage 11 — benchmarking (`draw_bench` harness + `draw_bench_suite`)
-- [x] Stage 12 — layout engine v2: intrinsic sizing (`ContentSize`),
-      flex (grow/shrink/basis/justify/align/wrap), grid (`Track`), and
-      deterministic text wrapping (`layout::text`)
-- [x] Stage 13 — layout v2 polish: flex `align-content` + cross gap; grid
-      `align-items`/`justify-items`/`align-content`, span-aware auto tracks;
-      `LayoutStyle::order`
-- [x] Stage 14 — pluggable `TextMeasurer` (default `ApproxTextMeasurer`,
-      `FixedWidthTextMeasurer`), `TextOptions` (`wrap`/`max_lines`/`ellipsis`)
-- [x] Stage 15 — incremental layout: dirty flag + viewport cache
-      (`Ui::layout_count`, `Ui::invalidate_layout`, `Ui::set_text_measurer`)
-- [x] Stage 16 — layout/text polish: `TextMeasurer::ascent` baselines, paint-side
-      text-layout cache, per-pass measure memoization, button text wrapping,
-      wgpu missing-glyph box
-- [x] Stage 17 — partial relayout: per-node dirty propagation, clean-subtree
-      skipping (`Ui::last_arranged_nodes`), cached child ordering (`order_cache`)
-- [x] Stage 18 — shared `examples/demo_app` used by `wgpu_demo` and the WASM demos,
-      with headless layout/pipeline tests through `draw_backend_recording`
-- [x] Stage 19 — real font stack in `draw_backend_wgpu`: `FontConfig` chooses
-      `FontMode::System` (system font via `QUILL_FONT` or a per-OS list,
-      `ab_glyph`, dynamic atlas, device-pixel rasterization for crisp HiDPI) or
-      `FontMode::Pixel` (built-in bitmap); `set_font_config` switches at runtime
-      and `FontMetrics` lets `wgpu_demo` inject a matching `TextMeasurer`.
-- [x] Stage 20 — design system: `draw_theme` design tokens (light/dark
-      palettes, spacing/radius/type/motion scales) + `draw_components` themed component
-      library (`Text`, `Card`, `Divider`, `Badge`, `Button`, `CodeBlock`,
-      `Terminal`, `EmptyState`, `Checkbox`, `Switch`) built on frozen `draw_ui`
-      primitives, plus the shared `demo_app` rewritten as a three-column
-      macOS-style notes app (icons/images are monochrome placeholder squares).
-- [x] Stage 21 — complex-script shaping: the wgpu backend shapes each line with
-      `rustybuzz` (kerning, ligatures, contextual forms) and `unicode-bidi`
-      (visual run ordering), rasterizing by glyph id and reusing shaped advances
-      for alignment. `TextMeasurer::measure_run` (default: sum of advances) lets
-      layout measure with the same shaping; the Canvas/WASM `measureText`
-      measurer uses it too. The core stays text-free.
-- [x] Stage 22 — overlay layer (`draw_components::Overlays`): a generic floating layer
-      (own `Ui`) with `confirm`, `popover`, `tips` and `message` builders,
-      edge-aware placement with flipping (`overlay::placement`), scrims, input
-      capture/modal blocking, Esc/click-outside dismissal, auto-dismiss timers
-      and `on_confirm`/`on_cancel`/`on_close` callbacks. `draw_components::Button`
-      gained a `Destructive` variant.
-- [x] Stage 23 — per-node decorations, no `Kit`: added
-      `draw_ui::{NodeDecor, InteractState}`, `Ui::add_decor`, `Ui::state_for`,
-      `Ui::is_interactive`; `Ui::paint` runs `paint_behind` / content /
-      `paint_front` per node and `Ui::set_on_click` accepts any control and
-      dispatches to the nearest ancestor. `Ui` owns the `Theme`
-      (`Ui::theme`/`set_theme`, so `draw_ui -> draw_theme`). The `Kit` runtime is
-      gone: `draw_components` components implement `draw_ui::Component`, read
-      `ui.theme()` and attach `draw_ui::{surface_decor, dynamic_surface_decor,
-      foreground_decor}`. Hosts run a single `ui.paint` + `ui.handle_input`.
-      `draw_components` holds only component builders; the surface/tone/decorator
-      primitives live in `draw_ui`.
-- [x] Stage 24 — declarative views: `draw_ui::{View, BuildContext, ViewExt,
-      Column, Row}` and `Ui::mount`. Views compose with `.child(..)`; `ViewExt`
-      modifiers (`grow`, `min_size`, `anchors`/`offsets`, `background`,
-      `dynamic_background`, `foreground`, `on_click`, `capture`, …) wrap a view
-      and post-process its node, so `ui.set_*` never appears in app code. Every
-      `Component` is automatically a `View` (blanket impl). `Card` takes
-      children; `demo_app` and the overlay popover content are built as view
-      trees.
-      Recorded in `docs/design-system.md`. **Superseded by Stage 25.10/25.11:** the
-      `View`/`ViewExt`/`BuildContext`/`Modify` layer and the `add_*`/`mount`
-      helpers were deleted; components compose natively with `.child()`.
-- [x] Stage 25 — Godot-style unified scene (accepted). One `SceneTree` for
-      world + UI, `Viewport`/`Camera2D` driving the world, and UI under a
-      `CanvasLayer` in viewport coordinates; every node owns its own state and
-      `draw_ui` is a set of free functions over the tree (no `Ui` object).
-      Phases 1-5 and sub-stages 25.1-25.16 landed. Phases 6-9 (`draw_game`,
-      native continuous loop, observability, `quill` facade) are **future
-      stages**, not part of Stage 25's acceptance. Post-25.16 work: `draw_font`
-      (system font service + numeric `FontWeight`) and `Theme` as a trait +
-      `DefaultTheme`. Full phase plan, target architecture, decisions and open
-      questions: `docs/godot-migration.md`.
-      **Stage 25.10/25.11 (component-native API):** `draw_scene::SceneChild` +
-      `SceneTree::add_child`; `draw_components::Component` carries a `Spec` and exposes
-      modifiers as methods; `draw_components` components take a
-      `&'static dyn Theme`; the theme is no longer stored on the tree.
-      **Stage 25.12 (`Line` primitive):** `DrawCommand::Line { from, to, paint,
-      width }` + `PaintContext::draw_line`, implemented in Canvas / wgpu /
-      recording; `Divider` and column separators draw a real line.
-      **Stage 25.13 (drag + resize):** `GuiState.dragging` / `Control.drag_callback`
-      with pointer capture in `draw_ui::handle_input`; `Component::on_drag`
-      (`DragPhase::{Start,Move,End}` + delta) / `draw_components::set_on_drag`;
-      `draw_components::ResizeHandle` (a divider-styled gutter that resizes a
-      target pane's flex basis). `draw_core::Cursor` + `ControlData.cursor` +
-      `Component::dynamic_cursor` (per-control provider) +
-      `draw_ui::hovered_cursor`; hosts map it (winit `CursorIcon`, canvas CSS
-      `cursor`). `demo_app`'s sidebar and list gutters are both draggable.
-      **Stage 25.14 (clip + wheel + `List`):** `ControlData.clip` (opt-in, the
-      only source of `DrawCommand::ClipRect`; resolved per layout pass into
-      `ControlData.clip_rect`, intersected with the nearest clipping ancestor) +
-      `Ui::paint` emitting one save/clip/restore per clipped region +
-      clip-aware hit testing; `InputEvent::Wheel` routing in
-      `draw_ui::handle_input` to the nearest `Control::scroll_callback`
-      (`draw_components::set_on_scroll` / `Component::on_scroll`); and
-      `draw_components::{List, ListState, ListColumn, RowSource}` — a
-      virtualized list whose frame cost is flat in the row count (107 controls /
-      72 commands per frame at 1 K, 10 K and 100 K rows; `docs/benchmarking.md`).
-      Additive to the frozen core: no `Widget` variant, existing `ControlData`
-      fields unchanged. Recorded in `docs/design-system.md`.
-      **Stage 25.14 demo:** `examples/file_browser` (own workspace) is the first
-      real consumer of `List` and the first host that turns a platform wheel into
-      `InputEvent::Wheel` (`host::wheel_pixels`); it scans directories on a worker
-      thread and verifies itself headlessly with `--selfcheck` / `--dump`.
-   - **Stage 25.15 (resizable split + binary preview, demo layer only — no core
-     change):** `examples/file_browser` splits into two panes the way
-     `demo_app` does — `Flex::row()` of `main(basis Px) |
-     ResizeHandle::vertical(theme).target(main) | preview(grow 1)`, so the one
-     gutter drives the left pane's basis and the right pane takes the rest.
-     Two things the component cannot do for you: a handle's `min`/`max` are
-     fixed at build time and know nothing about the viewport, so
-     `Browser::layout` re-clamps the main width to
-     `viewport - PREVIEW_MIN - gutter` every frame (otherwise a narrow window
-     squeezes the right pane to zero); and each virtualized list needs its own
-     `ListState::sync` in that same three-step frame. The right pane is a second
-     `List` over the selected file's first 64 KiB — 4096 rows of data, ~30 rows
-     mounted — formatted by `examples/file_browser/src/preview.rs` (pure
-     offset/hex/ascii functions) and read on a worker thread with the same
-     generation guard as the directory scan, so sweeping the selection with the
-     arrow keys leaves exactly one request in flight.
-   - **Stage 25.16 (preview mode, demo layer only — no core change):** the right
-     pane now shows those bytes two ways — `PreviewMode::Binary` (offset/hex/ascii)
-     and `PreviewMode::Text` (line number + line content) — toggled with `T` or by
-     clicking the pane's two tab buttons. The bytes are read once; the mode only
-     changes how a row is computed, so switching is free and it survives selecting
-     another file. The two modes are two `List`s (a list's columns are fixed at
-     build time) chosen by `SceneTree::set_visible`: a hidden list's container has
-     zero height, so `ListState::sync` returns early and it owns no row pool at
-     all — the idle mode costs nothing. Tabs are
-     `Flex::row().on_click(..).dynamic_background(..)`, so the active one is
-     highlighted without rebuilding the tree, and the click only writes a shared
-     cell that `Browser::update` drains (`on_click` cannot borrow the view).
-     Known gap: `draw_ui`'s word-based wrapping collapses leading whitespace, so
-     text mode cannot show indentation — `docs/plan.md` tracks it.
+All stages through **Stage 25 are complete and accepted.** The full ledger (one
+line per stage, with what each landed) is `docs/architecture.md` →
+"Implementation stages"; the Godot-style migration's phase plan and per-substage
+notes are `docs/godot-migration.md`.
+
+- **Current status:** Stage 25 (Godot-style unified scene) accepted — Phases 1-5
+  and sub-stages 25.1-25.16 landed. Post-25.16: `draw_font` (system font service
+  + numeric `FontWeight`) and `Theme` as a trait + `DefaultTheme`.
+- **Next (future stages):** Phase 6 `draw_game` capabilities, Phase 7 native
+  continuous loop, Phase 8 observability/tests/docs, Phase 9 `quill` facade. See
+  `docs/godot-migration.md`.
 
 ## Per-stage gate (must run)
 
