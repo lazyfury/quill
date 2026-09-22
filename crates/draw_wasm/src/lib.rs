@@ -9,6 +9,9 @@
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_wasm";
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod wheel;
+
 #[cfg(target_arch = "wasm32")]
 mod runner;
 #[cfg(target_arch = "wasm32")]

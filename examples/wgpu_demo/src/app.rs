@@ -10,7 +10,7 @@ use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Profile
 use draw_render::{PaintContext, RenderBackend};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WinitKey, NamedKey};
 #[cfg(target_os = "macos")]
@@ -24,6 +24,9 @@ use crate::demo::Demo;
 /// pixels of extra top padding so its content clears the traffic lights.
 #[cfg(target_os = "macos")]
 const TITLEBAR_SAFE_AREA: f32 = 28.0;
+
+/// One wheel notch scrolls about three text lines.
+const WHEEL_LINE_HEIGHT: f32 = 48.0;
 
 /// Runs the demo until the window is closed.
 pub fn run(options: Options) {
@@ -411,6 +414,17 @@ impl ApplicationHandler for App {
                 };
                 self.feed(&event);
             }
+            // Platform wheel -> `InputEvent::Wheel`. The core only routes the
+            // wheel to the nearest scroll callback; the host has to build the
+            // event, so a `List` inside this demo can scroll.
+            WindowEvent::MouseWheel { delta, .. } => {
+                let delta = wheel_pixels(delta, self.scale_factor as f32);
+                let position = self.cursor;
+                self.feed(&InputEvent::Wheel {
+                    position,
+                    delta: Vec2::new(0.0, delta),
+                });
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 let Some(key) = map_key(&event.logical_key) else {
                     return;
@@ -437,6 +451,18 @@ impl App {
             position.x as f32 / self.scale_factor as f32,
             position.y as f32 / self.scale_factor as f32,
         )
+    }
+}
+
+/// Platform wheel -> logical pixels (`y > 0` means scroll down, matching
+/// `InputEvent::Wheel`). Wheel-up (`LineDelta` `y > 0`) scrolls up, so the
+/// offset decreases; the sign convention lives here, not in the core.
+fn wheel_pixels(delta: MouseScrollDelta, scale: f32) -> f32 {
+    match delta {
+        MouseScrollDelta::LineDelta(_, lines) => -lines * WHEEL_LINE_HEIGHT,
+        MouseScrollDelta::PixelDelta(position) => {
+            -(position.y as f32) / if scale > 0.0 { scale } else { 1.0 }
+        }
     }
 }
 
@@ -480,5 +506,27 @@ fn map_key(key: &WinitKey) -> Option<Key> {
         WinitKey::Named(NamedKey::F12) => Some(Key::F12),
         WinitKey::Character(text) => text.chars().next().map(Key::Character),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wheel_up_scrolls_up() {
+        // Wheel up (away from the user) -> offset decreases -> earlier content.
+        assert!(wheel_pixels(MouseScrollDelta::LineDelta(0.0, 1.0), 1.0) < 0.0);
+        assert!(wheel_pixels(MouseScrollDelta::LineDelta(0.0, -1.0), 1.0) > 0.0);
+    }
+
+    #[test]
+    fn pixel_deltas_are_converted_to_logical() {
+        // 40 physical pixels at 2x = 20 logical pixels.
+        let pixels = wheel_pixels(
+            MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, -40.0)),
+            2.0,
+        );
+        assert_eq!(pixels, 20.0);
     }
 }

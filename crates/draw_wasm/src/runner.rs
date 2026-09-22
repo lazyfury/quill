@@ -3,11 +3,13 @@ use std::rc::Rc;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, PointerEvent, Window};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, PointerEvent, WheelEvent, Window};
 
 use draw_backend_canvas::Canvas2dBackend;
 use draw_core::{Cursor, EventResult, InputEvent, Key, PointerButton, Size, Vec2, ViewportSize};
 use draw_render::{PaintContext, RenderBackend};
+
+use crate::wheel::wheel_pixels;
 
 /// Application hook driven by the WASM runner.
 ///
@@ -58,6 +60,7 @@ where
     let app = Rc::new(RefCell::new(app));
 
     attach_pointer_listeners(&canvas, &app);
+    attach_wheel_listener(&canvas, &app);
     attach_keyboard_listeners(&window, &app);
 
     app.borrow_mut().attach_context(&ctx);
@@ -185,6 +188,23 @@ fn attach_pointer_listeners<A: App + 'static>(canvas: &HtmlCanvasElement, app: &
     leave.forget();
 }
 
+fn attach_wheel_listener<A: App + 'static>(canvas: &HtmlCanvasElement, app: &Rc<RefCell<A>>) {
+    let wheel = {
+        let app = app.clone();
+        let canvas = canvas.clone();
+        Closure::<dyn FnMut(WheelEvent)>::new(move |event: WheelEvent| {
+            let event = InputEvent::Wheel {
+                position: wheel_position(&canvas, &event),
+                delta: Vec2::new(0.0, wheel_pixels(event.delta_y(), event.delta_mode())),
+            };
+            app.borrow_mut().event(&event);
+        })
+    };
+
+    let _ = canvas.add_event_listener_with_callback("wheel", wheel.as_ref().unchecked_ref());
+    wheel.forget();
+}
+
 fn attach_keyboard_listeners<A: App + 'static>(window: &Window, app: &Rc<RefCell<A>>) {
     let down = {
         let app = app.clone();
@@ -210,6 +230,13 @@ fn attach_keyboard_listeners<A: App + 'static>(window: &Window, app: &Rc<RefCell
 }
 
 fn pointer_position(canvas: &HtmlCanvasElement, event: &PointerEvent) -> Vec2 {
+    let rect = canvas.get_bounding_client_rect();
+    let x = event.client_x() as f64 - rect.left();
+    let y = event.client_y() as f64 - rect.top();
+    Vec2::new(x as f32, y as f32)
+}
+
+fn wheel_position(canvas: &HtmlCanvasElement, event: &WheelEvent) -> Vec2 {
     let rect = canvas.get_bounding_client_rect();
     let x = event.client_x() as f64 - rect.left();
     let y = event.client_y() as f64 - rect.top();

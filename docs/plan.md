@@ -95,11 +95,6 @@ themed library. Remaining polish, in priority order:
    for a frame that does not move). Keying slots by `index % pool_size` would
    re-bind only the rows entering and leaving, which is worth ~12x on the scroll
    path. Deferred: the current cost is 0.4% of a 60 Hz budget.
-7. **Wheel pump in the other two hosts** — `examples/file_browser` translates
-   winit's `MouseScrollDelta` into `InputEvent::Wheel` (`host::wheel_pixels`, a
-   pure function with tests); `wgpu_demo` and the Canvas runner (DOM `wheel`)
-   still need the same few lines, and until they have them a `List` inside them
-   simply does not scroll.
 
 ## UI runtime — `Ui` boundary & lifecycle (folded into Stage 25)
 
@@ -191,6 +186,12 @@ Cross-cutting: Phases 9 and 11 both need "a popover full of commands", so the
 Stage history is the ledger in [`docs/architecture.md`](architecture.md); this
 section keeps non-stage work items.
 
+- **Wheel pump in every host.** `examples/file_browser` already translated
+  winit's `MouseScrollDelta` into `InputEvent::Wheel`; `examples/wgpu_demo`
+  (`app::wheel_pixels`) and the Canvas runner (`draw_wasm::wheel`) now do too, so
+  a `List` scrolls under the wheel in all three hosts. Each keeps its own pure,
+  unit-tested sign convention (winit negates an up-scroll; DOM already reports
+  "down" as positive), so the core stays sign-agnostic.
 - `draw_svg` (`crates/draw_svg`): backend-neutral SVG vector rendering with **no
 external dependency**. It parses a small SVG subset (the Lucide grammar:
 `path`/`rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, full path data
