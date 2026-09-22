@@ -17,6 +17,11 @@ Decisions (2025-09):
   picker. On macOS it also scans
   `/System/Library/AssetsV2/com_apple_MobileAsset_Font*/**/AssetData` — that is
   where PingFang lives (there is no `/System/Library/Fonts/PingFang.ttc`).
+  **Deferred when a seed is known:** with [`FontConfig::default_face`] (a
+  concrete `FaceRef`) or `QUILL_FONT`, `load_with` reads that one face and does
+  **not** scan; the scan runs on the first `families()`, unknown-family
+  `resolve`, or uncovered character. Without a seed it still scans up front (so
+  a fontless system can fall back to the pixel bitmap before the first frame).
 - **Resolution** (`FontServer::resolve`): `(family, weight)` → the nearest
   weight in that family, falling back to the default family.
 - **Shaping** (`FontServer::shape`): bidi reordering + `rustybuzz`, split by
@@ -28,7 +33,7 @@ Decisions (2025-09):
 ## API
 
 ```rust
-use draw_font::{FontConfig, FontRequest, FontServer};
+use draw_font::{FaceRef, FontConfig, FontRequest, FontServer};
 
 let server = FontServer::load_with(FontConfig::default());
 for family in server.families() {
@@ -36,6 +41,16 @@ for family in server.families() {
 }
 let id = server.resolve(&FontRequest::new("PingFang SC", 700)); // nearest weight
 let glyphs = server.shape("Hello 中文", 24.0, FontWeight::NORMAL);
+```
+
+When the application ships or knows its font file, seed it and skip the scan:
+
+```rust
+let server = FontServer::load_with(FontConfig {
+    default_face: Some(FaceRef::new("/opt/app/fonts/Inter.ttf", 0)),
+    ..FontConfig::default()
+});
+// No system scan: shaping uses the seed until a fallback / picker needs more.
 ```
 
 `FontMetrics` wraps an `Rc<FontServer>` for hosts that build a
@@ -105,9 +120,11 @@ backend is a thin re-export (`Font` = `FontServer`).
 - Uses `ttf-parser` directly (no `fontdb`/CoreText dependency): for each file it
   enumerates `fonts_in_collection`, reads the English family name (`name` id 1,
   else 16) and `OS/2.usWeightClass`, and keeps `(file, face_index)` metadata
-  only. Bytes are read, parsed and dropped; they are loaded (and leaked once)
-  only when a face is first used.
-- A full scan is ~1–2 s in a debug build; `QUILL_FONT` skips it.
+  only. Files are **memory-mapped** (`memmap2`) and dropped: only the pages the
+  `name`/`OS/2` tables touch are faulted in, instead of copying whole (possibly
+  tens-of-MB) collections into a heap buffer.
+- A full scan is ~1–2 s in a debug build; `QUILL_FONT` and
+  [`FontConfig::default_face`] skip it (see "What it does").
 - `FontServer::resolve` matches the family case-insensitively and picks the
   nearest weight (tie → heavier); unknown family → default family.
 
@@ -139,6 +156,7 @@ The discovery scan does **not** leak (it drops bytes after reading metadata).
 - [x] Numeric `FontWeight` + nearest-weight resolution.
 - [x] Per-character fallback + shared atlas.
 - [x] `draw_backend_wgpu` consumes the service; Canvas weight is numeric.
+- [x] `FontConfig::default_face` seed + deferred scan; discovery files mmap'd.
 - [ ] Variable-font `wght` axes.
 - [ ] Emoji / color-font fallback.
 - [ ] Cache discovery metadata on disk (startup cost).

@@ -42,7 +42,7 @@ mod shaping;
 
 pub use face::GlyphSlot;
 pub use server::{
-    FontConfig, FontFamilyInfo, FontId, FontMetrics, FontMode, FontRequest, FontServer,
+    FaceRef, FontConfig, FontFamilyInfo, FontId, FontMetrics, FontMode, FontRequest, FontServer,
     PIXEL_GLYPH_RATIO,
 };
 

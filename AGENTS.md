@@ -78,7 +78,8 @@ draw_font     -> draw_core
                  (backend-neutral font service: system-font discovery, family +
                   weight resolution with per-character fallback, `rustybuzz`
                   shaping, `ab_glyph` rasterization into a shared atlas. Owns
-                  `ab_glyph` / `rustybuzz` / `ttf-parser` / `font8x8`.)
+                  `ab_glyph` / `rustybuzz` / `ttf-parser` / `memmap2` /
+                  `font8x8`.)
 draw_svg      -> draw_core, draw_render
                  (backend-neutral SVG vector rendering: parses a small SVG subset
                   into flattened polylines and strokes them with the IR `Line` /

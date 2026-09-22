@@ -529,6 +529,7 @@ impl App {
                         .clone()
                         .unwrap_or_else(|| DEFAULT_FONT.to_string()),
                 ),
+                default_face: None,
             },
             last_frame: Instant::now(),
             proxy,

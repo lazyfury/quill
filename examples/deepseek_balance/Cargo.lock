@@ -563,6 +563,7 @@ dependencies = [
  "ab_glyph",
  "draw_core",
  "font8x8",
+ "memmap2",
  "rustybuzz",
  "ttf-parser",
  "unicode-bidi",

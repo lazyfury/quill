@@ -102,14 +102,28 @@ pub(crate) fn asset_dirs() -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// Memory-maps `path` read-only.
+///
+/// Discovery only reads the `name` / `OS/2` tables, so mapping lets the OS
+/// fault in just the pages it touches instead of copying a whole (possibly
+/// tens-of-MB) collection into a heap buffer.
+pub(crate) fn map_file(path: &Path) -> Option<memmap2::Mmap> {
+    let file = std::fs::File::open(path).ok()?;
+    // SAFETY: the file is opened read-only and is only ever read through this
+    // shared mapping; the font files are system-installed and not truncated
+    // while mapped (the same assumption the previous `fs::read` made).
+    unsafe { memmap2::Mmap::map(&file).ok() }
+}
+
 /// Parses every face of `path` and appends its normal-style metadata.
 fn collect_file(path: &Path, out: &mut Vec<FaceInfo>) {
-    let Ok(bytes) = std::fs::read(path) else {
+    let Some(mapping) = map_file(path) else {
         return;
     };
-    let count = ttf_parser::fonts_in_collection(&bytes).unwrap_or(1);
+    let bytes: &[u8] = &mapping;
+    let count = ttf_parser::fonts_in_collection(bytes).unwrap_or(1);
     for index in 0..count {
-        let Ok(face) = ttf_parser::Face::parse(&bytes, index) else {
+        let Ok(face) = ttf_parser::Face::parse(bytes, index) else {
             continue;
         };
         if face.is_italic() || face.is_oblique() {
