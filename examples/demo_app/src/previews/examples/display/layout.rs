@@ -115,7 +115,7 @@ pub(crate) fn padding_gap(card: Card, ctx: &mut Ctx) -> Card {
         Column::new()
             .gap(space::MD)
             .padding(Edges::all(space::LG))
-            .surface(SurfaceStyle::new(theme.palette().background).radius(radius::MD))
+            .surface(SurfaceStyle::new(theme.palette().surface_raised).radius(radius::MD))
             .child(Text::caption("padding LG · gap MD", theme).tone(Tone::Muted))
             .child(boxx(theme.palette().accent).min_size(0.0, 18.0))
             .child(boxx(theme.palette().info).min_size(0.0, 18.0)),
