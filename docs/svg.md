@@ -90,8 +90,7 @@ tar -xzf lucide.tgz package/icons   # 2112 icons
 Validate the whole pack against the parser (ignored by default):
 
 ```bash
-DRAW_SVG_ICON_DIR=$PWD/package/icons \
-  cargo test -p draw_svg -- --ignored --nocapture every_icon
+cargo test -p draw_svg -- --ignored --nocapture every_icon $PWD/package/icons
 ```
 
 That test parses every icon, draws it at 24×24, and fails if any icon errors or

@@ -199,9 +199,8 @@ incl. arcs, `stroke`/`stroke-width`/`stroke-linecap`/`stroke-linejoin`/`viewBox`
 into flattened polylines and strokes them with the existing `Line` +
 `FillCircle` IR, so it works with any backend. `IconPack` indexes a directory of
 `.svg` files by name. Validated against the whole Lucide pack: 2 112 icons parse
-into 8 605 shapes / ~224 K commands with none empty
-(`DRAW_SVG_ICON_DIR=… cargo test -p draw_svg -- --ignored every_icon`). See
-`docs/svg.md`. Fills are not rendered yet (stroke-only), which is exactly the
+into 8 605 shapes / ~224 K commands with none empty (run
+`every_icon` with the pack directory; see `docs/svg.md`). See `docs/svg.md`. Fills are not rendered yet (stroke-only), which is exactly the
 Lucide case.
 - `List` + the core increments it needed: `ControlData.clip` (the first and only
   source of `DrawCommand::ClipRect`, resolved in the layout pass, emitted as one

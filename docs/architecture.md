@@ -88,7 +88,7 @@ logical size plus the world -> screen `canvas_transform`.)
   native tests verify layout and the full pipeline through
   `draw_backend_recording`.
 - Stage 19 — real font stack in the wgpu backend [done]: a font is located from
-  `QUILL_FONT` or a per-OS candidate list, parsed with `ab_glyph`, and rasterized
+  a per-OS candidate list, parsed with `ab_glyph`, and rasterized
   on demand into a dynamic, shelf-packed atlas (uploaded after each `submit`).
   `FontConfig` selects `FontMode::System` (device-pixel rasterization for crisp
   HiDPI, while metrics stay logical) or `FontMode::Pixel` (built-in bitmap), and

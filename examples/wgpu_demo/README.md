@@ -56,8 +56,8 @@ on HiDPI displays.
 
 The backend font is configurable:
 
-- **System** (default): loads `QUILL_FONT` or a per-OS font (proportional Latin
-  + CJK), rasterized at device pixels for HiDPI.
+- **System** (default): loads a per-OS font (proportional Latin + CJK),
+  rasterized at device pixels for HiDPI.
 - **Pixel**: the built-in `font8x8` bitmap (the original pixel look).
 
 Switch at runtime with **f**, or start in pixel mode with `--pixel-font`.

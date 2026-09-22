@@ -116,11 +116,10 @@ pub struct FontId(pub usize);
 /// The font service: discovered faces, lazy loading, shaping and the atlas.
 pub struct FontServer {
     mode: FontMode,
-    /// Faces known so far: a seed (an explicit [`FaceRef`] or `QUILL_FONT`)
-    /// plus, once discovery runs, the scanned system faces appended to it.
+    /// Faces known so far: a seed (an explicit [`FaceRef`]) plus, once
+    /// discovery runs, the scanned system faces appended to it.
     faces: RefCell<Vec<FaceInfo>>,
-    /// Whether the system scan has run (or is not needed, e.g. `QUILL_FONT` or
-    /// pixel mode).
+    /// Whether the system scan has run (or is not needed, e.g. pixel mode).
     discovered: Cell<bool>,
     /// The family list, built (and discovery triggered) on first access.
     families: OnceCell<Vec<FontFamilyInfo>>,
@@ -144,24 +143,17 @@ impl FontServer {
 
     /// Loads the server described by `config`.
     ///
-    /// An explicit [`FontConfig::default_face`] or `QUILL_FONT` (plus
-    /// `QUILL_FONT_INDEX`) seeds the server **without scanning the system**;
-    /// the scan is deferred to the first picker / family miss / fallback. With
-    /// no seed the system is scanned now, and if no font can be found `System`
-    /// mode falls back to the pixel bitmap.
+    /// An explicit [`FontConfig::default_face`] seeds the server **without
+    /// scanning the system**; the scan is deferred to the first picker /
+    /// family miss / fallback. With no seed the system is scanned now, and if
+    /// no font can be found `System` mode falls back to the pixel bitmap.
     pub fn load_with(config: FontConfig) -> Self {
         if config.mode == FontMode::Pixel {
             return Self::bitmap_server(config);
         }
 
         // A known face avoids the scan entirely until another face is needed.
-        if let Some(path) = std::env::var_os("QUILL_FONT") {
-            let faces = load_override(PathBuf::from(path));
-            if !faces.is_empty() {
-                // The override is authoritative: no system fallback.
-                return Self::system_server(config, faces, true);
-            }
-        } else if let Some(face) = config.default_face.as_ref() {
+        if let Some(face) = config.default_face.as_ref() {
             let faces = seed_from_face(face);
             if !faces.is_empty() {
                 return Self::system_server(config, faces, false);
@@ -551,8 +543,7 @@ impl FontServer {
         self.mode
     }
 
-    /// The default family name, or the override file when `QUILL_FONT` was
-    /// used.
+    /// The default family name, or `None` in pixel mode.
     pub fn name(&self) -> Option<&str> {
         if self.mode == FontMode::System {
             Some(self.default_family())
@@ -732,30 +723,6 @@ fn seed_from_face(face_ref: &FaceRef) -> Vec<FaceInfo> {
         weight: FontWeight::new(face.weight().to_number()),
         file: face_ref.file.clone(),
         index: face_ref.index,
-    }]
-}
-
-/// Loads a single face from `QUILL_FONT` (+ optional `QUILL_FONT_INDEX`).
-fn load_override(path: PathBuf) -> Vec<FaceInfo> {
-    let index = std::env::var("QUILL_FONT_INDEX")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0);
-    let Some(mapping) = discovery::map_file(&path) else {
-        return Vec::new();
-    };
-    let bytes: &[u8] = &mapping;
-    let Ok(face) = ttf_parser::Face::parse(bytes, index) else {
-        return Vec::new();
-    };
-    let Some(family) = discovery::family_name(&face) else {
-        return Vec::new();
-    };
-    vec![FaceInfo {
-        family,
-        weight: FontWeight::new(face.weight().to_number()),
-        file: path,
-        index,
     }]
 }
 

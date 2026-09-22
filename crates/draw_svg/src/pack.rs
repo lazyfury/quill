@@ -140,20 +140,26 @@ mod tests {
         assert!(IconPack::open(&dir).is_err());
     }
 
-    /// Parses every icon in a real pack. Ignored by default; point it at a pack
-    /// with `DRAW_SVG_ICON_DIR`:
+    /// Parses every icon in a real pack. Ignored by default; pass the pack
+    /// directory as a trailing argument:
     ///
     /// ```text
-    /// DRAW_SVG_ICON_DIR=/path/to/lucide/icons \
-    ///   cargo test -p draw_svg -- --ignored --nocapture every_icon
+    /// cargo test -p draw_svg -- --ignored --nocapture every_icon /path/to/lucide/icons
     /// ```
     #[test]
-    #[ignore = "needs a real icon pack (set DRAW_SVG_ICON_DIR)"]
+    #[ignore = "needs a real icon pack (pass its directory)"]
     fn every_icon_in_a_real_pack_parses() {
         use draw_core::{Color, Rect, Size, Vec2};
         use draw_render::PaintContext;
 
-        let Ok(dir) = std::env::var("DRAW_SVG_ICON_DIR") else {
+        // libtest treats the path as an extra name filter; the test name above
+        // still matches. Pick the last positional argument that is a directory.
+        let dir = std::env::args()
+            .skip(1)
+            .filter(|arg| !arg.starts_with('-'))
+            .filter(|arg| Path::new(arg).is_dir())
+            .last();
+        let Some(dir) = dir else {
             return;
         };
         let pack = IconPack::open(dir).expect("open the icon pack");

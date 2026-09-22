@@ -1,6 +1,6 @@
 //! Built-in fixed ASCII bitmap-font fallback.
 //!
-//! Used when no system/`QUILL_FONT` font can be loaded. ASCII is rasterized
+//! Used when no system font can be loaded. ASCII is rasterized
 //! from the public-domain `font8x8` glyphs into an `Rgba8Unorm` atlas. Each
 //! glyph cell is `8x8`; set pixels are white with alpha 1, unset pixels fully
 //! transparent, so `texel * color` tints text.

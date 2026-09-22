@@ -94,7 +94,7 @@ the GPU pass is a single textured-triangle pipeline (`src/shader.wgsl`):
   zoomed low-resolution canvas. The filter is a backend-side property of the
   `TextureId`; the neutral `DrawImage` command stays filter-free.
 - `DrawText` uses the [`draw_font`](font.md) service: a [`FontServer`] discovers
-  system fonts (or `QUILL_FONT`), resolves family/weight, shapes with `rustybuzz`
+  system fonts, resolves family/weight, shapes with `rustybuzz`
   + `unicode-bidi` (per-character fallback), and rasterizes `ab_glyph` glyphs by
   glyph id on demand at the requested size into a `1024x1024` shelf-packed atlas
   uploaded to the GPU after each `submit`. UVs, shaped advances and baselines

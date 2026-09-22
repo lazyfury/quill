@@ -5,8 +5,8 @@
 //! font parsing:
 //!
 //! - **Discovery** ([`FontServer::families`]): scans the system font
-//!   directories (or `QUILL_FONT`) into a list of families and weights, so an
-//!   application can build a font picker.
+//!   directories into a list of families and weights, so an application can
+//!   build a font picker.
 //! - **Resolution** ([`FontServer::resolve`]): maps a `(family, weight)`
 //!   request to a concrete face (file + face index), picking the nearest
 //!   available weight and falling back to the default family.

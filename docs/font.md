@@ -12,14 +12,13 @@ Decisions (2025-09):
 
 ## What it does
 
-- **Discovery** (`FontServer::families`): scans the system font directories (or
-  `QUILL_FONT`) into families + weights, so an application can build a font
-  picker. On macOS it also scans
+- **Discovery** (`FontServer::families`): scans the system font directories
+  into families + weights, so an application can build a font picker. On macOS it also scans
   `/System/Library/AssetsV2/com_apple_MobileAsset_Font*/**/AssetData` — that is
   where PingFang lives (there is no `/System/Library/Fonts/PingFang.ttc`).
   **Deferred when a seed is known:** with [`FontConfig::default_face`] (a
-  concrete `FaceRef`) or `QUILL_FONT`, `load_with` reads that one face and does
-  **not** scan; the scan runs on the first `families()`, unknown-family
+  concrete `FaceRef`), `load_with` reads that one face and does **not** scan;
+  the scan runs on the first `families()`, unknown-family
   `resolve`, or uncovered character. Without a seed it still scans up front (so
   a fontless system can fall back to the pixel bitmap before the first frame).
 - **Resolution** (`FontServer::resolve`): `(family, weight)` → the nearest
@@ -57,8 +56,10 @@ let server = FontServer::load_with(FontConfig {
 `draw_ui::TextMeasurer`; it exposes `advance_weighted` / `measure_run_weighted`
 so layout measures the same faces the backend draws.
 
-`QUILL_FONT` (+ `QUILL_FONT_INDEX`) overrides discovery with a single face;
-`QUILL_FONT_BOLD` is gone (weight resolution replaces it).
+To override discovery with a single face, pass [`FontConfig::default_face`].
+`draw_font` reads no environment variables; a host that wants an env override
+resolves the file itself and builds the `FaceRef`. `QUILL_FONT_BOLD` is gone
+(weight resolution replaces it).
 
 ## Background (the old limits)
 
@@ -123,8 +124,8 @@ backend is a thin re-export (`Font` = `FontServer`).
   only. Files are **memory-mapped** (`memmap2`) and dropped: only the pages the
   `name`/`OS/2` tables touch are faulted in, instead of copying whole (possibly
   tens-of-MB) collections into a heap buffer.
-- A full scan is ~1–2 s in a debug build; `QUILL_FONT` and
-  [`FontConfig::default_face`] skip it (see "What it does").
+- A full scan is ~1–2 s in a debug build; a seed ([`FontConfig::default_face`])
+  skips it (see "What it does").
 - `FontServer::resolve` matches the family case-insensitively and picks the
   nearest weight (tie → heavier); unknown family → default family.
 
