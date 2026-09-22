@@ -1,8 +1,8 @@
 use draw_core::{Color, Edges, Size};
 
 use crate::layout::{
-    self, layout_text, measure_with, ContentSize, FlexStyle, GridStyle, TextMeasurer, TextOptions,
-    WordBreak,
+    self, layout_text, measure_weighted_with, ContentSize, FlexStyle, GridStyle, TextMeasurer,
+    TextOptions, WordBreak,
 };
 
 /// Runtime state of a button.
@@ -119,7 +119,7 @@ impl Widget {
                 ..
             } => {
                 let line_h = measurer.line_height(*font_size);
-                let natural = measure_with(measurer, text, *font_size);
+                let natural = measure_weighted_with(measurer, text, *font_size, options.weight);
                 // `word_break` only has meaning while soft wrapping is on; with
                 // `wrap: false` the text never breaks, so the min must be the
                 // full run (the default `Word` granularity), not the per-mode
@@ -129,8 +129,13 @@ impl Widget {
                 } else {
                     WordBreak::Word
                 };
-                let mut min_width =
-                    layout::longest_unit_width_with(measurer, text, *font_size, break_mode);
+                let mut min_width = layout::longest_unit_width_weighted_with(
+                    measurer,
+                    text,
+                    *font_size,
+                    break_mode,
+                    options.weight,
+                );
                 // A wrapping label hard-breaks an overlong word when it paints
                 // (see `layout::text::hard_break`), so its minimum must never
                 // exceed the width the parent offered. Without this cap a giant
@@ -159,7 +164,12 @@ impl Widget {
             }
             Self::Button(button) => {
                 let line_h = measurer.line_height(button.font_size);
-                let natural = measure_with(measurer, &button.text, button.font_size);
+                let natural = measure_weighted_with(
+                    measurer,
+                    &button.text,
+                    button.font_size,
+                    button.options.weight,
+                );
                 // Same rule as the label: `word_break` only applies while
                 // wrapping; a non-wrapping button's min is its full text run.
                 let break_mode = if button.options.wrap {
@@ -167,11 +177,12 @@ impl Widget {
                 } else {
                     WordBreak::Word
                 };
-                let mut text_min = layout::longest_unit_width_with(
+                let mut text_min = layout::longest_unit_width_weighted_with(
                     measurer,
                     &button.text,
                     button.font_size,
                     break_mode,
+                    button.options.weight,
                 );
                 // Same cap as the label: a wrapping button can hard-break an
                 // overlong token, so it must not report a minimum wider than

@@ -6,7 +6,7 @@
 //! resulting textured quads.
 
 use super::*;
-use draw_core::Size;
+use draw_core::{FontWeight, Size};
 use draw_render::{CornerRadii, DrawCommand, TextAlign};
 
 impl WgpuBackend {
@@ -95,11 +95,12 @@ impl WgpuBackend {
                 text,
                 position,
                 font_size,
+                weight,
                 align,
                 paint,
             } => {
                 let color = self.solid_color(paint);
-                self.draw_text(text, *position, *font_size, *align, color);
+                self.draw_text(text, *position, *font_size, *weight, *align, color);
             }
         }
     }
@@ -393,6 +394,7 @@ impl WgpuBackend {
         text: &str,
         position: Vec2,
         font_size: f32,
+        weight: FontWeight,
         align: TextAlign,
         color: [f32; 4],
     ) {
@@ -401,7 +403,7 @@ impl WgpuBackend {
         }
         // Shaped advances drive both alignment and glyph placement (kerning,
         // ligatures and bidi are resolved by the font under the given size).
-        let glyphs = self.font.shape(text, font_size);
+        let glyphs = self.font.shape(text, font_size, weight);
         let total: f32 = glyphs.iter().map(|slot| slot.advance).sum();
         let mut pen = match align {
             TextAlign::Left => position.x,

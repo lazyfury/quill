@@ -1,7 +1,7 @@
 //! Themed buttons.
 
 use crate::base::{Component, Label, Spec};
-use draw_core::{Color, Edges};
+use draw_core::{Color, Edges, FontWeight};
 use draw_theme::{radius, ControlSize, TextSize, Theme};
 use draw_ui::{Align, Justify, SurfaceStyle, TextOptions, Widget};
 
@@ -27,6 +27,7 @@ pub struct Button {
     variant: ButtonVariant,
     size: ControlSize,
     font_size: f32,
+    weight: FontWeight,
     on_click: Option<Box<dyn FnMut()>>,
 }
 
@@ -39,6 +40,7 @@ impl Button {
             variant: ButtonVariant::Secondary,
             size: theme.default_control(),
             font_size: TextSize::Small.px(),
+            weight: FontWeight::NORMAL,
             on_click: None,
         }
     }
@@ -85,6 +87,17 @@ impl Button {
     pub fn font_size(mut self, font_size: f32) -> Self {
         self.font_size = font_size;
         self
+    }
+
+    /// Sets the label weight (regular or bold).
+    pub fn weight(mut self, weight: FontWeight) -> Self {
+        self.weight = weight;
+        self
+    }
+
+    /// Shorthand for [`weight`](Self::weight)`(`[`FontWeight::BOLD`]`)`.
+    pub fn bold(self) -> Self {
+        self.weight(FontWeight::BOLD)
     }
 
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
@@ -180,6 +193,7 @@ impl Component for Button {
             Label::new(text)
                 .font_size(font_size)
                 .color(color)
+                .weight(self.weight)
                 .text_options(TextOptions::no_wrap()),
         );
         self.spec.on_click = self.on_click.take();

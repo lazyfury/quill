@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use draw_backend_canvas::font_spec;
+use draw_core::FontWeight;
 use draw_ui::TextMeasurer;
 use web_sys::CanvasRenderingContext2d;
 
@@ -23,8 +24,8 @@ use web_sys::CanvasRenderingContext2d;
 /// [`draw_ui::set_text_measurer`](draw_ui::set_text_measurer).
 pub struct CanvasTextMeasurer {
     ctx: CanvasRenderingContext2d,
-    advances: RefCell<HashMap<(u32, u32), f32>>,
-    runs: RefCell<HashMap<(u32, String), f32>>,
+    advances: RefCell<HashMap<(u32, u32, u32), f32>>,
+    runs: RefCell<HashMap<(u32, u32, String), f32>>,
     metrics: RefCell<HashMap<u32, FontMetrics>>,
 }
 
@@ -56,7 +57,7 @@ impl CanvasTextMeasurer {
     }
 
     fn measure_metrics(&self, font_size: f32) -> FontMetrics {
-        self.ctx.set_font(&font_spec(font_size));
+        self.ctx.set_font(&font_spec(font_size, FontWeight::NORMAL));
 
         // "Mg" exercises an ascender and a descender, so its actual bounding box
         // is a reasonable fallback when font bounding boxes are unavailable.
@@ -83,13 +84,13 @@ impl CanvasTextMeasurer {
         }
     }
 
-    fn advance_for(&self, ch: char, font_size: f32) -> f32 {
-        let key = (font_size.to_bits(), ch as u32);
+    fn advance_for(&self, ch: char, font_size: f32, weight: FontWeight) -> f32 {
+        let key = (font_size.to_bits(), ch as u32, weight.value() as u32);
         if let Some(advance) = self.advances.borrow().get(&key) {
             return *advance;
         }
 
-        self.ctx.set_font(&font_spec(font_size));
+        self.ctx.set_font(&font_spec(font_size, weight));
         let advance = self
             .ctx
             .measure_text(&ch.to_string())
@@ -101,13 +102,13 @@ impl CanvasTextMeasurer {
         advance
     }
 
-    fn measure_run(&self, text: &str, font_size: f32) -> f32 {
-        let key = (font_size.to_bits(), text.to_string());
+    fn measure_run_weighted(&self, text: &str, font_size: f32, weight: FontWeight) -> f32 {
+        let key = (font_size.to_bits(), weight.value() as u32, text.to_string());
         if let Some(width) = self.runs.borrow().get(&key) {
             return *width;
         }
 
-        self.ctx.set_font(&font_spec(font_size));
+        self.ctx.set_font(&font_spec(font_size, weight));
         // `measureText` on the whole run applies browser shaping (kerning,
         // ligatures, bidi), unlike summing per-character advances.
         let width = self
@@ -116,7 +117,11 @@ impl CanvasTextMeasurer {
             .ok()
             .map(|measured| measured.width() as f32)
             .filter(|width| width.is_finite() && *width >= 0.0)
-            .unwrap_or_else(|| text.chars().map(|ch| self.advance_for(ch, font_size)).sum());
+            .unwrap_or_else(|| {
+                text.chars()
+                    .map(|ch| self.advance_for(ch, font_size, weight))
+                    .sum()
+            });
         self.runs.borrow_mut().insert(key, width);
         width
     }
@@ -124,7 +129,11 @@ impl CanvasTextMeasurer {
 
 impl TextMeasurer for CanvasTextMeasurer {
     fn advance(&self, ch: char, font_size: f32) -> f32 {
-        self.advance_for(ch, font_size)
+        self.advance_for(ch, font_size, FontWeight::NORMAL)
+    }
+
+    fn advance_weighted(&self, ch: char, font_size: f32, weight: FontWeight) -> f32 {
+        self.advance_for(ch, font_size, weight)
     }
 
     fn line_height(&self, font_size: f32) -> f32 {
@@ -136,7 +145,11 @@ impl TextMeasurer for CanvasTextMeasurer {
     }
 
     fn measure_run(&self, text: &str, font_size: f32) -> f32 {
-        CanvasTextMeasurer::measure_run(self, text, font_size)
+        CanvasTextMeasurer::measure_run_weighted(self, text, font_size, FontWeight::NORMAL)
+    }
+
+    fn measure_run_weighted(&self, text: &str, font_size: f32, weight: FontWeight) -> f32 {
+        CanvasTextMeasurer::measure_run_weighted(self, text, font_size, weight)
     }
 }
 

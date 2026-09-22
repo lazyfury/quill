@@ -9,7 +9,7 @@
 
 use std::sync::LazyLock;
 
-use draw_core::Color;
+use draw_core::{Color, FontWeight};
 
 use crate::density::{ControlSize, Density};
 use crate::palette::Palette;
@@ -135,6 +135,15 @@ pub trait Theme {
     /// Font size for a text role.
     fn font_size(&self, size: TextSize) -> f32 {
         size.px()
+    }
+
+    /// Default weight for a text role.
+    ///
+    /// Defaults to [`FontWeight::NORMAL`]; a theme can make headings bold
+    /// without touching any component. An explicit `weight` on a component
+    /// overrides this token.
+    fn font_weight(&self, _size: TextSize) -> FontWeight {
+        FontWeight::NORMAL
     }
 
     /// Spacing step in pixels, scaled by the theme's [`Density`].
@@ -348,6 +357,35 @@ mod tests {
         assert_eq!(
             default_theme(Mode::Light).default_control(),
             ControlSize::Regular
+        );
+    }
+
+    #[test]
+    fn a_theme_can_override_the_font_weight_token() {
+        struct BoldHeadings(DefaultTheme);
+        impl Theme for BoldHeadings {
+            fn palette(&self) -> &Palette {
+                self.0.palette()
+            }
+            fn mode(&self) -> Mode {
+                self.0.mode()
+            }
+            fn font_weight(&self, size: TextSize) -> FontWeight {
+                if matches!(size, TextSize::Heading) {
+                    FontWeight::BOLD
+                } else {
+                    FontWeight::NORMAL
+                }
+            }
+        }
+
+        let theme = BoldHeadings(DefaultTheme::dark());
+        assert_eq!(theme.font_weight(TextSize::Heading), FontWeight::BOLD);
+        assert_eq!(theme.font_weight(TextSize::Body), FontWeight::NORMAL);
+        // The default keeps every role regular.
+        assert_eq!(
+            default_theme(Mode::Dark).font_weight(TextSize::Heading),
+            FontWeight::NORMAL
         );
     }
 }

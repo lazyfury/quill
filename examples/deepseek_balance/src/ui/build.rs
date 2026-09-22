@@ -34,14 +34,19 @@ pub(super) fn tab_button(theme: &'static dyn Theme, tab: Tab, feed: &Feed) -> Fl
                 SurfaceStyle::new(Color::TRANSPARENT)
             }
         })
-        .child(Text::small(tab.label(), theme))
+        .child(Text::small(tab.label(), theme).bold())
 }
 
 /// The DeepSeek page: endpoint header, status, error, currency cards, footer.
 ///
 /// Zero padding: the tabbed container already insets everything, and `Flex`'s
 /// own default (16px) would double it.
-pub(super) fn deepseek_page(theme: &'static dyn Theme, endpoint: &str, refs: &Refs, feed: &Feed) -> Flex {
+pub(super) fn deepseek_page(
+    theme: &'static dyn Theme,
+    endpoint: &str,
+    refs: &Refs,
+    feed: &Feed,
+) -> Flex {
     Flex::column()
         .mouse_filter(MouseFilter::Ignore)
         .gap(space::LG)
@@ -128,7 +133,11 @@ pub(super) fn go_window_row(theme: &'static dyn Theme, kind: WindowKind, value: 
 /// A press is an intent, not a command: whether it goes out is decided in
 /// `update`, which owns the clock and therefore the throttle. Both pages build
 /// one and share [`Feed`], so their labels and dimming agree.
-pub(super) fn refresh_button(theme: &'static dyn Theme, slot: &NodeRef, feed: &Feed) -> Ref<Button> {
+pub(super) fn refresh_button(
+    theme: &'static dyn Theme,
+    slot: &NodeRef,
+    feed: &Feed,
+) -> Ref<Button> {
     let requested = feed.requested.clone();
     Button::primary(REFRESH_LABEL, theme)
         .on_click(move || requested.set(true))

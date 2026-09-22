@@ -176,6 +176,20 @@ tree.add_child(
 );
 ```
 
+Weight is a per-label token too (`draw_core::FontWeight`):
+
+```rust
+use draw_components::FontWeight;
+
+tree.add_child(panel, Text::heading("Settings", theme).bold());
+tree.add_child(panel, Text::new("Value", theme).weight(FontWeight::BOLD));
+```
+
+`TextOptions::weight` carries it (so the paint-side text cache keys on it), the
+theme's `font_weight(TextSize)` supplies the default (regular unless a theme
+overrides it), and `TextMeasurer` measures it through `measure_run_weighted`, so
+wrapping matches the painted face. `Button` also takes `.weight(..)` / `.bold()`.
+
 Measurement is pluggable via `TextMeasurer`, so layout stays deterministic and
 backend-neutral while the host supplies real metrics:
 

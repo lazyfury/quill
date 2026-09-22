@@ -568,6 +568,12 @@ impl Label {
         self.options = options;
         self
     }
+
+    /// Sets the text weight (regular or bold).
+    pub fn weight(mut self, weight: draw_core::FontWeight) -> Self {
+        self.options = self.options.weight(weight);
+        self
+    }
 }
 
 impl Component for Label {

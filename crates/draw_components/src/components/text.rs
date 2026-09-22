@@ -1,7 +1,7 @@
 //! Text components.
 
 use crate::base::{Component, Spec};
-use draw_core::Color;
+use draw_core::{Color, FontWeight};
 use draw_theme::{TextSize, Theme, Tone};
 use draw_ui::{TextOptions, Widget, WordBreak};
 
@@ -13,6 +13,7 @@ use draw_ui::{TextOptions, Widget, WordBreak};
 /// ```ignore
 /// tree.add_child(root, Text::heading("Settings", theme));
 /// tree.add_child(root, Text::body("Saved automatically.", theme).tone(Tone::Muted));
+/// tree.add_child(root, Text::body("Important", theme).bold());
 /// ```
 pub struct Text {
     spec: Spec,
@@ -21,6 +22,8 @@ pub struct Text {
     tone: Tone,
     color: Option<Color>,
     options: TextOptions,
+    /// Explicit weight; `None` falls back to the theme's per-size token.
+    weight: Option<FontWeight>,
     theme: &'static dyn Theme,
 }
 
@@ -34,6 +37,7 @@ impl Text {
             tone: Tone::Default,
             color: None,
             options: TextOptions::default(),
+            weight: None,
             theme,
         }
     }
@@ -111,6 +115,17 @@ impl Text {
         self
     }
 
+    /// Sets the text weight, overriding the theme's per-size token.
+    pub fn weight(mut self, weight: FontWeight) -> Self {
+        self.weight = Some(weight);
+        self
+    }
+
+    /// Shorthand for [`weight`](Self::weight)`(`[`FontWeight::BOLD`]`)`.
+    pub fn bold(self) -> Self {
+        self.weight(FontWeight::BOLD)
+    }
+
     pub fn size_px(&self) -> f32 {
         self.size.px()
     }
@@ -126,13 +141,64 @@ impl Component for Text {
     }
 
     fn widget(&self) -> Widget {
+        let weight = self
+            .weight
+            .unwrap_or_else(|| self.theme.font_weight(self.size));
         Widget::Label {
             text: self.text.clone(),
             font_size: self.size.px(),
             color: self.color.unwrap_or_else(|| self.tone.color(self.theme)),
-            options: self.options,
+            options: self.options.weight(weight),
         }
     }
 }
 
 crate::impl_scene_child!(Text);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use draw_theme::{default_theme, DefaultTheme, Mode, Palette, Theme};
+
+    fn weight_of(mut text: Text) -> FontWeight {
+        match text.widget() {
+            Widget::Label { options, .. } => options.weight,
+            _ => panic!("Text must build a Label"),
+        }
+    }
+
+    #[test]
+    fn default_weight_follows_the_theme() {
+        let theme = default_theme(Mode::Dark);
+        assert_eq!(weight_of(Text::new("x", theme)), FontWeight::NORMAL);
+    }
+
+    #[test]
+    fn bold_overrides_the_theme_token() {
+        let theme = default_theme(Mode::Dark);
+        assert_eq!(weight_of(Text::new("x", theme).bold()), FontWeight::BOLD);
+    }
+
+    #[test]
+    fn a_theme_can_make_headings_bold() {
+        struct BoldHeadings(DefaultTheme);
+        impl Theme for BoldHeadings {
+            fn palette(&self) -> &Palette {
+                self.0.palette()
+            }
+            fn mode(&self) -> Mode {
+                self.0.mode()
+            }
+            fn font_weight(&self, size: TextSize) -> FontWeight {
+                if matches!(size, TextSize::Heading) {
+                    FontWeight::BOLD
+                } else {
+                    FontWeight::NORMAL
+                }
+            }
+        }
+        let theme: &'static dyn Theme = Box::leak(Box::new(BoldHeadings(DefaultTheme::dark())));
+        assert_eq!(weight_of(Text::heading("x", theme)), FontWeight::BOLD);
+        assert_eq!(weight_of(Text::new("x", theme)), FontWeight::NORMAL);
+    }
+}

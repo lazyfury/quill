@@ -66,6 +66,7 @@ pub use node_ref::{NodeRef, Ref};
 pub use overlay::{OverlayId, Overlays, Placement};
 pub use router::Router;
 
+pub use draw_core::FontWeight;
 pub use draw_render::CornerRadii;
 pub use draw_theme::{self as theme, SurfaceTone, Theme, Tone};
 

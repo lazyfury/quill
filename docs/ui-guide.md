@@ -70,8 +70,8 @@ Choices that trip people up:
   `anchors(Edges)` + `offsets(Edges)`.
 - Containers that should not eat clicks: `.mouse_filter(MouseFilter::Ignore)`.
 - Text: `Text::{new, display, title, heading, subheading, small, caption}` then
-  `.tone(Tone::Muted)` (or `.color(..)`), `.wrap(bool)`, `.max_lines(n)`,
-  `.ellipsis(bool)`, `.size(TextSize)`.
+  `.tone(Tone::Muted)` (or `.color(..)`), `.weight(FontWeight::BOLD)` / `.bold()`,
+  `.wrap(bool)`, `.max_lines(n)`, `.ellipsis(bool)`, `.size(TextSize)`.
 
 Layout details (flex/grid/text wrapping): `docs/components.md` §Layout.
 

@@ -56,7 +56,9 @@ use draw_core::{
 };
 use draw_render::PaintContext;
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{default_theme, radius, space, Mode, SurfaceLevel, Theme, Tone};
+#[cfg(test)]
+use draw_theme::{default_theme, Mode};
+use draw_theme::{radius, space, SurfaceLevel, Theme, Tone};
 use draw_ui::{fill_rounded_rect, Align, Justify, MouseFilter, SurfaceStyle, TextMeasurer};
 
 use crate::api::Balance;
@@ -751,7 +753,7 @@ impl BalanceApp {
     /// The theme the view was built with. The host reads it to match its own
     /// clear colour to the panel backdrop.
     pub fn theme(&self) -> &'static dyn Theme {
-        &self.theme
+        self.theme
     }
 
     // -- refresh -----------------------------------------------------------

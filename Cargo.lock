@@ -394,17 +394,14 @@ dependencies = [
 name = "draw_backend_wgpu"
 version = "0.1.0"
 dependencies = [
- "ab_glyph",
  "bytemuck",
  "draw_bench",
  "draw_core",
+ "draw_font",
  "draw_render",
  "draw_scene",
  "font8x8",
  "pollster",
- "rustybuzz",
- "unicode-bidi",
- "unicode-script",
  "wgpu",
 ]
 
@@ -450,6 +447,19 @@ dependencies = [
  "draw_render",
  "draw_scene",
  "draw_ui",
+]
+
+[[package]]
+name = "draw_font"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "draw_core",
+ "font8x8",
+ "rustybuzz",
+ "ttf-parser",
+ "unicode-bidi",
+ "unicode-script",
 ]
 
 [[package]]

@@ -58,6 +58,7 @@ deepseek_balance — 查询 DeepSeek 账户余额
       --dump-commands  同 --selfcheck，只打印每条绘制命令
       --light          使用浅色主题（默认深色）
       --pixel-font     使用内置点阵字体（默认系统字体；点阵字体不含中文）
+      --font <family>  系统字体家族名（默认 PingFang SC，找不到时回退平台默认）
       --every <秒>     自动刷新间隔，0 表示不自动刷新（菜单栏默认 300 秒）
       --min-gap <秒>   两次刷新之间的最短间隔，0 表示不节流（默认 10 秒）
       --frames <n>     渲染 n 帧后退出（用于自检真实渲染管线）
@@ -121,6 +122,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
     let mut options = Options {
         light: false,
         pixel_font: false,
+        font: None,
         frames: None,
         until_result: false,
         window: false,
@@ -160,6 +162,13 @@ fn parse(args: &[String]) -> Result<Command, String> {
             "--badge" => options.badge = true,
             "--light" => options.light = true,
             "--pixel-font" => options.pixel_font = true,
+            "--font" => {
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--font 需要一个字体家族名".to_string())?;
+                index += 1;
+                options.font = Some(value.clone());
+            }
             "--until-result" => options.until_result = true,
             "--every" => {
                 let value = args
@@ -242,6 +251,7 @@ mod tests {
             Ok(Command::Run(options)) => {
                 assert!(!options.light);
                 assert!(!options.pixel_font);
+                assert_eq!(options.font, None, "defaults to the platform font");
                 assert_eq!(options.frames, None);
                 assert!(!options.until_result);
                 assert!(!options.window, "the menu bar is the default on macOS");
@@ -283,6 +293,8 @@ mod tests {
         match parse(&args(&[
             "--light",
             "--pixel-font",
+            "--font",
+            "PingFang SC",
             "--frames",
             "3",
             "--until-result",
@@ -295,6 +307,7 @@ mod tests {
             Ok(Command::Run(options)) => {
                 assert!(options.light);
                 assert!(options.pixel_font);
+                assert_eq!(options.font.as_deref(), Some("PingFang SC"));
                 assert_eq!(options.frames, Some(3));
                 assert!(options.until_result);
                 assert!(options.window);
@@ -320,6 +333,7 @@ mod tests {
         assert!(parse(&args(&["--every", "-1"])).is_err());
         assert!(parse(&args(&["--min-gap"])).is_err());
         assert!(parse(&args(&["--min-gap", "-1"])).is_err());
+        assert!(parse(&args(&["--font"])).is_err());
     }
 
     /// A zero second value is accepted and means "off", not "unset":

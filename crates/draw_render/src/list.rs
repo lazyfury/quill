@@ -1,4 +1,4 @@
-use draw_core::{Rect, Transform2D, Vec2};
+use draw_core::{FontWeight, Rect, Transform2D, Vec2};
 
 use crate::command::{CornerRadii, DrawCommand, Paint, TextAlign};
 use crate::texture::TextureId;
@@ -313,10 +313,24 @@ impl PaintContext {
         align: TextAlign,
         paint: impl Into<Paint>,
     ) {
+        self.draw_text_weighted(text, position, font_size, FontWeight::NORMAL, align, paint);
+    }
+
+    /// [`draw_text`](Self::draw_text) with an explicit [`FontWeight`].
+    pub fn draw_text_weighted(
+        &mut self,
+        text: impl Into<String>,
+        position: Vec2,
+        font_size: f32,
+        weight: FontWeight,
+        align: TextAlign,
+        paint: impl Into<Paint>,
+    ) {
         self.commands.push(DrawCommand::DrawText {
             text: text.into(),
             position,
             font_size,
+            weight,
             align,
             paint: paint.into(),
         });

@@ -44,9 +44,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use draw_backend_wgpu::{wgpu, FontConfig, FontMetrics, FontMode, WgpuBackend};
-use draw_core::{InputEvent, Key, PointerButton, Rect, Size, Vec2, ViewportSize};
+use draw_core::{FontWeight, InputEvent, Key, PointerButton, Rect, Size, Vec2, ViewportSize};
 use draw_render::{PaintContext, RenderBackend};
-use draw_theme::{default_theme, Mode, Theme};
+use draw_theme::{default_theme, Mode as ThemeMode};
 use draw_ui::TextMeasurer;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -68,6 +68,10 @@ use crate::menubar;
 
 /// Window title (also the tooltip's fallback).
 const TITLE: &str = "DeepSeek 余额";
+/// Default UI font family. `PingFang SC` is the macOS Chinese system font; the
+/// font server falls back to its per-OS default when a platform does not have
+/// it, so this is safe everywhere. `--font` overrides it.
+const DEFAULT_FONT: &str = "PingFang SC";
 /// Logical size of the plain window (`--window`).
 const WINDOW_WIDTH: f32 = 560.0;
 const WINDOW_HEIGHT: f32 = 500.0;
@@ -151,6 +155,9 @@ pub struct Options {
     pub light: bool,
     /// Use the built-in bitmap font instead of the system font (no CJK).
     pub pixel_font: bool,
+    /// Font family name for the system font. `None` uses [`DEFAULT_FONT`]
+    /// (`PingFang SC`, falling back per OS).
+    pub font: Option<String>,
     /// Exit after this many frames (a smoke test for the real pipeline).
     pub frames: Option<u32>,
     /// Exit as soon as the first balance reply has been applied, printing what
@@ -380,6 +387,10 @@ impl TextMeasurer for BackendTextMeasurer {
         self.metrics.advance(ch, font_size)
     }
 
+    fn advance_weighted(&self, ch: char, font_size: f32, weight: FontWeight) -> f32 {
+        self.metrics.advance_weighted(ch, font_size, weight)
+    }
+
     fn line_height(&self, font_size: f32) -> f32 {
         self.metrics.line_height(font_size)
     }
@@ -390,6 +401,10 @@ impl TextMeasurer for BackendTextMeasurer {
 
     fn measure_run(&self, text: &str, font_size: f32) -> f32 {
         self.metrics.measure_run(text, font_size)
+    }
+
+    fn measure_run_weighted(&self, text: &str, font_size: f32, weight: FontWeight) -> f32 {
+        self.metrics.measure_run_weighted(text, font_size, weight)
     }
 }
 
@@ -419,7 +434,9 @@ struct App {
     scale_factor: f64,
     cursor: Vec2,
     view: BalanceApp,
-    font_mode: FontMode,
+    /// The font stack every surface uses: mode, HiDPI rasterization and the
+    /// default family (`--font` or [`DEFAULT_FONT`]).
+    font_config: FontConfig,
     last_frame: Instant,
     /// Wakes the event loop when a worker thread has a result.
     proxy: EventLoopProxy<UserEvent>,
@@ -462,9 +479,9 @@ struct Badge {
 impl App {
     fn new(options: Options, proxy: EventLoopProxy<UserEvent>) -> Self {
         let theme = if options.light {
-            default_theme(Mode::Light)
+            default_theme(ThemeMode::Light)
         } else {
-            default_theme(Mode::Dark)
+            default_theme(ThemeMode::Dark)
         };
         let mode = Mode::default_for(options.window);
 
@@ -499,10 +516,19 @@ impl App {
             scale_factor: 1.0,
             cursor: Vec2::ZERO,
             view,
-            font_mode: if options.pixel_font {
-                FontMode::Pixel
-            } else {
-                FontMode::System
+            font_config: FontConfig {
+                mode: if options.pixel_font {
+                    FontMode::Pixel
+                } else {
+                    FontMode::System
+                },
+                device_pixel_rasterization: true,
+                default_family: Some(
+                    options
+                        .font
+                        .clone()
+                        .unwrap_or_else(|| DEFAULT_FONT.to_string()),
+                ),
             },
             last_frame: Instant::now(),
             proxy,
@@ -639,16 +665,22 @@ impl App {
         backend.set_scale_factor(self.scale_factor as f32);
         backend.set_clear_color(clear_color(
             mode == Mode::MenuBar,
-            self.view.theme().palette.background,
+            self.view.theme().palette().background,
         ));
 
         // Measure text with the backend's real font (system font, so CJK works).
-        let font_config = FontConfig {
-            mode: self.font_mode,
-            device_pixel_rasterization: true,
-        };
+        let font_config = self.font_config.clone();
         if let Err(error) = backend.set_font_config(font_config) {
             eprintln!("font setup failed, using fallback: {error}");
+        }
+        if self.self_check {
+            // Screenshot-free evidence of which family was resolved (`PingFang SC`
+            // unless `--font` / the platform default says otherwise).
+            let metrics = backend.text_metrics();
+            self.trace(&format!(
+                "字体：{}",
+                metrics.name().unwrap_or("（内置点阵）")
+            ));
         }
         self.view.set_text_measurer(Rc::new(BackendTextMeasurer {
             metrics: backend.text_metrics(),
@@ -768,12 +800,9 @@ impl App {
         backend.set_scale_factor(window.scale_factor() as f32);
         // The view owns its theme now (a value, like the main view), so the text
         // colours and the (invisible) clear colour come from the same tokens.
-        let mut view = BadgeApp::new(*self.view.theme());
-        backend.set_clear_color(clear_color(true, view.theme().palette.background));
-        let font_config = FontConfig {
-            mode: self.font_mode,
-            device_pixel_rasterization: true,
-        };
+        let mut view = BadgeApp::new(self.view.theme());
+        backend.set_clear_color(clear_color(true, view.theme().palette().background));
+        let font_config = self.font_config.clone();
         if let Err(error) = backend.set_font_config(font_config) {
             eprintln!("badge font setup failed, using fallback: {error}");
         }

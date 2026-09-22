@@ -80,10 +80,11 @@ impl Ui {
                     let step = measurer.line_height(*font_size);
                     let mut baseline = rect.top() + measurer.ascent(*font_size);
                     for line in lines.iter() {
-                        ctx.draw_text(
+                        ctx.draw_text_weighted(
                             line.clone(),
                             Vec2::new(rect.left(), baseline),
                             *font_size,
+                            options.weight,
                             TextAlign::Left,
                             *color,
                         );
@@ -109,10 +110,11 @@ impl Ui {
                     let mut baseline =
                         rect.center().y - block / 2.0 + measurer.ascent(button.font_size);
                     for line in lines.iter() {
-                        ctx.draw_text(
+                        ctx.draw_text_weighted(
                             line.clone(),
                             Vec2::new(rect.center().x, baseline),
                             button.font_size,
+                            button.options.weight,
                             TextAlign::Center,
                             button.text_color,
                         );
@@ -174,7 +176,7 @@ mod tests {
     use crate::control::Control;
     use crate::layout::TextOptions;
     use crate::widget::Widget;
-    use draw_core::{Color, Edges, Size, ViewportSize};
+    use draw_core::{Color, Edges, FontWeight, Size, ViewportSize};
     use draw_render::DrawCommand;
     use draw_scene::SceneTree;
 
@@ -372,5 +374,28 @@ mod tests {
             command,
             DrawCommand::DrawText { text, .. } if text == "overhang"
         )));
+    }
+
+    /// The weight on a label's `TextOptions` reaches the backend: a bold label
+    /// paints `DrawText { weight: Bold }`.
+    #[test]
+    fn a_bold_label_paints_a_bold_text_command() {
+        let mut tree = SceneTree::new();
+        let root = tree.root();
+        let container = add(&mut tree, root, ControlData::fill_parent(), panel());
+        let mut widget = label("bold");
+        if let Widget::Label { options, .. } = &mut widget {
+            *options = options.weight(FontWeight::BOLD);
+        }
+        add(&mut tree, container, rect(0.0, 0.0, 100.0, 20.0), widget);
+
+        crate::layout(&mut tree, ViewportSize::new(Size::new(200.0, 200.0)));
+        let list = paint(&tree);
+
+        let weight = list.commands().iter().find_map(|command| match command {
+            DrawCommand::DrawText { text, weight, .. } if text == "bold" => Some(*weight),
+            _ => None,
+        });
+        assert_eq!(weight, Some(FontWeight::BOLD));
     }
 }

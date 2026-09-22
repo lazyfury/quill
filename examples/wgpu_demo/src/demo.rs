@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use draw_backend_wgpu::FontMetrics;
-use draw_core::{EventResult, InputEvent, ViewportSize};
+use draw_core::{EventResult, FontWeight, InputEvent, ViewportSize};
 use draw_render::PaintContext;
 use draw_ui::TextMeasurer;
 
@@ -25,6 +25,10 @@ impl TextMeasurer for BackendTextMeasurer {
         self.metrics.advance(ch, font_size)
     }
 
+    fn advance_weighted(&self, ch: char, font_size: f32, weight: FontWeight) -> f32 {
+        self.metrics.advance_weighted(ch, font_size, weight)
+    }
+
     fn line_height(&self, font_size: f32) -> f32 {
         self.metrics.line_height(font_size)
     }
@@ -35,6 +39,10 @@ impl TextMeasurer for BackendTextMeasurer {
 
     fn measure_run(&self, text: &str, font_size: f32) -> f32 {
         self.metrics.measure_run(text, font_size)
+    }
+
+    fn measure_run_weighted(&self, text: &str, font_size: f32, weight: FontWeight) -> f32 {
+        self.metrics.measure_run_weighted(text, font_size, weight)
     }
 }
 

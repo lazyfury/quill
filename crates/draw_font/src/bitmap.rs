@@ -1,9 +1,9 @@
 //! Built-in fixed ASCII bitmap-font fallback.
 //!
-//! Used when no system/`QUILL_FONT` font can be loaded. `wgpu` has no text
-//! stack, so ASCII is rasterized from the public-domain `font8x8` glyphs into
-//! an `Rgba8Unorm` atlas. Each glyph cell is `8x8`; set pixels are white with
-//! alpha 1, unset pixels fully transparent, so `texel * color` tints text.
+//! Used when no system/`QUILL_FONT` font can be loaded. ASCII is rasterized
+//! from the public-domain `font8x8` glyphs into an `Rgba8Unorm` atlas. Each
+//! glyph cell is `8x8`; set pixels are white with alpha 1, unset pixels fully
+//! transparent, so `texel * color` tints text.
 //!
 //! Characters outside printable ASCII (including CJK) sample a box-shaped
 //! "missing glyph" cell and still advance by one `font_size`.
@@ -11,30 +11,30 @@
 use font8x8::UnicodeFonts;
 
 /// Glyph cell size in texels.
-pub const GLYPH_SIZE: u32 = 8;
+pub(crate) const GLYPH_SIZE: u32 = 8;
 /// Atlas grid columns.
-pub const ATLAS_COLUMNS: u32 = 16;
+const ATLAS_COLUMNS: u32 = 16;
 /// Atlas grid rows (16 * 6 = 96 cells >= 95 printable ASCII glyphs).
-pub const ATLAS_ROWS: u32 = 6;
+const ATLAS_ROWS: u32 = 6;
 /// Atlas width in texels.
-pub const ATLAS_WIDTH: u32 = ATLAS_COLUMNS * GLYPH_SIZE;
+pub(crate) const ATLAS_WIDTH: u32 = ATLAS_COLUMNS * GLYPH_SIZE;
 /// Atlas height in texels.
-pub const ATLAS_HEIGHT: u32 = ATLAS_ROWS * GLYPH_SIZE;
+pub(crate) const ATLAS_HEIGHT: u32 = ATLAS_ROWS * GLYPH_SIZE;
 
 /// First character covered by the atlas (`' '`).
-pub const FIRST_CHAR: u32 = 0x20;
+const FIRST_CHAR: u32 = 0x20;
 /// Last character covered by the atlas (`'~'`).
-pub const LAST_CHAR: u32 = 0x7e;
+const LAST_CHAR: u32 = 0x7e;
 
 /// Atlas cell index of the "missing glyph" box (the spare cell after ASCII).
-pub const MISSING_GLYPH_INDEX: u32 = LAST_CHAR - FIRST_CHAR + 1;
+const MISSING_GLYPH_INDEX: u32 = LAST_CHAR - FIRST_CHAR + 1;
 
 // The grid must have a cell for every printable ASCII glyph, plus one spare
 // cell for the missing-glyph box.
 const _: () = assert!(ATLAS_COLUMNS * ATLAS_ROWS > LAST_CHAR - FIRST_CHAR + 1);
 
 /// Rasterizes the printable ASCII range into a tightly packed RGBA8 atlas.
-pub fn build_atlas() -> Vec<u8> {
+pub(crate) fn build_atlas() -> Vec<u8> {
     let mut data = vec![0u8; (ATLAS_WIDTH * ATLAS_HEIGHT * 4) as usize];
     for code in FIRST_CHAR..=LAST_CHAR {
         let ch = char::from_u32(code).unwrap_or('?');
@@ -80,7 +80,7 @@ pub fn build_atlas() -> Vec<u8> {
 /// Texture coordinates (`u0, v0, u1, v1`) for `ch`.
 ///
 /// Characters outside printable ASCII map to the missing-glyph box.
-pub fn glyph_uv(ch: char) -> [f32; 4] {
+pub(crate) fn glyph_uv(ch: char) -> [f32; 4] {
     let (cell_x, cell_y) = cell_origin_for_index(index_for(ch));
     // Corner UVs: the glyph quad spans exactly this cell, so the quad's
     // corners map to the cell's corners (not its texel centres). A half-texel

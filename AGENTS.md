@@ -59,6 +59,11 @@ draw_scene    -> draw_core, draw_render
 draw_ui         -> draw_core, draw_scene, draw_render
 draw_components -> draw_core, draw_scene, draw_render, draw_ui, draw_theme
 draw_render   -> draw_core
+draw_font     -> draw_core
+                 (backend-neutral font service: system-font discovery, family +
+                  weight resolution with per-character fallback, `rustybuzz`
+                  shaping, `ab_glyph` rasterization into a shared atlas. Owns
+                  `ab_glyph` / `rustybuzz` / `ttf-parser` / `font8x8`.)
 draw_svg      -> draw_core, draw_render
                  (backend-neutral SVG vector rendering: parses a small SVG subset
                   into flattened polylines and strokes them with the IR `Line` /
@@ -120,9 +125,9 @@ UI is built from `draw_theme` / `draw_components` / `draw_ui`; blocking work —
 the network call, the directory scan — runs on a worker thread and comes back
 through a winit `EventLoopProxy`). `wgpu` only in
 `draw_backend_wgpu` (plus its tests/bench) and those window hosts. Font parsing
-(`ab_glyph`), text shaping
-(`rustybuzz`, `unicode-bidi`) and system-font discovery live only in
-`draw_backend_wgpu`; the core stays text-free.
+(`ab_glyph`), text shaping (`rustybuzz`, `unicode-bidi`) and system-font
+discovery live only in `draw_font` (which `draw_backend_wgpu` consumes); the
+core stays text-free.
 
 ## Demo workspace modes & how to test
 
@@ -399,6 +404,7 @@ The suite is a contract, not a diary. Before adding or keeping a test:
 | **Build an app UI: frame loop, widgets, hosting, conventions, cheat sheet** | **`docs/ui-guide.md`** (read this before scanning crates) |
 | Pipeline, coordinates, stage plan, backend replaceability | `docs/architecture.md` |
 | Backends (Canvas / wgpu / recording), adding a backend, browser boundary | `docs/backend.md` |
+| Fonts: discovery, family/weight resolution, fallback, shaping | `docs/font.md` (`crates/draw_font`) |
 | SVG / vector icons, loading an icon pack (Lucide) | `docs/svg.md` (`crates/draw_svg`) |
 | Controls, layout, components (API reference by name) | `docs/components.md` |
 | Design tokens, theme, component library | `docs/design-system.md` |

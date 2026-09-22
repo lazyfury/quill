@@ -55,7 +55,9 @@ use draw_components::{
 use draw_core::{Edges, EventResult, InputEvent, Key, NodeId, Vec2, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{default_theme, space, Mode, SurfaceLevel, Theme, Tone};
+#[cfg(test)]
+use draw_theme::{default_theme, Mode};
+use draw_theme::{space, SurfaceLevel, Theme, Tone};
 use draw_ui::{MouseFilter, SizeBasis, SurfaceStyle, TextMeasurer};
 
 use crate::preview::{Preview, PreviewMode};

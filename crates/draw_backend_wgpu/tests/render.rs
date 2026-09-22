@@ -10,7 +10,7 @@
 use draw_backend_wgpu::{
     wgpu, FontConfig, FontMode, PixelBuffer, TextureFilter, WgpuBackend, PIXEL_GLYPH_RATIO,
 };
-use draw_core::{Color, Rect, Size, Vec2, ViewportSize};
+use draw_core::{Color, FontWeight, Rect, Size, Vec2, ViewportSize};
 use draw_render::{CornerRadii, Paint, PaintContext, RenderBackend, TextAlign, TextureId};
 
 /// Attempts to create a backend; `None` means "skip, no GPU adapter".
@@ -468,6 +468,55 @@ fn draw_text_rasterizes_visible_glyphs() {
     );
 }
 
+/// Bold reaches the GPU: the same glyph at 700 has more ink than at 400 (when
+/// the default family ships a bolder face).
+#[test]
+fn bold_text_has_more_ink_than_regular() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    let metrics = backend.text_metrics();
+    if !metrics.is_system() {
+        return; // the pixel font has one weight
+    }
+    let default = metrics.name().unwrap_or_default().to_string();
+    let has_bolder = metrics
+        .families()
+        .iter()
+        .find(|family| family.name == default)
+        .is_some_and(|family| family.weights.iter().any(|weight| *weight >= 600));
+    if !has_bolder {
+        return; // no bolder face to compare against
+    }
+
+    backend.set_clear_color(Color::BLACK);
+    let ink = |backend: &mut WgpuBackend, weight: FontWeight| -> u64 {
+        let mut ctx = PaintContext::new();
+        ctx.draw_text_weighted(
+            "D",
+            Vec2::new(0.0, 24.0),
+            32.0,
+            weight,
+            TextAlign::Left,
+            Paint::new(Color::WHITE),
+        );
+        let pixels = render(backend, ctx, viewport(32.0, 32.0));
+        let mut sum = 0u64;
+        for y in 0..32 {
+            for x in 0..32 {
+                sum += pixels.pixel(x, y).map(|pixel| pixel[0] as u64).unwrap_or(0);
+            }
+        }
+        sum
+    };
+    let regular = ink(&mut backend, FontWeight::NORMAL);
+    let bold = ink(&mut backend, FontWeight::BOLD);
+    assert!(
+        bold > regular,
+        "bold ink {bold} is not more than regular {regular}"
+    );
+}
+
 #[test]
 fn font_config_switches_to_pixel_mode() {
     let Some(mut backend) = backend() else {
@@ -477,6 +526,7 @@ fn font_config_switches_to_pixel_mode() {
         .set_font_config(FontConfig {
             mode: FontMode::Pixel,
             device_pixel_rasterization: true,
+            ..Default::default()
         })
         .unwrap();
     assert_eq!(backend.font_config().mode, FontMode::Pixel);
@@ -593,6 +643,7 @@ fn pixel_font_maps_glyph_texels_one_to_one() {
         .set_font_config(FontConfig {
             mode: FontMode::Pixel,
             device_pixel_rasterization: true,
+            ..Default::default()
         })
         .unwrap();
     backend.set_clear_color(Color::BLACK);

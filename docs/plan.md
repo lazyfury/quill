@@ -65,8 +65,22 @@ audited by `draw_profile`'s inspector, or it is not "done".
   `control_height` / `row_height`, so a custom theme (e.g. the image editor's)
   changes density without touching components. `Button` takes a `ControlSize`
   (`mini()`/`regular()`), defaulting to the theme's `default_control`.
-- Font weights are not modeled (no weight axis yet) — add `FontWeight` tokens
-  when the backends can render them.
+- **Font weight is modeled (done).** `draw_core::FontWeight` (`Normal`/`Bold`)
+  rides on `DrawCommand::DrawText`, `draw_ui::TextOptions::weight`, and the
+  `Theme::font_weight(TextSize)` token; `Text::weight(..)`/`.bold()` and
+  `Button::weight(..)`/`.bold()` set it. The Canvas backend emits `bold` in the
+  font spec and the wgpu backend loads a separate bold face (`QUILL_FONT_BOLD`
+  or a per-OS candidate list, falling back to the regular face), sharing one
+  glyph atlas. `TextMeasurer` gained weight-aware methods with regular-metrics
+  defaults, so a host with a bold face measures what it renders.
+- **`FontServer` (done).** Font loading/discovery lives in `draw_font`: it
+  enumerates families + weights for an app font picker, resolves a
+  `(family, weight)` request to a concrete face with nearest-weight matching and
+  default fallback, shapes with per-character fallback, and rasterizes into a
+  shared atlas. Replaces the fixed `candidate_paths()` + always-face-0 loading,
+  which could not reach PingFang (a 24-face `.ttc`, no stable path) or pick a
+  weight. `FontWeight` is numeric (100–900). Full design and status:
+  [`docs/font.md`](font.md).
 - **Configurable font metrics (planned).** `line_height` / `ascent` come straight
   from the loaded face (`ab_glyph`: `height + line_gap`, `ascent`). Faces with
   skewed metrics (large descent / line gap — some CJK fonts) make vertically

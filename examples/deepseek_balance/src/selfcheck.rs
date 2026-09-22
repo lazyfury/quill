@@ -23,7 +23,7 @@ use draw_backend_recording::{RecordedFrame, RecordingBackend};
 use draw_core::{Color, Rect, Size, Vec2, ViewportSize};
 use draw_profile::{inspect, FrameCounters, FrameStats, InspectionReport, Severity};
 use draw_render::{CornerRadii, DrawCommand, PaintContext, RenderBackend};
-use draw_theme::{default_theme, Mode, Theme};
+use draw_theme::{default_theme, Mode};
 
 use crate::api::{Balance, BalanceInfo};
 use crate::badge::{self, BadgeApp};
@@ -265,12 +265,14 @@ fn describe_command(command: &DrawCommand) -> String {
             text,
             position,
             font_size,
+            weight,
             align,
             paint,
         } => format!(
-            "DrawText {} font={} {:?} {} \"{}\"",
+            "DrawText {} font={}{} {:?} {} \"{}\"",
             pos_s(*position),
             num(*font_size),
+            if weight.is_bold() { " weight=bold" } else { "" },
             align,
             color_s(paint.color),
             text

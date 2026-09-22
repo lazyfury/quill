@@ -16,7 +16,7 @@
 //! - `max_lines` truncates to the last line; with `ellipsis` the last line gets
 //!   an `…` that fits the available width.
 
-use draw_core::Size;
+use draw_core::{FontWeight, Size};
 
 /// Measures glyph advances and line height.
 ///
@@ -50,6 +50,29 @@ pub trait TextMeasurer {
     /// renders (see the wgpu backend's `FontMetrics::measure_run`).
     fn measure_run(&self, text: &str, font_size: f32) -> f32 {
         text.chars().map(|ch| self.advance(ch, font_size)).sum()
+    }
+
+    /// Advance width of a single character at `font_size` and `weight`.
+    ///
+    /// Defaults to ignoring the weight, so a measurer without bold metrics
+    /// keeps working; a host with a bold face overrides this so layout matches
+    /// what it renders.
+    fn advance_weighted(&self, ch: char, font_size: f32, _weight: FontWeight) -> f32 {
+        self.advance(ch, font_size)
+    }
+
+    /// Width of `text` on a single line at `font_size` and `weight`.
+    fn measure_line_weighted(&self, text: &str, font_size: f32, weight: FontWeight) -> f32 {
+        self.measure_run_weighted(text, font_size, weight)
+    }
+
+    /// Advance width of `text` as one run at `font_size` and `weight`.
+    ///
+    /// Defaults to ignoring the weight (see
+    /// [`advance_weighted`](TextMeasurer::advance_weighted)).
+    fn measure_run_weighted(&self, text: &str, font_size: f32, weight: FontWeight) -> f32 {
+        let _ = weight;
+        self.measure_run(text, font_size)
     }
 }
 
@@ -134,6 +157,8 @@ pub struct TextOptions {
     pub max_lines: Option<usize>,
     /// Append `…` to the last line when `max_lines` clips it.
     pub ellipsis: bool,
+    /// Regular or bold; also selects the metrics used to measure the run.
+    pub weight: FontWeight,
 }
 
 impl Default for TextOptions {
@@ -143,6 +168,7 @@ impl Default for TextOptions {
             word_break: WordBreak::Word,
             max_lines: None,
             ellipsis: false,
+            weight: FontWeight::NORMAL,
         }
     }
 }
@@ -154,6 +180,7 @@ impl TextOptions {
             word_break: WordBreak::Word,
             max_lines: None,
             ellipsis: false,
+            weight: FontWeight::NORMAL,
         }
     }
 
@@ -164,11 +191,18 @@ impl TextOptions {
             word_break: WordBreak::Word,
             max_lines: None,
             ellipsis: false,
+            weight: FontWeight::NORMAL,
         }
     }
 
     pub const fn wrap(mut self, wrap: bool) -> Self {
         self.wrap = wrap;
+        self
+    }
+
+    /// Sets the text weight (regular or bold).
+    pub const fn weight(mut self, weight: FontWeight) -> Self {
+        self.weight = weight;
         self
     }
 
@@ -226,6 +260,16 @@ pub fn measure_line_with(measurer: &dyn TextMeasurer, text: &str, font_size: f32
     measurer.measure_line(text, font_size)
 }
 
+/// Width of `text` on one line using `measurer` at `weight`.
+pub fn measure_line_weighted_with(
+    measurer: &dyn TextMeasurer,
+    text: &str,
+    font_size: f32,
+    weight: FontWeight,
+) -> f32 {
+    measurer.measure_line_weighted(text, font_size, weight)
+}
+
 /// Natural size of `text` with explicit newlines but no soft wrapping.
 pub fn measure(text: &str, font_size: f32) -> Size {
     measure_with(&ApproxTextMeasurer, text, font_size)
@@ -233,11 +277,21 @@ pub fn measure(text: &str, font_size: f32) -> Size {
 
 /// Natural size of `text` with explicit newlines but no soft wrapping.
 pub fn measure_with(measurer: &dyn TextMeasurer, text: &str, font_size: f32) -> Size {
+    measure_weighted_with(measurer, text, font_size, FontWeight::NORMAL)
+}
+
+/// [`measure_with`] at an explicit `weight`.
+pub fn measure_weighted_with(
+    measurer: &dyn TextMeasurer,
+    text: &str,
+    font_size: f32,
+    weight: FontWeight,
+) -> Size {
     let mut width = 0.0f32;
     let mut lines = 0usize;
     for line in text.split('\n') {
         lines += 1;
-        width = width.max(measurer.measure_line(line, font_size));
+        width = width.max(measurer.measure_line_weighted(line, font_size, weight));
     }
     Size::new(width, lines.max(1) as f32 * measurer.line_height(font_size))
 }
@@ -257,10 +311,21 @@ pub fn longest_unit_width_with(
     font_size: f32,
     word_break: WordBreak,
 ) -> f32 {
+    longest_unit_width_weighted_with(measurer, text, font_size, word_break, FontWeight::NORMAL)
+}
+
+/// [`longest_unit_width_with`] at an explicit `weight`.
+pub fn longest_unit_width_weighted_with(
+    measurer: &dyn TextMeasurer,
+    text: &str,
+    font_size: f32,
+    word_break: WordBreak,
+    weight: FontWeight,
+) -> f32 {
     let mut max = 0.0f32;
     for line in text.split('\n') {
         for (token, _) in tokens(line, word_break) {
-            max = max.max(measurer.measure_line(&token, font_size));
+            max = max.max(measurer.measure_line_weighted(&token, font_size, weight));
         }
     }
     max
@@ -296,9 +361,30 @@ pub fn wrap_text_with_break(
     max_width: f32,
     word_break: WordBreak,
 ) -> Vec<String> {
+    wrap_text_weighted(
+        measurer,
+        text,
+        font_size,
+        max_width,
+        word_break,
+        FontWeight::NORMAL,
+    )
+}
+
+/// [`wrap_text_with_break`] at an explicit `weight`.
+pub fn wrap_text_weighted(
+    measurer: &dyn TextMeasurer,
+    text: &str,
+    font_size: f32,
+    max_width: f32,
+    word_break: WordBreak,
+    weight: FontWeight,
+) -> Vec<String> {
     let mut out = Vec::new();
     for hard in text.split('\n') {
-        wrap_hard_line(measurer, hard, font_size, max_width, word_break, &mut out);
+        wrap_hard_line(
+            measurer, hard, font_size, max_width, word_break, weight, &mut out,
+        );
     }
     if out.is_empty() {
         out.push(String::new());
@@ -318,7 +404,14 @@ pub fn layout_text(
     options: TextOptions,
 ) -> Vec<String> {
     let mut lines = if options.wrap {
-        wrap_text_with_break(measurer, text, font_size, max_width, options.word_break)
+        wrap_text_weighted(
+            measurer,
+            text,
+            font_size,
+            max_width,
+            options.word_break,
+            options.weight,
+        )
     } else {
         text.split('\n').map(str::to_string).collect()
     };
@@ -334,7 +427,7 @@ pub fn layout_text(
             lines.truncate(max_lines);
             if options.ellipsis {
                 if let Some(last) = lines.last_mut() {
-                    truncate_with_ellipsis(measurer, last, font_size, max_width);
+                    truncate_with_ellipsis(measurer, last, font_size, max_width, options.weight);
                 }
             }
         }
@@ -347,14 +440,17 @@ fn truncate_with_ellipsis(
     line: &mut String,
     font_size: f32,
     max_width: f32,
+    weight: FontWeight,
 ) {
     const ELLIPSIS: char = '\u{2026}';
     if max_width <= 0.0 {
         line.push(ELLIPSIS);
         return;
     }
-    let ellipsis_w = measurer.advance(ELLIPSIS, font_size);
-    while !line.is_empty() && measurer.measure_line(line, font_size) + ellipsis_w > max_width {
+    let ellipsis_w = measurer.advance_weighted(ELLIPSIS, font_size, weight);
+    while !line.is_empty()
+        && measurer.measure_line_weighted(line, font_size, weight) + ellipsis_w > max_width
+    {
         line.pop();
     }
     line.push(ELLIPSIS);
@@ -371,6 +467,7 @@ fn wrap_hard_line(
     font_size: f32,
     max_width: f32,
     word_break: WordBreak,
+    weight: FontWeight,
     out: &mut Vec<String>,
 ) {
     if max_width <= 0.0 {
@@ -383,12 +480,12 @@ fn wrap_hard_line(
         return;
     }
 
-    let space_w = measurer.advance(' ', font_size);
+    let space_w = measurer.advance_weighted(' ', font_size, weight);
     let mut current = String::new();
     let mut current_w = 0.0f32;
 
     for (unit, space_before) in units {
-        let unit_w = measurer.measure_line(&unit, font_size);
+        let unit_w = measurer.measure_line_weighted(&unit, font_size, weight);
         let sep = if current.is_empty() || !space_before {
             0.0
         } else {
@@ -413,6 +510,7 @@ fn wrap_hard_line(
                 &unit,
                 font_size,
                 max_width,
+                weight,
                 &mut current,
                 &mut current_w,
                 out,
@@ -436,12 +534,13 @@ fn hard_break(
     unit: &str,
     font_size: f32,
     max_width: f32,
+    weight: FontWeight,
     current: &mut String,
     current_w: &mut f32,
     out: &mut Vec<String>,
 ) {
     for ch in unit.chars() {
-        let ch_w = measurer.advance(ch, font_size);
+        let ch_w = measurer.advance_weighted(ch, font_size, weight);
         if !current.is_empty() && *current_w + ch_w > max_width + EPSILON {
             out.push(std::mem::take(current));
             *current_w = 0.0;
@@ -714,5 +813,43 @@ mod tests {
         // "ab" measures 10 unshaped (would hard-break) but 5 shaped, so it fits.
         let lines = wrap_text_with(&Shaper, "ab cd", 10.0, 8.0);
         assert_eq!(lines, vec!["ab".to_string(), "cd".to_string()]);
+    }
+
+    /// A weight-aware measurer is asked for the run at the option's weight, so
+    /// bold metrics reach layout instead of the regular ones.
+    #[test]
+    fn text_is_measured_at_the_options_weight() {
+        /// Bold advances twice as wide as regular.
+        struct BoldWide;
+
+        impl TextMeasurer for BoldWide {
+            fn advance(&self, _ch: char, font_size: f32) -> f32 {
+                font_size * 0.5
+            }
+
+            fn advance_weighted(&self, _ch: char, font_size: f32, weight: FontWeight) -> f32 {
+                if weight.is_bold() {
+                    font_size
+                } else {
+                    font_size * 0.5
+                }
+            }
+
+            fn line_height(&self, font_size: f32) -> f32 {
+                font_size * 1.2
+            }
+
+            fn measure_run_weighted(&self, text: &str, font_size: f32, weight: FontWeight) -> f32 {
+                text.chars()
+                    .map(|ch| self.advance_weighted(ch, font_size, weight))
+                    .sum()
+            }
+        }
+
+        let m = BoldWide;
+        let normal = measure_weighted_with(&m, "ab", 10.0, FontWeight::NORMAL);
+        let bold = measure_weighted_with(&m, "ab", 10.0, FontWeight::BOLD);
+        assert!((normal.width - 10.0).abs() < 1e-4);
+        assert!((bold.width - 20.0).abs() < 1e-4);
     }
 }

@@ -1,4 +1,4 @@
-use draw_core::{Color, Rect, Transform2D, Vec2};
+use draw_core::{Color, FontWeight, Rect, Transform2D, Vec2};
 
 use crate::texture::TextureId;
 
@@ -192,6 +192,8 @@ pub enum DrawCommand {
         /// Baseline origin in the current transform space.
         position: Vec2,
         font_size: f32,
+        /// Regular or bold.
+        weight: FontWeight,
         align: TextAlign,
         paint: Paint,
     },

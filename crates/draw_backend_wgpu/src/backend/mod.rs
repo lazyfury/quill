@@ -296,7 +296,7 @@ impl WgpuBackend {
 
     /// Returns the current font configuration.
     pub fn font_config(&self) -> FontConfig {
-        self.font_config
+        self.font_config.clone()
     }
 
     /// Switches the font mode / HiDPI rasterization and rebuilds the atlas.
@@ -309,7 +309,7 @@ impl WgpuBackend {
     }
 
     fn rebuild_font(&mut self) -> Result<(), WgpuError> {
-        let font = Rc::new(Font::load_with(self.font_config));
+        let font = Rc::new(Font::load_with(self.font_config.clone()));
         font.set_scale(self.scale_factor);
         let (width, height) = font.atlas_size();
         let texture = upload_texture(

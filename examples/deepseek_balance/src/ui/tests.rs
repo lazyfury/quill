@@ -673,7 +673,8 @@ fn the_backdrop_is_a_rounded_fill_the_size_of_the_panel() {
         assert_eq!(corners.bottom_left, PANEL_RADIUS);
         assert_eq!(corners.bottom_right, PANEL_RADIUS);
         assert_eq!(
-            paint.color, app.theme.palette().background,
+            paint.color,
+            app.theme.palette().background,
             "the fill is the theme's backdrop token"
         );
         // Opaque: only the four corners outside the radius may be see-through.

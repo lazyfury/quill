@@ -3,15 +3,19 @@ use std::fmt;
 
 use web_sys::{CanvasRenderingContext2d, HtmlImageElement};
 
-use draw_core::{Color, Transform2D, ViewportSize};
+use draw_core::{Color, FontWeight, Transform2D, ViewportSize};
 use draw_render::{CornerRadii, DrawCommand, DrawList, Paint, RenderBackend, TextAlign, TextureId};
 
-/// The Canvas font spec used for `DrawText` at `font_size` logical pixels.
+/// The Canvas font spec used for `DrawText` at `font_size` logical pixels and
+/// `weight`.
+///
+/// Uses the CSS font shorthand (`"<weight> <size>px <family>"`), so a numeric
+/// weight is passed straight through to the browser's font matcher.
 ///
 /// A host-side `TextMeasurer` must measure with this exact spec so layout
 /// baselines match what the backend draws.
-pub fn font_spec(font_size: f32) -> String {
-    format!("{font_size}px sans-serif")
+pub fn font_spec(font_size: f32, weight: FontWeight) -> String {
+    format!("{} {font_size}px sans-serif", weight.value())
 }
 
 /// Errors from the Canvas 2D backend.
@@ -229,11 +233,12 @@ impl Canvas2dBackend {
                 text,
                 position,
                 font_size,
+                weight,
                 align,
                 paint,
             } => {
                 self.set_fill(paint);
-                self.ctx.set_font(&font_spec(*font_size));
+                self.ctx.set_font(&font_spec(*font_size, *weight));
                 self.ctx.set_text_align(match align {
                     TextAlign::Left => "left",
                     TextAlign::Center => "center",

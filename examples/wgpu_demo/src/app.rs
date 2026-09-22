@@ -170,6 +170,7 @@ impl App {
         let font_config = FontConfig {
             mode: self.font_mode,
             device_pixel_rasterization: true,
+            ..Default::default()
         };
         if let Err(error) = backend.set_font_config(font_config) {
             eprintln!("font setup failed, using fallback: {error}");
@@ -218,6 +219,7 @@ impl App {
         let config = FontConfig {
             mode: self.font_mode,
             device_pixel_rasterization: true,
+            ..Default::default()
         };
         if let Some(backend) = self.backend.as_mut() {
             if let Err(error) = backend.set_font_config(config) {

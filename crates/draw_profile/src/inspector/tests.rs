@@ -1,6 +1,6 @@
 use super::*;
 use crate::stats::FrameStats;
-use draw_core::{Color, Rect, Size, Transform2D, Vec2};
+use draw_core::{Color, FontWeight, Rect, Size, Transform2D, Vec2};
 use draw_render::{DrawCommand, DrawList, Paint, TextAlign};
 
 fn rect(w: f32, h: f32) -> Rect {
@@ -37,6 +37,7 @@ fn clean_list_produces_no_findings() {
             text: "hi".into(),
             position: Vec2::new(1.0, 2.0),
             font_size: 12.0,
+            weight: FontWeight::NORMAL,
             align: TextAlign::Left,
             paint: Paint::solid(Color::WHITE),
         },
@@ -143,6 +144,7 @@ fn empty_text_is_info() {
         text: "   ".into(),
         position: Vec2::ZERO,
         font_size: 12.0,
+        weight: FontWeight::NORMAL,
         align: TextAlign::Left,
         paint: Paint::solid(Color::WHITE),
     }]);

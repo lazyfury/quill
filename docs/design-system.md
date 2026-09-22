@@ -338,6 +338,21 @@ backward-compatible addition and record it here.
   `word_break` builder. Additive and backward compatible: `WordBreak::Word` is
   the `Default`, so every existing `TextOptions` literal/`default()` call keeps
   the old output.
+- **Font weight** (Stage 25.x): text had no weight knob — `DrawCommand::DrawText`,
+  `Widget::Label`/`ButtonData`, and the theme all stopped at `font_size`.
+  `draw_core::FontWeight` (now numeric, 100–900; `NORMAL`/`BOLD`/`MEDIUM`/…)
+  flows through the IR, the UI and the theme. `TextOptions` gains `weight` (so
+  the paint-side text cache keys on it), `TextMeasurer` gains
+  `advance_weighted` / `measure_line_weighted` / `measure_run_weighted` with
+  regular-metrics defaults (existing measurers keep compiling), and
+  `Theme::font_weight(TextSize)` gives a per-role token (default `Normal`, so
+  nothing changes visually unless a theme or component asks for bold). `Text`
+  and `Button` gain `.weight(..)` / `.bold()`; `Label` gains `.weight(..)`.
+  Backend-facing: `PaintContext::draw_text_weighted`, Canvas passes the numeric
+  weight into the CSS font shorthand, and `draw_font::FontServer` resolves it to
+  the nearest face (shared atlas). Additive and backward compatible: `draw_text`
+  still draws `Normal`, and all existing `TextOptions` constructors default to
+  `Normal`. See [`docs/font.md`](font.md).
 - **Wrapping flex containers report the stacked cross size** (driven by
   `image_editor`'s new-document preset row): `measure_flex` computed a
   container's preferred cross size from the tallest single item even when `wrap`

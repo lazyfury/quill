@@ -23,7 +23,9 @@ use draw_components::{Column, Component, Flex, NodeRef, Text};
 use draw_core::{Color, Edges, NodeId, ViewportSize};
 use draw_render::PaintContext;
 use draw_scene::{SceneChild, SceneTree};
-use draw_theme::{default_theme, space, Mode, TextSize, Theme};
+#[cfg(test)]
+use draw_theme::{default_theme, Mode};
+use draw_theme::{space, TextSize, Theme};
 use draw_ui::{self, MouseFilter, TextMeasurer};
 
 use crate::api::Balance;

@@ -23,6 +23,7 @@ mod texture;
 
 pub use backend::RenderBackend;
 pub use command::{CornerRadii, DrawCommand, Paint, TextAlign};
+pub use draw_core::FontWeight;
 pub use list::{DrawList, PaintContext};
 pub use texture::TextureId;
 

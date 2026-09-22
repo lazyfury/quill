@@ -9,20 +9,17 @@ license.workspace = true
 [dependencies]
 draw_core.workspace = true
 draw_render.workspace = true
-ab_glyph = "0.2"
-rustybuzz = "0.20"
-unicode-bidi = "0.3"
-unicode-script = "0.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+draw_font.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
-font8x8 = "0.3"
 pollster = "0.4"
 wgpu = "24"
 
 [dev-dependencies]
 draw_scene.workspace = true
 draw_bench.workspace = true
+font8x8 = "0.3"
 
 [[bench]]
 name = "wgpu"
