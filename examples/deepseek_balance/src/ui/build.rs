@@ -36,7 +36,11 @@ pub(super) fn tab_button(theme: &'static dyn Theme, tab: Tab, feed: &Feed) -> Fl
                 SurfaceStyle::new(Color::TRANSPARENT)
             }
         })
-        .child(Text::small(tab.label(), theme).size(draw_theme::TextSize::Caption).weight(FontWeight::new(600)))
+        .child(
+            Text::small(tab.label(), theme)
+                .size(draw_theme::TextSize::Caption)
+                .weight(FontWeight::new(600)),
+        )
 }
 
 /// The DeepSeek page: endpoint header, status, error, currency cards, footer.
