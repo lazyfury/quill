@@ -38,8 +38,8 @@ pub(super) fn tab_button(theme: &'static dyn Theme, tab: Tab, feed: &Feed) -> Fl
         })
         .child(
             Text::small(tab.label(), theme)
-                .size(draw_theme::TextSize::Caption)
-                .weight(FontWeight::new(600)),
+                .size(draw_theme::TextSize::Subheading)
+                .weight(FontWeight::BOLD),
         )
 }
 
