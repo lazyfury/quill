@@ -61,6 +61,9 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
     committed as a whole once it is complete — not as agent-internal todo
     subtasks. Present the finished task as a reviewable diff, get approval, then
     commit it (stage reports still follow rule 6).
+13. **Correct factual errors.** If a request rests on a factual mistake about
+    the code, docs or repo state, say so and give the correct picture before
+    acting — do not silently execute it or guess around it.
 
 ## Dependency direction
 
