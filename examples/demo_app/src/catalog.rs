@@ -81,8 +81,8 @@ pub const ITEMS: &[&[Item]] = &[
         },
         Item {
             name: "Alignment",
-            blurb: "Start / center / end / stretch on the cross axis.",
-            snippet: "Row::new().align(Align::Center)",
+            blurb: "Start / center / end on the main axis, stretch on the cross axis.",
+            snippet: "Row::new().justify(Justify::Center).align(Align::Stretch)",
         },
         Item {
             name: "Padding & Gap",

@@ -4,7 +4,7 @@
 use draw_components::{Card, Column, Component, Grid, Panel, Row, Text};
 use draw_core::{Color, Edges};
 use draw_theme::{radius, space, Theme, Tone};
-use draw_ui::{Align, SurfaceStyle, Track};
+use draw_ui::{Align, Justify, SurfaceStyle, Track};
 
 use super::super::Ctx;
 use super::boxx;
@@ -91,13 +91,21 @@ pub(crate) fn anchors(card: Card, ctx: &mut Ctx) -> Card {
 
 pub(crate) fn alignment(card: Card, ctx: &mut Ctx) -> Card {
     let theme = ctx.theme;
+    let p = theme.palette();
     card.child(
         Column::new()
             .gap(space::XS)
-            .child(aligned(theme, Align::Start, theme.palette().accent))
-            .child(aligned(theme, Align::Center, theme.palette().info))
-            .child(aligned(theme, Align::End, theme.palette().success))
-            .child(aligned(theme, Align::Stretch, theme.palette().warning)),
+            .child(rail(theme, Justify::Start, p.accent))
+            .child(rail(theme, Justify::Center, p.info))
+            .child(rail(theme, Justify::End, p.success))
+            .child(
+                Row::new()
+                    .align(Align::Stretch)
+                    .padding(Edges::all(space::XS))
+                    .min_size(0.0, 28.0)
+                    .surface(SurfaceStyle::new(p.surface_raised).radius(radius::SM))
+                    .child(Panel::new().color(p.warning).flat().grow(1.0)),
+            ),
     )
 }
 
@@ -114,12 +122,13 @@ pub(crate) fn padding_gap(card: Card, ctx: &mut Ctx) -> Card {
     )
 }
 
-/// A fixed-height rail showing one cross-axis alignment.
-fn aligned(theme: &'static dyn Theme, align: Align, color: Color) -> Row {
+/// A fixed-height rail showing one main-axis alignment of a small box.
+fn rail(theme: &'static dyn Theme, justify: Justify, color: Color) -> Row {
     Row::new()
-        .align(align)
+        .justify(justify)
+        .align(Align::Center)
         .padding(Edges::all(space::XS))
-        .min_size(0.0, 26.0)
+        .min_size(0.0, 28.0)
         .surface(SurfaceStyle::new(theme.palette().surface_raised).radius(radius::SM))
-        .child(Panel::new().color(color).flat().min_size(40.0, 12.0))
+        .child(Panel::new().color(color).flat().min_size(40.0, 14.0))
 }
