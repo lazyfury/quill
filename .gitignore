@@ -12,4 +12,9 @@ bench-baselines/
 # Local assistant scratch space.
 .workbuddy
 
+# Local task-tracker database (tools/schema.sql + tools/tasks.py are committed).
+tools/*.db
+__pycache__/
+*.pyc
+
 .DS_Store
