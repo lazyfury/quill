@@ -49,6 +49,17 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
    (`docs/godot-migration.md`) may change `draw_scene` / `draw_ui` incompatible;
    keep the compatibility layer green per phase and update
    `docs/design-system.md` when component-facing APIs move.
+9. **Ask when unclear.** If a request is ambiguous, or a change would alter the
+   architecture, a public API or the roadmap, stop and ask before writing code;
+   do not guess intent.
+10. **Roadmap changes need confirmation.** Do not add, remove, reorder or
+    re-scope stages/phases (including `docs/godot-migration.md`) without explicit
+    approval, and record any approved change in the docs.
+11. **Do not start work on your own.** Implement only the agreed task; report
+    unrelated findings instead of acting on them.
+12. **Accept and commit per task.** Present each task as a reviewable diff, get
+    approval, then commit it as its own commit (stage reports still follow
+    rule 6).
 
 ## Dependency direction
 
