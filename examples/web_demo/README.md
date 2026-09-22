@@ -19,12 +19,11 @@ python3 -m http.server 8080 --directory .
 
 ## What it shows
 
-- a three-column, macOS-style notes app (sidebar / content list / detail) built
-  from `draw_components` themed components (`Text`, `Badge`, `Divider`, `Button`,
-  `Checkbox`, `Switch`) on the shared `demo_app::DemoApp`,
-- monochrome rounded-square placeholders for icons and images,
-- a static image placeholder (monochrome rounded square) in the detail hero,
-- selection state (click a note or nav row) reflected in the detail pane,
+- a component gallery built from `draw_components` on the shared
+  `demo_app::DemoApp`: a sidebar of groups, a preview `Router` and live cards
+  (`Text`, `Card`, `Badge`, `Button`, `Checkbox`, `Switch`, `List`, …),
+- theme switching (the sidebar footer toggles light/dark),
+- interactive previews (buttons, toggles, a resizable split, menus and dialogs),
 - pointer input (hover/click) and viewport-responsive layout (resize the window).
 
 ## Headless self-test

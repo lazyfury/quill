@@ -49,7 +49,7 @@ audited by `draw_profile`'s inspector, or it is not "done".
 | `Popover` | done | `Overlays::popover`, anchored with edge flipping |
 | `Menu` / `MenuItem` | done | floating surface + rows (`shortcut`/`tone`/`disabled`); `Overlays::menu` anchors `BelowStart`; used by `image_editor` |
 | `Progress`, `Spinner`, `Skeleton` | later | uses `Arc`/rounded primitives |
-| `ScrollView` | next | the clip + offset model now exists (`ControlData.clip`, `set_on_scroll`); wrap it in a component with a draggable scrollbar |
+| `ScrollView` | done | clip + offset viewport for arbitrary content, with a draggable scrollbar; `ScrollView::state().sync` after layout, like `List`; `docs/components.md` |
 
 ## Theme
 
@@ -130,9 +130,11 @@ priority order and add native tests.
 
 ## Demo (`examples/demo_app`)
 
-- Light/dark toggle in the sidebar.
-- Scrollable note list (depends on `ScrollView`).
-- Keyboard navigation (arrow keys move list selection; `⌘K` command palette).
+The shared `demo_app` is a component gallery (groups → preview `Router` → live
+cards), each preview page wrapped in a `ScrollView` so a short window still
+reaches every card. Next:
+
+- Keyboard navigation (arrow keys move between groups and cards).
 - Command palette overlay using the `List`/`Input` components.
 
 ## Demo (`image_editor`)
@@ -264,8 +266,7 @@ Lucide case.
 - Fixed flex cross-axis `Stretch` overflowing a definite container: items now
   fill the container's inner cross size instead of growing to their content's
   preferred width, so a fixed-width column's items no longer push past its edge.
-  Covered by `draw_ui::ui::layout::stretch_does_not_grow_a_definite_cross_axis`
-  and `demo_app::note_rows_fit_with_a_wide_measurer`.
+  Covered by `draw_ui::ui::layout::stretch_does_not_grow_a_definite_cross_axis`.
 - Button cursor feedback: `draw_ui::hovered_is_button` / `is_interactive` feed
   `demo_app::DemoApp::pointer_over_clickable`, which the Canvas runner maps to a
   CSS `pointer` cursor and `wgpu_demo` to `CursorIcon::Pointer`.

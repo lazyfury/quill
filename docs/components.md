@@ -384,6 +384,35 @@ same frame step (`layout` → sync every list → `layout` again if any changed)
 a list whose container is hidden gets no rect, so `sync` returns early and it
 owns no pool — the idle mode costs nothing.
 
+### ScrollView
+
+`ScrollView` is the generic version of the same mechanism: it puts one
+arbitrary child in a clipped viewport and translates it by the scroll offset,
+with a draggable scrollbar. The child keeps its natural height; the viewport
+clips.
+
+```rust
+use draw_components::ScrollView;
+
+let view = ScrollView::new(theme).child(long_column);
+let state = view.state();                 // take the handle before mounting
+tree.add_child(pane, view);
+
+draw_ui::layout(&mut tree, viewport);
+if state.sync(&mut tree) {                // applies the offset + scrollbar
+    draw_ui::layout(&mut tree, viewport); // a moved offset wants new rects
+}
+```
+
+`ScrollViewState::sync` returns `true` when it changed the tree (the offset or
+the thumb moved), so the host lays out again — the same contract as
+`ListState`. `scroll_by` / `scroll_to` / `scroll_to_top` are pure state (safe
+from the wheel callback), `drag_by` scales a thumb drag, and `invalidate`
+re-measures the content after it can change height. Content that fits does not
+scroll and the bar is hidden, so a `ScrollView` costs nothing until it
+overflows; `.scrollbar(false)` keeps the clip without the bar. This is what the
+`demo_app` gallery uses so a short window still reaches every card.
+
 ## Switch views (Router)
 
 `draw_components::Router` shows exactly one of several child views in a

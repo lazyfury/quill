@@ -1,6 +1,6 @@
 //! quill native `wgpu` demo.
 //!
-//! Opens a window and renders the shared, backend-neutral three-column
+//! Opens a window and renders the shared, backend-neutral component-gallery
 //! `demo_app::DemoApp` UI through [`draw_backend_wgpu::WgpuBackend`], presenting
 //! it to a wgpu surface:
 //!

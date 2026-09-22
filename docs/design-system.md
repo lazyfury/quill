@@ -158,9 +158,10 @@ Surfaces are usually static, but selection and hover need per-frame styles:
 
 ### Demo
 
-`examples/demo_app` is a three-column, macOS-style notes app built from these
-components: sidebar (nav + selection), content list (note rows with thumbnail
-placeholders) and detail pane (toolbar, hero scene, body, actions).
+`examples/demo_app` is a **component gallery**: a sidebar of groups, a preview
+`Router` (one page per group) and a two-column grid of live component cards.
+The sidebar footer toggles light/dark by rebuilding the scene against the token
+set, so the demo is itself the token-swap proof.
 
 ### Available components
 
@@ -178,6 +179,7 @@ placeholders) and detail pane (toolbar, hero scene, body, actions).
 | `Checkbox` | compact control with shared state and `on_change`. |
 | `Switch` | compact on/off control. |
 | `List` | virtualized rows: mounts the viewport's rows (+1 buffer) and recycles them; `ListState` (`sync`/`scroll_by`/`scroll_to`/`invalidate`), wheel + click, container clip. |
+| `ScrollView` | clip + offset viewport for arbitrary content with a draggable scrollbar; `ScrollViewState` (`sync`/`scroll_by`/`scroll_to`/`invalidate`), wheel + thumb drag, hidden when the content fits. |
 | `Menu` / `MenuItem` | floating menu surface + rows (label, optional right-aligned shortcut, `tone`/`destructive`, `disabled`, `on_click`); `Menu::separator`/`min_width`; place with `Overlays::menu`. |
 
 `draw_components` containers take children, so a screen is one expression:

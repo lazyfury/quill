@@ -19,19 +19,14 @@ cargo run -p wgpu_demo --release
 
 ## Controls
 
-- A three-column, macOS-style notes app built from `draw_components` components on the
-  `draw_ui` core:
-  - **sidebar** (220px): app icon + title, search placeholder, nav
-    rows with selection, version badge,
-  - **content list** (324px): header, note rows with thumbnail placeholders,
-    selection highlight and an accent bar,
-  - **detail**: toolbar with icon buttons, a static image placeholder
-    (monochrome rounded square), title/metadata, wrapping body text, preference
-    controls and action buttons.
-- Icons and images are monochrome rounded-square placeholders.
-- Clicking a note row (or the back/forward icon buttons) updates the detail
-  pane; clicking nav rows updates the sidebar selection; **New Note** increments
-  the click counter (the headless probe).
+- A component gallery built from `draw_components` on the shared `demo_app`:
+  - **sidebar** (248px): app mark + title, one row per group, and a footer
+    primary button that toggles light/dark,
+  - **preview**: a `Router` showing the selected group, with a two-column grid
+    of live component cards (each card is interactive and shows its snippet).
+- Clicking a group shows its page; interactive cards open menus/dialogs and
+  toggle controls; the footer button increments the click counter (the headless
+  probe) and switches theme.
 - Resize the window (the UI re-lays out) or move it between displays with
   different DPRs.
 

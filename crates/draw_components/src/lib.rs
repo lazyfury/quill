@@ -37,6 +37,8 @@
 //! - Surfaces: [`Card`], [`Divider`], [`Badge`], [`CodeBlock`], [`Terminal`],
 //!   [`EmptyState`].
 //! - Controls: [`Button`], [`Checkbox`], [`Switch`].
+//! - Scroll: [`List`] (virtualized rows) and [`ScrollView`] (a clipped, offset
+//!   viewport with a draggable scrollbar).
 //! - Menus: [`Menu`] + [`MenuItem`], placed with [`Overlays::menu`].
 //! - Floating: [`Overlays`] (`confirm`, `popover`, `menu`, `tips`, `message`).
 //!
@@ -60,7 +62,8 @@ pub use base::{
 };
 pub use components::{
     Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, List, ListColumn,
-    ListState, Menu, MenuItem, ResizeHandle, RowSource, Switch, Terminal, Text, MENU_MIN_WIDTH,
+    ListState, Menu, MenuItem, ResizeHandle, RowSource, ScrollView, ScrollViewState, Switch,
+    Terminal, Text, MENU_MIN_WIDTH,
 };
 pub use node_ref::{NodeRef, Ref};
 pub use overlay::{OverlayId, Overlays, Placement};
