@@ -22,8 +22,8 @@ in its top-left corner — the classic engine "debug bounds" view.
 ```rust
 use draw_ui::DebugDrawOptions;
 
-// after painting the app UI into `ctx`:
-ui.paint_debug(&mut ctx, &DebugDrawOptions::default());
+// after `draw_ui::paint(&tree, &mut ctx)`:
+draw_ui::paint_debug(&tree, &mut ctx, &DebugDrawOptions::default());
 ```
 
 `DebugDrawOptions` controls the look:
@@ -54,14 +54,14 @@ use draw_debug_ui::DebugOverlay;
 
 let mut debug = DebugOverlay::new(); // visible by default
 
-// per frame, after `app_ui.paint(&mut ctx)`:
-debug.paint(&app_ui, &mut ctx);
+// per frame, after `draw_ui::paint(&tree, &mut ctx)`:
+debug.paint(&tree, &mut ctx);
 
 // toggle (e.g. an F3 key binding)
 debug.toggle();
 ```
 
-It owns no tree, so it draws over any `Ui` you pass in.
+It owns no tree, so it draws over any tree you pass in.
 
 ---
 
@@ -162,8 +162,8 @@ let report = inspect_with(&list, &stats, &config);
 ## 3. Performance panel (`PerformanceOverlay`)
 
 `PerformanceOverlay` renders a `Profiler` + `InspectionReport` as an ordinary
-`draw_ui` panel in a viewport corner. It owns its own `Ui` tree, so it does not
-disturb the application's layout or hit-testing.
+`draw_ui` panel in a viewport corner. It owns its own `SceneTree` subtree, so it
+does not disturb the application's layout or hit-testing.
 
 ```rust
 use draw_debug_ui::{Corner, OverlayConfig, PerformanceOverlay};

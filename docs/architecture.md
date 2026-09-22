@@ -134,57 +134,24 @@ logical size plus the world -> screen `canvas_transform`.)
 - Post-Stage-25 (un-numbered): `draw_font` (system-font service + numeric
   `FontWeight`) and `Theme` as a trait + `DefaultTheme`.
 
-## Debugging & performance inspection (Stage 10)
+## Debugging & performance inspection
 
-The pipeline stays backend-neutral, and so does observing it. `draw_profile`
-never measures time or touches a backend; hosts sample `Instant` per phase and
-feed the numbers in:
+Observation stays backend-neutral and outside the pipeline. `draw_profile` never
+measures time or touches a backend (hosts sample `Instant` per phase and feed
+numbers in), and `draw_debug_ui` draws its overlays with ordinary
+`DrawCommand`s. `Profiler` keeps a bounded frame history; `inspect` ranks
+`Finding`s by severity; `DebugOverlay` draws component bounds via
+`draw_ui::paint_debug` and `PerformanceOverlay` renders the summary as a
+`draw_ui` panel painted after the app UI. See `docs/debug.md`.
 
-```text
-frame_start -> update -> layout -> paint -> render -> frame_done
-                |          |         |         |
-                +---------- StageTimes ----+  FrameCounters
-                                            |
-                     Profiler.record(FrameStats) -> FrameSummary
-                                            |
-                     inspect(&DrawList, &FrameStats) -> InspectionReport
-                                            |
-                           draw_debug_ui::DebugOverlay (draw_ui panel)
-```
-
-- `Profiler` keeps a bounded frame history and derives averages/min/max/FPS.
-- `inspect` produces severity-ranked `Finding`s (correctness, degenerate
-  geometry, budgets) aggregated by `FindingCode`.
-- `DebugOverlay` draws **component debug bounds**: a yellow border + `Name #id`
-  on every visible control, via `draw_ui::Ui::paint_debug`.
-- `PerformanceOverlay` renders the summary + findings as an ordinary `draw_ui`
-  panel; it is painted after the application UI and does not touch app layout or
-  input.
-
-See `docs/debug.md`.
-
-## Benchmarking (Stage 11)
+## Benchmarking
 
 The profiler observes a frame; a benchmark pins a path to a number and guards it
-against regression. The harness is dependency-free and lives outside the
-pipeline:
-
-```text
-draw_bench_suite          ->  draw_bench
-deterministic fixtures        BenchRunner -> Stats
-drive one stage               Baseline   -> Verdict
-```
-
-- `draw_bench` measures and compares only; it never builds a scene or touches a
-  backend.
-- `draw_bench_suite` builds fixtures and drives scene/ui/render; it contains no
-  timing code.
-- `draw_backend_wgpu` adds a GPU benchmark for the offscreen render + readback
-  path.
-
-`draw_bench` and `draw_bench_suite` sit beside the pipeline (like the demos):
-they depend on the core crates but no core crate depends on them. See
-`docs/benchmarking.md`.
+against regression. `draw_bench` measures and compares only and never builds a
+scene or touches a backend; `draw_bench_suite` owns the deterministic fixtures
+and contains no timing code; `draw_backend_wgpu` adds a GPU benchmark for the
+offscreen render + readback path. Both bench crates sit beside the pipeline
+(like the demos): core crates never depend on them. See `docs/benchmarking.md`.
 
 ## Backend replaceability
 

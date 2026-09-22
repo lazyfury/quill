@@ -131,7 +131,7 @@ from the tree, so switching light/dark is just building with a different theme.
 
 Themed chrome is attached to a control as a `draw_ui::NodeDecor` (built by the
 `draw_ui` decorator helpers `surface_decor` / `dynamic_surface_decor` /
-`foreground_decor`), so a single `ui.paint` runs it in tree order:
+`foreground_decor`), so a single `draw_ui::paint` runs it in tree order:
 
 1. every decorator's `paint_behind` — rounded surfaces/borders behind content,
 2. the control's own `Widget` content,
@@ -148,7 +148,7 @@ circles into rounded surfaces without double-blending translucent fills.
 Components register clicks with `draw_components::set_on_click(tree, node, ..)` or the
 `Component::on_click` builder; a hit on any
 descendant walks up to the nearest ancestor callback. Hover/pressed/focused
-state lives in the core and `Ui::state_for(node)` inherits it from ancestors,
+state lives in the core and `draw_ui::state_for(tree, node)` inherits it from ancestors,
 which is what decorators read each frame. Checkbox/Switch share their state
 through `Rc<Cell<bool>>`.
 
@@ -202,10 +202,10 @@ Extend the library by implementing `draw_components::Component` (see
 then the layer, and paints the layer last:
 
 ```rust
-app.ui.layout(viewport);
-overlays.layout(&app.ui, viewport); // resolve targets after layout
+draw_ui::layout(&mut tree, viewport);
+overlays.layout(&tree, viewport); // resolve targets after layout
 // ... paint main UI ...
-overlays.paint(&mut ctx);           // scrim + floating content on top
+overlays.paint(&mut ctx);         // scrim + floating content on top
 ```
 
 Input goes to the layer first; a modal entry returns `EventResult::Handled` so
@@ -246,26 +246,23 @@ backward-compatible addition and record it here.
 
 ### Recorded core additions
 
-- **`draw_ui::NodeDecor` / `InteractState` + `Ui::add_decor`** (Stage 22): the
-  closed `Widget` enum cannot carry themed chrome, so components attach a
-  `NodeDecor` to a node instead. `Ui::paint` runs `paint_behind` / content /
-  `paint_front` per node and `Ui::state_for` resolves inherited hover/pressed/
-  focused. `Ui::set_on_click` now accepts any control (not just
-  `Widget::Button`) and dispatches to the nearest ancestor callback, so themed
-  component roots own their clicks. `draw_components` no longer keeps a surface /
+- **`draw_ui::NodeDecor` / `InteractState` + `draw_ui::add_decor`** (Stage 22):
+  the closed `Widget` enum cannot carry themed chrome, so components attach a
+  `NodeDecor` to a node instead. `draw_ui::paint` runs `paint_behind` / content /
+  `paint_front` per node and `draw_ui::state_for` resolves inherited hover/
+  pressed/focused. `draw_components::set_on_click` now accepts any control (not
+  just `Widget::Button`) and dispatches to the nearest ancestor callback, so
+  themed component roots own their clicks. `draw_components` no longer keeps a surface /
   foreground / interaction registry; its decorator helpers build `NodeDecor`
   values from the theme. This is additive: existing `Widget`/`ControlData`
   shapes are unchanged.
-- **`draw_ui` owns the theme and styling primitives** (Stage 24): `draw_ui` now
-  receives a `Theme` value; it is not stored on the tree (the old `Ui::theme()`
-  ambient theme was removed in Stage 25)
-  tokens. `SurfaceStyle`, `fill_rounded_rect`/`fill_rounded_rect_corners`/`inset`/
-  `surface`, `Tone`, `SurfaceTone` and the `surface_decor`/
-  `dynamic_surface_decor`/`foreground_decor` factories moved from `draw_kit` into
-  `draw_ui`. `Theme` stays a small token interface (mode + palette + scale
-  accessors), and
-  `draw_components` (renamed from `draw_kit`) now contains only component
-  builders.
+- **`draw_ui` owns the styling primitives** (Stage 24; the theme was later
+  reverted to a constructor argument in Stage 25): `SurfaceStyle`,
+  `fill_rounded_rect`/`fill_rounded_rect_corners`/`inset`/`surface`, `Tone`,
+  `SurfaceTone` and the `surface_decor`/`dynamic_surface_decor`/
+  `foreground_decor` factories moved from `draw_kit` into `draw_ui`.
+  `draw_components` (renamed from `draw_kit`) contains only component builders;
+  components receive the theme as a `&'static dyn Theme`.
 - **`draw_components::NodeRef` / `Ref<C>` + `Component::ref_` / `with_ref`**
   (Stage 25.x): a component is a pure spec with no identity until mount, so the
   declarative chain exposes node ids through callback refs. `NodeRef` is a clone
@@ -285,7 +282,7 @@ backward-compatible addition and record it here.
   a divider can reference its sibling pane before mount (order-independent); only
   the demo called `.target`.
 - **`draw_ui::content_size`** (driven by `examples/deepseek_balance`):
-  `Ui::layout` pins every UI root to the viewport, so a view always fills the
+  `draw_ui::layout` pins every UI root to the viewport, so a view always fills the
   surface it is handed and no resolved rectangle says how much room the content
   *wanted*. A host that sizes its window to its content — the menu-bar panel in
   `examples/deepseek_balance`, via `Window::request_inner_size` — needs exactly
@@ -372,20 +369,10 @@ backward-compatible addition and record it here.
   `popover`/`confirm`/`tips`/`message` entries and the `Placement` variants are
   unchanged. `Menu`/`MenuItem` themselves are plain `draw_components` themed
   components — no `Widget`/`ControlData` shape changed.
-- **`Theme.density` (`Density`) — spacing and control metrics as a token**
-  (driven by `image_editor`'s compact theme): spacing and control
-  metrics were hardcoded `draw_theme` consts, so a custom theme could only swap
-  colors. `Theme` (the trait) now exposes a `Density` (`space_scale`,
-  `control_height`, `control_height_mini`, `control_padding_x`/`_y`,
-  `row_height`, `default_control`) with accessors (`spacing`, `control_height`,
-  `control_padding_x`/`_y`, `row_height`, `default_control`); `DefaultTheme`
-  carries it and `DefaultTheme::compact()` / `with_density` swap it. The
-  component library reads those
-  accessors instead of the `space` / `control` consts (the consts stay the
-  base/comfortable values and the source of the scale). `Button` gained
-  `ControlSize` (`mini()` / `regular()`, default from the theme).
-  `Density::COMFORTABLE` (the default) reproduces the previous metrics exactly,
-  so existing themes and components are unchanged.
+- **`Theme.density` (`Density`)** (driven by `image_editor`'s compact theme):
+  spacing and control metrics became a token instead of hardcoded `draw_theme`
+  consts, so a custom theme can swap them without a second code path. See
+  §Density above for the token list, accessors and the `compact()` swap.
 - **`ResizeHandle::invert()`** (driven by `image_editor`'s resizable
   right sidebar): the handle assumed its target pane was on the *near* side, so
   a right-hand sidebar (target on the far side) resized in the wrong direction.

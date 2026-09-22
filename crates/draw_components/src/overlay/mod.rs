@@ -1,14 +1,14 @@
 //! A generic overlay layer: confirm dialogs, popovers, tooltips and toasts on
-//! top of the [`Ui`] stack.
+//! top of the app's [`SceneTree`].
 //!
-//! [`Overlays`] owns its own [`Ui`], so the host keeps painting its
-//! main UI exactly as before and then layers this on top:
+//! [`Overlays`] owns its own private `SceneTree`, so the host lays out and
+//! paints its main UI as usual and then layers this on top:
 //!
 //! ```ignore
-//! app.ui.layout(viewport);
-//! overlays.layout(&app.ui, viewport); // anchor to laid-out targets
+//! draw_ui::layout(&mut tree, viewport);
+//! overlays.layout(&tree, viewport);   // anchor to laid-out targets
 //!
-//! app.ui.paint(&mut ctx);             // main UI (decor + content)
+//! draw_ui::paint(&tree, &mut ctx);    // main UI (decor + content)
 //! overlays.paint(&mut ctx);           // scrim + overlay content, on top
 //! ```
 //!

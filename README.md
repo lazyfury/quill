@@ -32,22 +32,13 @@ depend on browser APIs or a concrete backend. See `AGENTS.md`.
 
 ## Status
 
-Stage 25 (Godot-style unified scene). One `SceneTree` owns world (`Node2D`) and
-UI (`Control`); `draw_scene` provides `Viewport` / `Camera2D` / `CanvasLayer` and
-the `Scene -> DrawList` paint step; `draw_render` is the backend-neutral IR
-(`DrawCommand`/`DrawList`/`PaintContext`) plus the `RenderBackend` trait;
-`draw_ui` owns the `Control` runtime, layout, paint and input routing;
-`draw_theme` provides design tokens and `draw_components` the component library
-(base builders + themed components); `draw_backend_recording` gives the fully
-headless `Scene -> DrawList -> RenderBackend` test path, `draw_backend_canvas` +
-`draw_wasm` render to an HTML Canvas (DPR + input), and `draw_backend_wgpu`
-renders the same IR offscreen and reads pixels back for native `cargo test`.
-`draw_profile` records per-phase timings and audits frames;
-`draw_debug_ui::DebugOverlay` / `PerformanceOverlay` draw component bounds and the
-profiler panel.
-
-Three independent renderers consume the same `DrawList`:
-`draw_backend_canvas`, `draw_backend_recording`, and `draw_backend_wgpu`.
+Stage 25 (Godot-style unified scene) is accepted: one `SceneTree` owns world
+(`Node2D`) and UI (`Control`), with `draw_scene::{Viewport, Camera2D,
+CanvasLayer}` and the `Scene -> DrawList` paint step. Three independent renderers
+consume the same backend-neutral `DrawList` — Canvas 2D (WASM), the headless
+recording backend, and native `wgpu` (offscreen + pixel readback). See
+[`docs/architecture.md`](docs/architecture.md) for the stage ledger and
+[`docs/getting-started.md`](docs/getting-started.md) to build an app.
 
 ## Examples
 

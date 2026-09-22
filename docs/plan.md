@@ -53,44 +53,20 @@ audited by `draw_profile`'s inspector, or it is not "done".
 
 ## Theme
 
-- `Theme` is a trait (`draw_theme::Theme`) with a built-in `DefaultTheme`
-  implementation; components take a `&'static dyn Theme`, so an application can
-  implement its own theme and override any token (palette, density, surface
-  mapping, fonts) without touching the component library. A **runtime
-  light/dark toggle** still rebuilds the tree with a different theme (or
-  resolves colors per frame in the component's `prepare`/decorator);
-  `dynamic_surface_decor` already resolves per frame.
-- `Theme` also carries a `Density` (spacing scale + control metrics): `compact()`
-  is a token swap, and the component library reads `theme.spacing` /
-  `control_height` / `row_height`, so a custom theme (e.g. the image editor's)
-  changes density without touching components. `Button` takes a `ControlSize`
-  (`mini()`/`regular()`), defaulting to the theme's `default_control`.
-- **Font weight is modeled (done).** `draw_core::FontWeight` (`Normal`/`Bold`)
-  rides on `DrawCommand::DrawText`, `draw_ui::TextOptions::weight`, and the
-  `Theme::font_weight(TextSize)` token; `Text::weight(..)`/`.bold()` and
-  `Button::weight(..)`/`.bold()` set it. The Canvas backend emits `bold` in the
-  font spec and the wgpu backend loads a separate bold face (`QUILL_FONT_BOLD`
-  or a per-OS candidate list, falling back to the regular face), sharing one
-  glyph atlas. `TextMeasurer` gained weight-aware methods with regular-metrics
-  defaults, so a host with a bold face measures what it renders.
-- **`FontServer` (done).** Font loading/discovery lives in `draw_font`: it
-  enumerates families + weights for an app font picker, resolves a
-  `(family, weight)` request to a concrete face with nearest-weight matching and
-  default fallback, shapes with per-character fallback, and rasterizes into a
-  shared atlas. Replaces the fixed `candidate_paths()` + always-face-0 loading,
-  which could not reach PingFang (a 24-face `.ttc`, no stable path) or pick a
-  weight. `FontWeight` is numeric (100–900). Full design and status:
-  [`docs/font.md`](font.md).
-- **Configurable font metrics (planned).** `line_height` / `ascent` come straight
-  from the loaded face (`ab_glyph`: `height + line_gap`, `ascent`). Faces with
-  skewed metrics (large descent / line gap — some CJK fonts) make vertically
-  centered text sit off-center, and there is no knob: `FontConfig` only carries
-  `mode` + `device_pixel_rasterization`, and `TextOptions` has no vertical
-  alignment / baseline offset. Plan: add overrides to `FontConfig`
-  (`line_height_ratio: Option<f32>`, `ascent_ratio: Option<f32>`,
-  `baseline_offset: f32`), applied in `Font::line_height` / `Font::ascent`
-  (`draw_backend_wgpu/src/font/mod.rs`); defaults (`None` / `0.0`) keep today's
-  behaviour. A host can already work around this by overriding
+Tokens, palette, density and the `Theme` trait API are documented in
+[`docs/design-system.md`](design-system.md); font resolution and shaping in
+[`docs/font.md`](font.md). Remaining roadmap:
+
+- **Font weight (done).** `draw_core::FontWeight` (numeric 100–900) rides the
+  IR, `draw_ui::TextOptions::weight` and `Theme::font_weight(TextSize)`;
+  `Text`/`Button` expose `.weight(..)`/`.bold()`.
+- **`FontServer` (done).** `draw_font` discovers system families/weights,
+  resolves `(family, weight)` with per-character fallback, shapes and rasterizes
+  into a shared atlas — replacing the fixed candidate-path loading.
+- **Configurable font metrics (planned).** Add `line_height_ratio` /
+  `ascent_ratio` / `baseline_offset` overrides to `FontConfig` so faces with
+  skewed metrics (large descent / line gap — some CJK fonts) can be centered;
+  defaults keep today's behaviour. A host can already override
   `TextMeasurer::ascent` (as `image_editor` does for its bundled CJK font).
 
 ## Component layer (`draw_components`)
@@ -155,8 +131,7 @@ priority order and add native tests.
 | 2 | `SceneTree::paint` includes **every** canvas item with a `Visual`, not just `Node2D`; a `Control` with a `Visual` would be painted twice (scene + `draw_ui`). Filter by node kind / ownership. | medium | `draw_scene/src/paint.rs:66` |
 | 3 | **Resource lifecycle is not in the IR contract**: `RenderBackend` has no texture registration; each backend registers privately (e.g. Canvas `register_image`). Document it as a backend extension point, and consider a minimal `register_texture` contract. | medium | `draw_render/src/backend.rs`, `texture.rs` |
 | 4 | `DrawCommand::DrawText` owns a `String` (one allocation per text command per frame). Revisit (`Rc<str>`/interned text) only if it shows in the benchmarks. | low | `draw_render/src/command.rs` |
-| 5 | Stale docs: `draw_scene` crate doc claims it must not depend on `draw_render` (it does, by design); `Overlays` module doc/example still says it owns a `Ui` and calls `app.ui.*`. | low (docs) | `draw_scene/src/lib.rs:4`, `draw_components/src/overlay/mod.rs:1` |
-| 6 | Naming: cross-link `draw_core::ViewportSize` vs `draw_scene::Viewport` docs; clarify that the internal zero-sized `draw_ui` `Ui` namespace is not a public object. | low | `draw_core`, `draw_ui/src/ui/mod.rs` |
+| 5 | Naming: cross-link `draw_core::ViewportSize` vs `draw_scene::Viewport` docs; clarify that the internal zero-sized `draw_ui` `Ui` namespace is not a public object. | low | `draw_core`, `draw_ui/src/ui/mod.rs` |
 
 ## Demo (`examples/demo_app`)
 
@@ -212,6 +187,9 @@ Cross-cutting: Phases 9 and 11 both need "a popover full of commands", so the
   `cargo bench --workspace --no-run`.
 
 ## Done
+
+Stage history is the ledger in [`docs/architecture.md`](architecture.md); this
+section keeps non-stage work items.
 
 - `draw_svg` (`crates/draw_svg`): backend-neutral SVG vector rendering with **no
 external dependency**. It parses a small SVG subset (the Lucide grammar:
@@ -283,39 +261,14 @@ Lucide case.
   `RenderBackend`), which is what every demo already did. See the review item
   "Core hardening".
 
-- `Line` primitive: `DrawCommand::Line { from, to, paint, width }` +
-  `PaintContext::draw_line`, implemented in Canvas (`moveTo`/`lineTo`/`stroke`),
-  wgpu (thin quad) and recording. `Divider`/column separators now draw a real
-  line instead of a filled rect; the profiler audits line geometry.
-- Component-native composition (Stage 25): `SceneTree::add_child` is the single
-  attachment point and every `draw_components::Component` supports `.child()` and the
-  other modifiers directly. The `View`/`ViewExt`/`BuildContext`/`Modify` layer
-  was deleted; `draw_components` no longer exposes `add_*`/`mount` free functions.
-  `demo_app`, `Overlays` popover content and the debug overlay use the new API.
-- Decorator-based chrome, no `Kit` (Stage 23): components attach
-  `draw_ui::NodeDecor` (surface / foreground) and register clicks with
-  `draw_components::set_on_click`. A single `draw_ui::paint` / `draw_ui::handle_input`
-  runs everything. The theme is a value passed to constructors.
-- Overlay layer (`draw_components::Overlays`): a generic floating layer with `confirm`,
-  `popover`, `tips` and `message` built on a pure placement module (flip + clamp),
-  scrims, modal capture, Esc/click-outside dismissal and auto-dismiss timers.
-  `draw_components::Button` gained `Destructive`. Wired into `demo_app` (Delete →
-  confirm → toast).
 - Fixed flex cross-axis `Stretch` overflowing a definite container: items now
   fill the container's inner cross size instead of growing to their content's
   preferred width, so a fixed-width column's items no longer push past its edge.
   Covered by `draw_ui::ui::layout::stretch_does_not_grow_a_definite_cross_axis`
   and `demo_app::note_rows_fit_with_a_wide_measurer`.
-- Stage 21 (complex-script shaping): the wgpu backend shapes each line with
-  `rustybuzz` (kerning, ligatures, contextual forms) and `unicode-bidi` (visual
-  run ordering), rasterizes by glyph id, and aligns by shaped advances.
-  `TextMeasurer::measure_run` is the backend-neutral hook so layout measures with
-  the same shaping; Canvas/WASM `measureText` measures whole runs too.
-- Button cursor feedback: `Ui::hovered_is_button` / `Ui::is_interactive` feed
-  `App::pointer_cursor`, so the Canvas runner sets a `pointer` CSS cursor while
-  the pointer is over a clickable control (and `default` otherwise);
-  `demo_app::DemoApp::pointer_over_clickable` combines both, and `wgpu_demo`
-  maps it to `CursorIcon::Pointer`.
+- Button cursor feedback: `draw_ui::hovered_is_button` / `is_interactive` feed
+  `demo_app::DemoApp::pointer_over_clickable`, which the Canvas runner maps to a
+  CSS `pointer` cursor and `wgpu_demo` to `CursorIcon::Pointer`.
 - Canvas/WASM text is vertically centered: `draw_wasm::CanvasTextMeasurer`
   measures with the same `measureText` font the Canvas backend draws with
   (shared `draw_backend_canvas::font_spec`), so layout baselines use the real

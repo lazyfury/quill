@@ -1,8 +1,9 @@
 //! `draw_scene` — the scene tree: [`Node`], [`SceneTree`], [`CanvasItem`] and
 //! `Node2D` (via [`NodeKind::Node2D`]).
 //!
-//! May depend on `draw_core`. Must not depend on `draw_render` or any browser
-//! API, so the whole scene graph stays testable with native `cargo test`.
+//! May depend on `draw_core` and `draw_render` (the Paint step, Scene -> DrawList,
+//! lives here by design). Must not depend on any browser or concrete-backend API,
+//! so the whole scene graph stays testable with native `cargo test`.
 //!
 //! # Model
 //!

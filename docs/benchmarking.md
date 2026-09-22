@@ -122,9 +122,9 @@ entities to expose scaling curves — the list scenarios are the exception, at
 | `scene/update_clean/{n}` | `SceneTree::update` with nothing dirty (dirty-flag traversal) |
 | `scene/update_dirty_all/{n}` | move every node, then `update` (propagation + recompute) |
 | `scene/paint/{n}` | `SceneTree::paint` into a fresh `DrawList` |
-| `ui/layout/{n}` | `Ui::layout` across the control tree |
+| `ui/layout/{n}` | `draw_ui::layout` across the control tree |
 | `ui/hit_test/{n}` | worst-case reverse hit test (point over the bottom-most control) |
-| `ui/paint/{n}` | `Ui::paint` into a fresh `DrawList` |
+| `ui/paint/{n}` | `draw_ui::paint` into a fresh `DrawList` |
 | `pipeline/ui_frame/{n}` | end-to-end CPU frame: layout → paint → submit → end |
 | `list/scroll_full/{n}` | one scrolling frame of a list with **every** row mounted (the naive shape) |
 | `list/scroll_virtual/{n}` | the same frame through `draw_components::List` (the viewport's rows, recycled) |

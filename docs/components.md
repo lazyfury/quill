@@ -300,7 +300,7 @@ Two pieces make scrolling possible in the core, and `List` builds on both.
 hands its own rectangle to its whole subtree (`draw_ui::set_clip`,
 `Component::clip(true)`). Nested clips intersect, and a subtree whose
 intersection is empty is skipped entirely — nothing painted, nothing
-hit-testable. `Ui::layout` resolves the rectangle in the same pre-order pass
+hit-testable. `draw_ui::layout` resolves the rectangle in the same pre-order pass
 that writes the rectangles back, so it is a pure function of the geometry and
 needs no dirty propagation of its own; paint emits one `save` + `clip_rect` per
 clipped region and pops it with `restore`. A tree where nothing clips emits no
