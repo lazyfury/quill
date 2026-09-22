@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -33,8 +34,13 @@
 #include "gallery.hpp"
 #include "gl_backend.hpp"
 #include "ui.hpp"
+#include "wgpu_ffi.h"
 
 using namespace cppffi;
+
+// Provided by `native_window.mm`: the NSView of a GLFW window, for the wgpu
+// surface. Returns null if the window has no view.
+extern "C" void* cpp_ffi_ns_view(GLFWwindow* window);
 
 namespace {
 
@@ -43,6 +49,7 @@ struct Options {
     bool selfcheck = false;
     bool gallery = false;
     bool demoapp = false;
+    bool wgpu = false;
     bool help = false;
     int width = 520;
     int height = 480;
@@ -60,6 +67,8 @@ void print_help() {
         "  --gallery     show the demo_app-styled component gallery instead of the dashboard\n"
         "  --demoapp     load the real demo_app gallery through demoapp_ffi (chrome only;\n"
         "                DrawText has no ABI v1 record). Arrow keys switch group.\n"
+        "  --wgpu        render with the Rust wgpu backend (wgpu_ffi) instead of the\n"
+        "                C++ OpenGL backend; --selfcheck --wgpu reads it back offscreen.\n"
         "  --width N     window width in logical pixels (default 520)\n"
         "  --height N    window height in logical pixels (default 480)\n"
         "  --frames N    exit after N frames (smoke test for the real window)\n"
@@ -84,6 +93,8 @@ bool parse(int argc, char** argv, Options& options) {
             options.gallery = true;
         } else if (arg == "--demoapp") {
             options.demoapp = true;
+        } else if (arg == "--wgpu") {
+            options.wgpu = true;
         } else if (arg == "--help" || arg == "-h") {
             options.help = true;
         } else if (arg == "--width") {
@@ -187,11 +198,16 @@ int run_dump(const Options& options) {
     return 0;
 }
 
-GLFWwindow* create_window(const Options& options, bool visible) {
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+GLFWwindow* create_window(const Options& options, bool visible, bool no_api) {
+    if (no_api) {
+        // No OpenGL context: the wgpu backend creates a Metal layer on the view.
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    } else {
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+    }
     glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
     return glfwCreateWindow(options.width, options.height, "quill C++ FFI", nullptr, nullptr);
 }
@@ -218,13 +234,73 @@ Pixel sample(const std::vector<unsigned char>& rgba, int fb_width, int fb_height
     return Pixel{rgba[index], rgba[index + 1], rgba[index + 2], rgba[index + 3]};
 }
 
+// The wgpu readback is already top-down (`copy_texture_to_buffer` copies rows
+// in order), unlike `glReadPixels`, so it needs no y flip.
+Pixel sample_top_down(const std::vector<unsigned char>& rgba, int width, int height, float scale,
+                      float logical_x, float logical_y) {
+    const int x = static_cast<int>(logical_x * scale);
+    const int y = static_cast<int>(logical_y * scale);
+    if (x < 0 || x >= width || y < 0 || y >= height) {
+        return {};
+    }
+    const std::size_t index = (static_cast<std::size_t>(y) * width + x) * 4;
+    return Pixel{rgba[index], rgba[index + 1], rgba[index + 2], rgba[index + 3]};
+}
+
 int channel(float value) { return static_cast<int>(value * 255.0f + 0.5f); }
 
 bool near(int actual, float expected) { return std::abs(actual - channel(expected)) <= 4; }
 
+// The expected pixels for whichever scene is on screen, shared by the OpenGL
+// and wgpu self-checks so both backends are held to the same result. `at(x, y)`
+// samples the rendered frame at a logical coordinate.
+int check_scene_pixels(const Options& options, const std::function<Pixel(float, float)>& at,
+                       std::uint64_t commands) {
+    int failures = 0;
+    auto check = [&](const char* label, const Pixel& got, const Color& want) {
+        const bool ok = near(got.r, want.r) && near(got.g, want.g) && near(got.b, want.b);
+        if (!ok) {
+            ++failures;
+        }
+        std::printf("  %-16s (%3d,%3d,%3d) vs (%3d,%3d,%3d)  %s\n", label, got.r, got.g, got.b,
+                    channel(want.r), channel(want.g), channel(want.b), ok ? "ok" : "FAIL");
+    };
+
+    if (options.demoapp) {
+        // The real app fills the viewport: (4,4) lands on the sidebar surface,
+        // not the clear color. Text has no ABI v1 record, so this checks that
+        // the frame arrived and that the backend tessellated it; the chrome is
+        // what can be compared.
+        check("sidebar", at(4.0f, 4.0f), palette().surface);
+        if (commands < 100) {
+            ++failures;
+            std::printf("  expected the full gallery frame, got %llu commands\n",
+                        static_cast<unsigned long long>(commands));
+        }
+    } else if (options.gallery) {
+        // Coordinates follow `build_gallery`: cards at x=16, card 1 at y=16,
+        // pad 16, so the first button row starts at (32, 32), 96px wide with an
+        // 8px gap; the hover row is one control height + 12 below.
+        check("background", at(4.0f, 4.0f), palette().background);
+        check("card", at(20.0f, 20.0f), palette().surface_raised);
+        check("primary", at(40.0f, 40.0f), palette().accent);
+        check("destructive", at(352.0f, 40.0f), palette().error);
+        check("secondary hover", at(40.0f, 88.0f), palette().surface_hover);
+    } else {
+        // Coordinates follow the layout in `ui.cpp`: root padding 16, panel
+        // padding 12, progress bar at (28, 28) sized (W-56, 14).
+        const float w = static_cast<float>(options.width);
+        check("background", at(4.0f, 4.0f), palette().background);
+        check("panel", at(20.0f, 20.0f), palette().surface_raised);
+        check("bar fill", at(32.0f, 33.0f), palette().accent);
+        check("bar track", at(w - 40.0f, 33.0f), palette().surface_hover);
+    }
+    return failures;
+}
+
 // --selfcheck: render offscreen and verify the pixels the UI promised.
 int run_selfcheck(const Options& options) {
-    GLFWwindow* window = create_window(options, false);
+    GLFWwindow* window = create_window(options, false, false);
     if (window == nullptr) {
         std::fprintf(stderr, "failed to create the offscreen window\n");
         return 1;
@@ -297,15 +373,6 @@ int run_selfcheck(const Options& options) {
     std::vector<unsigned char> rgba(static_cast<std::size_t>(fb_width) * fb_height * 4);
     glReadPixels(0, 0, fb_width, fb_height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 
-    int failures = 0;
-    auto check = [&](const char* label, const Pixel& got, const Color& want) {
-        const bool ok = near(got.r, want.r) && near(got.g, want.g) && near(got.b, want.b);
-        if (!ok) {
-            ++failures;
-        }
-        std::printf("  %-16s (%3d,%3d,%3d) vs (%3d,%3d,%3d)  %s\n", label, got.r, got.g, got.b,
-                    channel(want.r), channel(want.g), channel(want.b), ok ? "ok" : "FAIL");
-    };
     auto at = [&](float x, float y) { return sample(rgba, fb_width, fb_height, scale, x, y); };
 
     std::printf("self-check: %s, offscreen %dx%d device, scale %.2f\n",
@@ -315,35 +382,7 @@ int run_selfcheck(const Options& options) {
                 static_cast<unsigned long long>(backend.commands()),
                 static_cast<unsigned long long>(backend.triangles()));
 
-    if (options.demoapp) {
-        // The real app fills the viewport: (4,4) lands on the sidebar surface,
-        // not the clear color. Text has no ABI v1 record, so this checks that
-        // the frame arrived and that the backend tessellated it; the chrome is
-        // what can be compared.
-        check("sidebar", at(4.0f, 4.0f), palette().surface);
-        if (backend.commands() < 100) {
-            ++failures;
-            std::printf("  expected the full gallery frame, got %llu commands\n",
-                        static_cast<unsigned long long>(backend.commands()));
-        }
-    } else if (options.gallery) {
-        // Coordinates follow `build_gallery`: cards at x=16, card 1 at y=16,
-        // pad 16, so the first button row starts at (32, 32), 96px wide with an
-        // 8px gap; the hover row is one control height + 12 below.
-        check("background", at(4.0f, 4.0f), palette().background);
-        check("card", at(20.0f, 20.0f), palette().surface_raised);
-        check("primary", at(40.0f, 40.0f), palette().accent);
-        check("destructive", at(352.0f, 40.0f), palette().error);
-        check("secondary hover", at(40.0f, 88.0f), palette().surface_hover);
-    } else {
-        // Coordinates follow the layout in `ui.cpp`: root padding 16, panel
-        // padding 12, progress bar at (28, 28) sized (W-56, 14).
-        const float w = static_cast<float>(options.width);
-        check("background", at(4.0f, 4.0f), palette().background);
-        check("panel", at(20.0f, 20.0f), palette().surface_raised);
-        check("bar fill", at(32.0f, 33.0f), palette().accent);
-        check("bar track", at(w - 40.0f, 33.0f), palette().surface_hover);
-    }
+    const int failures = check_scene_pixels(options, at, backend.commands());
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glDeleteRenderbuffers(1, &color);
@@ -360,21 +399,42 @@ int run_selfcheck(const Options& options) {
 }
 
 int run_window(const Options& options) {
-    GLFWwindow* window = create_window(options, true);
+    const bool use_wgpu = options.wgpu;
+    GLFWwindow* window = create_window(options, true, use_wgpu);
     if (window == nullptr) {
         std::fprintf(stderr, "failed to create the window\n");
         glfwTerminate();
         return 1;
     }
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
 
     GlBackend backend;
-    if (!backend.init()) {
-        std::fprintf(stderr, "failed to init the OpenGL backend\n");
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        return 1;
+    WgpuFfi* wgpu = nullptr;
+    if (use_wgpu) {
+        int fb_width = 0;
+        int fb_height = 0;
+        int window_width = 0;
+        int window_height = 0;
+        glfwGetFramebufferSize(window, &fb_width, &fb_height);
+        glfwGetWindowSize(window, &window_width, &window_height);
+        const float scale = window_width > 0
+                                ? static_cast<float>(fb_width) / static_cast<float>(window_width)
+                                : 1.0f;
+        wgpu = wgpu_ffi_new(cpp_ffi_ns_view(window), fb_width, fb_height, scale);
+        if (wgpu == nullptr) {
+            std::fprintf(stderr, "failed to init the wgpu backend\n");
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            return 1;
+        }
+    } else {
+        glfwMakeContextCurrent(window);
+        glfwSwapInterval(1);
+        if (!backend.init()) {
+            std::fprintf(stderr, "failed to init the OpenGL backend\n");
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            return 1;
+        }
     }
 
     // The real demo_app gallery, when asked for. Its frame comes from Rust
@@ -406,6 +466,8 @@ int run_window(const Options& options) {
 
     const double start = glfwGetTime();
     double last = start;
+    int last_fb_width = 0;
+    int last_fb_height = 0;
     int frames = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -423,9 +485,6 @@ int run_window(const Options& options) {
                                 ? static_cast<float>(fb_width) / static_cast<float>(window_width)
                                 : 1.0f;
 
-        backend.begin_frame(fb_width, fb_height, scale);
-        clear_to(palette().background);
-
         const double now = glfwGetTime();
         QuillDrawList* list = nullptr;
         if (demoapp != nullptr) {
@@ -442,12 +501,27 @@ int run_window(const Options& options) {
                          static_cast<float>(window_height)},
                         options, static_cast<float>(now - start));
         }
-        backend.submit(list);
-        backend.end_frame();
+
+        if (use_wgpu) {
+            if (fb_width != last_fb_width || fb_height != last_fb_height) {
+                wgpu_ffi_resize(wgpu, fb_width, fb_height, scale);
+                last_fb_width = fb_width;
+                last_fb_height = fb_height;
+            }
+            const Color clear = palette().background;
+            wgpu_ffi_render(wgpu, list, clear.r, clear.g, clear.b, clear.a);
+        } else {
+            backend.begin_frame(fb_width, fb_height, scale);
+            clear_to(palette().background);
+            backend.submit(list);
+            backend.end_frame();
+        }
         quill_draw_list_free(list);
         last = now;
 
-        glfwSwapBuffers(window);
+        if (!use_wgpu) {
+            glfwSwapBuffers(window);
+        }
         ++frames;
         if (options.frames > 0 && frames >= options.frames) {
             break;
@@ -457,9 +531,87 @@ int run_window(const Options& options) {
     if (demoapp != nullptr) {
         demoapp_free(demoapp);
     }
+    if (wgpu != nullptr) {
+        wgpu_ffi_free(wgpu);
+    }
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
+}
+
+// --selfcheck --wgpu: render offscreen with the Rust wgpu backend and assert
+// the same pixels the OpenGL self-check does. No window needed.
+int run_wgpu_selfcheck(const Options& options) {
+    WgpuFfi* wgpu = wgpu_ffi_new(nullptr, 0, 0, 1.0f);
+    if (wgpu == nullptr) {
+        std::fprintf(stderr, "failed to init the wgpu backend\n");
+        return 1;
+    }
+
+    QuillDrawList* list = nullptr;
+    DemoAppHandle* demoapp = nullptr;
+    if (options.demoapp) {
+        demoapp = demoapp_new();
+        demoapp_set_viewport(demoapp, static_cast<float>(options.width),
+                             static_cast<float>(options.height));
+        demoapp_update(demoapp, 0.0f);
+        demoapp_layout(demoapp);
+        list = demoapp_paint(demoapp);
+    } else {
+        list = quill_draw_list_new();
+        Canvas canvas(list);
+        if (options.gallery) {
+            build_gallery(canvas, {0.0f, 0.0f, static_cast<float>(options.width),
+                                   static_cast<float>(options.height)});
+        } else {
+            DashboardState state = demo_state(0.0f);
+            state.balance = 0.6f;
+            build_dashboard(canvas,
+                            {0.0f, 0.0f, static_cast<float>(options.width),
+                             static_cast<float>(options.height)},
+                            state);
+        }
+    }
+
+    const Color clear = palette().background;
+    const int rc = wgpu_ffi_render_offscreen(wgpu, list, static_cast<uint32_t>(options.width),
+                                             static_cast<uint32_t>(options.height), 1.0f,
+                                             clear.r, clear.g, clear.b, clear.a);
+    const std::size_t count = quill_draw_list_len(list);
+    quill_draw_list_free(list);
+    if (demoapp != nullptr) {
+        demoapp_free(demoapp);
+    }
+    if (rc != 0) {
+        std::fprintf(stderr, "wgpu offscreen render failed: %d\n", rc);
+        wgpu_ffi_free(wgpu);
+        return 1;
+    }
+
+    const int width = options.width;
+    const int height = options.height;
+    std::vector<unsigned char> rgba(static_cast<std::size_t>(width) * height * 4);
+    const std::size_t written = wgpu_ffi_read_pixels(wgpu, rgba.data(), rgba.size());
+    if (written != rgba.size()) {
+        std::fprintf(stderr, "wgpu readback returned %zu of %zu bytes\n", written, rgba.size());
+        wgpu_ffi_free(wgpu);
+        return 1;
+    }
+
+    auto at = [&](float x, float y) { return sample_top_down(rgba, width, height, 1.0f, x, y); };
+    std::printf("self-check: %s, wgpu offscreen %dx%d, scale 1.00\n",
+                options.demoapp ? "demo_app" : (options.gallery ? "gallery" : "dashboard"),
+                width, height);
+    std::printf("  drawlist         %zu commands\n", count);
+    const int failures = check_scene_pixels(options, at, count);
+
+    wgpu_ffi_free(wgpu);
+    if (failures == 0) {
+        std::printf("self-check: ok\n");
+        return 0;
+    }
+    std::printf("self-check: %d failure(s)\n", failures);
+    return 1;
 }
 
 }  // namespace
@@ -482,6 +634,10 @@ int main(int argc, char** argv) {
     }
     if (options.dump) {
         return run_dump(options);
+    }
+    if (options.selfcheck && options.wgpu) {
+        // Headless: no GLFW window or context needed.
+        return run_wgpu_selfcheck(options);
     }
     if (!glfwInit()) {
         std::fprintf(stderr, "failed to init GLFW\n");

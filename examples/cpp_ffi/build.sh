@@ -5,7 +5,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$here"
 
-cargo build --release -p draw_ffi -p demoapp_ffi --manifest-path ../../Cargo.toml
+cargo build --release -p draw_ffi -p demoapp_ffi -p wgpu_ffi --manifest-path ../../Cargo.toml
 
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel

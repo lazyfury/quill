@@ -122,6 +122,12 @@ impl QuillDrawList {
             list: DrawList::new(),
         }
     }
+
+    /// The underlying list, for a Rust companion crate that renders it (e.g.
+    /// `wgpu_ffi`). Not part of the C ABI.
+    pub fn draw_list(&self) -> &DrawList {
+        &self.list
+    }
 }
 
 impl Default for QuillDrawList {

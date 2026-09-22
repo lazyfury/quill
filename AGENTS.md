@@ -85,6 +85,11 @@ demoapp_ffi   -> demo_app, draw_ffi, draw_core, draw_render, draw_theme
                   DrawList through `draw_ffi`'s command record. The only crate
                   that depends on `demo_app`, which is an example, not a core
                   crate.)
+wgpu_ffi      -> draw_backend_wgpu, draw_ffi, draw_core, draw_render
+                 (C ABI over the Rust wgpu backend: a foreign host hands over a
+                  window view and a DrawList, and the existing backend renders
+                  it; a headless handle renders offscreen + reads pixels back.
+                  The other side of the C++ demo's backend comparison.)
 draw_font     -> draw_core
                  (backend-neutral font service: system-font discovery, family +
                   weight resolution with per-character fallback, `rustybuzz`
@@ -122,11 +127,12 @@ file_browser   -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                   the first real consumer of `draw_components::List`, and the
                   first host to translate a platform wheel into
                   `InputEvent::Wheel`)
-cpp_ffi (C++/CMake) -> draw_ffi + demoapp_ffi (staticlibs), GLFW, OpenGL 3.3
+cpp_ffi (C++/CMake) -> draw_ffi + demoapp_ffi + wgpu_ffi (staticlibs), GLFW, OpenGL 3.3
                  (standalone C++ host: NOT a Cargo workspace and not a member;
-                  `draw_ffi` is the workspace member it links, and
-                  `demoapp_ffi` lets its `--demoapp` mode load the real gallery.
-                  The UI and the OpenGL backend are C++ — see
+                  `draw_ffi` is the workspace member it links, `demoapp_ffi`
+                  lets its `--demoapp` mode load the real gallery, and
+                  `wgpu_ffi` gives `--wgpu` the Rust backend as an alternative
+                  to the C++ OpenGL one. The UI is C++ — see
                   `examples/cpp_ffi` and `docs/cpp-ffi.md`.)
 ```
 
@@ -178,8 +184,9 @@ None of the demos is a dependency of the core crates.
 | `examples/wgpu_demo` | root member | native `wgpu` + `winit` | `cargo test -p wgpu_demo`; run `cargo run -p wgpu_demo --release` | `examples/wgpu_demo/README.md`, `docs/debug.md` |
 | `examples/deepseek_balance` | **standalone** (own workspace) | own `util` sub-crate (member of that workspace); native `wgpu` + `winit` + `ureq` | `cargo test --manifest-path examples/deepseek_balance/Cargo.toml`; `cargo run --manifest-path examples/deepseek_balance/Cargo.toml -- --selfcheck` | dependency block above, crate module docs |
 | `examples/file_browser` | **standalone** (own workspace) | single crate; native `wgpu` + `winit` | `cargo test --manifest-path examples/file_browser/Cargo.toml`; `cargo run --manifest-path examples/file_browser/Cargo.toml -- --selfcheck` (`--dump` too) | dependency block above |
-| `examples/cpp_ffi` | **standalone** (C++/CMake; no Cargo workspace) | C++17 UI + OpenGL 3.3 backend; links `draw_ffi` + `demoapp_ffi` | `./examples/cpp_ffi/build.sh`; `./examples/cpp_ffi/build/cpp_ffi --selfcheck` (`--dump`, `--gallery`, `--demoapp` too) | `examples/cpp_ffi/README.md`, `docs/cpp-ffi.md` |
+| `examples/cpp_ffi` | **standalone** (C++/CMake; no Cargo workspace) | C++17 UI + OpenGL 3.3 backend; links `draw_ffi` + `demoapp_ffi` + `wgpu_ffi` | `./examples/cpp_ffi/build.sh`; `./examples/cpp_ffi/build/cpp_ffi --selfcheck` (`--dump`, `--gallery`, `--demoapp`, `--wgpu` too) | `examples/cpp_ffi/README.md`, `docs/cpp-ffi.md` |
 | `examples/demoapp_ffi` | root member | `staticlib`/`cdylib` C ABI over `demo_app`; loaded by `cpp_ffi --demoapp` | `cargo test -p demoapp_ffi` | `docs/cpp-ffi.md` |
+| `examples/wgpu_ffi` | root member | `staticlib`/`cdylib` C ABI over `draw_backend_wgpu`; `cpp_ffi --wgpu` (and `--selfcheck --wgpu`) | `cargo test -p wgpu_ffi` | `docs/cpp-ffi.md` |
 
 Headless self-check binaries (`--selfcheck`, and `--dump*` where noted) render
 the same UI into `draw_backend_recording` and print a report; they are the

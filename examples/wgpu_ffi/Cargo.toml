@@ -1,0 +1,19 @@
+[package]
+name = "wgpu_ffi"
+description = "C ABI over draw_backend_wgpu: a foreign host hands over a window and a DrawList, and the Rust wgpu backend renders it."
+version.workspace = true
+edition.workspace = true
+# `wgpu` 24 requires Rust 1.76, like `draw_backend_wgpu`.
+rust-version = "1.76"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+draw_core.workspace = true
+draw_render.workspace = true
+draw_backend_wgpu.workspace = true
+draw_ffi.workspace = true

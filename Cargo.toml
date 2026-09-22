@@ -21,6 +21,7 @@ members = [
     "examples/web_demo",
     "examples/demo_app",
     "examples/demoapp_ffi",
+    "examples/wgpu_ffi",
     "examples/wgpu_demo",
     "examples/multi_tree",
 ]

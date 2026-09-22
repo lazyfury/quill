@@ -37,7 +37,8 @@ rasterize glyphs, which is deliberately out of scope.
 | `src/ui.{hpp,cpp}` | the dashboard (balance bar, chart, toggle, spinner) |
 | `src/gallery.{hpp,cpp}` | a few `demo_app`-styled components (button / checkbox / switch / card / divider / badge) |
 | `src/gl_backend.{hpp,cpp}` | the OpenGL backend (tessellation + state stack) |
-| `src/main.cpp` | window/event loop, `--dump`, `--gallery`, `--selfcheck` |
+| `src/native_window.mm` | the one Objective-C++ file: the NSView for wgpu |
+| `src/main.cpp` | window/event loop, `--dump`, `--gallery`, `--demoapp`, `--wgpu`, `--selfcheck` |
 
 ## Build & run
 
@@ -45,10 +46,11 @@ Requires a C++17 toolchain, CMake ≥ 3.20 and macOS. GLFW is used if installed,
 otherwise the pinned 3.4 release is fetched at configure time.
 
 ```bash
-./build.sh                 # cargo build -p draw_ffi + demoapp_ffi, then CMake
+./build.sh                 # cargo build -p draw_ffi + demoapp_ffi + wgpu_ffi, then CMake
 ./build/cpp_ffi            # the live dashboard window
 ./build/cpp_ffi --gallery  # the component gallery, styled like demo_app
 ./build/cpp_ffi --demoapp  # the real demo_app gallery, loaded through demoapp_ffi
+./build/cpp_ffi --wgpu     # render with the Rust wgpu backend instead of OpenGL
 ./build/cpp_ffi --dump     # print the DrawList command stream (no GPU)
 ./build/cpp_ffi --selfcheck
 ```
@@ -77,6 +79,22 @@ OpenGL backend. Arrow keys switch the catalog group.
 text record, so those read back as `QUILL_CMD_UNSUPPORTED` and are skipped. The
 layout, colors and chrome are the real app's — the labels are missing. Run
 `./build/cpp_ffi --dump --demoapp` to see it: 145 commands, 86 of them text.
+
+## Two backends (`--wgpu`)
+
+`examples/wgpu_ffi` wraps the existing Rust `draw_backend_wgpu` in a C ABI, so
+the same `DrawList` can be rendered two ways:
+
+```text
+DrawList ─┬─> C++ GlBackend (OpenGL 3.3)   [default]
+          └─> wgpu_ffi -> draw_backend_wgpu [--wgpu]
+```
+
+`--wgpu` creates the window with `GLFW_CLIENT_API = GLFW_NO_API` (no GL context)
+and hands the `NSView` to Rust through `src/native_window.mm`; wgpu's Metal
+backend attaches its own layer. `--selfcheck --wgpu` renders offscreen and reads
+back with `wgpu_ffi_read_pixels`, asserting the same expected pixels as the
+OpenGL check — the two backends are compared directly.
 
 ## Verification (no screenshots)
 

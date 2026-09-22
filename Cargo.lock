@@ -2344,6 +2344,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wgpu_ffi"
+version = "0.1.0"
+dependencies = [
+ "draw_backend_wgpu",
+ "draw_core",
+ "draw_ffi",
+ "draw_render",
+]
+
+[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

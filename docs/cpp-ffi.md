@@ -117,6 +117,41 @@ for every label. ABI v1 has no text record, so those read back as
 colors are the real app's, the labels are missing. The `--dump` histogram makes
 that visible (86 `unsupported` of 145 commands).
 
+## The Rust wgpu backend over FFI (`--wgpu`)
+
+`examples/wgpu_ffi` exposes the existing Rust `draw_backend_wgpu` over a C ABI,
+so the C++ host can render the *same* `DrawList` with either backend:
+
+```text
+C++ builds a DrawList ─┬─> C++ GlBackend (OpenGL 3.3) ─> surface
+                       └─> wgpu_ffi -> draw_backend_wgpu ─> surface
+```
+
+- `wgpu_ffi_new(view, w, h, scale)` — a native `NSView*` for a window surface,
+  or null for a headless renderer.
+- `wgpu_ffi_resize` / `wgpu_ffi_render` (surface + present) / `wgpu_ffi_free`.
+- `wgpu_ffi_render_offscreen` + `wgpu_ffi_read_pixels` — the no-window
+  verification path.
+
+The host creates the window with `GLFW_CLIENT_API = GLFW_NO_API` for `--wgpu`
+(no OpenGL context) and passes the view through the one Objective-C++ file,
+`src/native_window.mm`. wgpu's Metal backend attaches its own layer.
+
+```bash
+./build/cpp_ffi --wgpu                       # Rust backend, live window
+./build/cpp_ffi --selfcheck --wgpu           # offscreen readback
+./build/cpp_ffi --selfcheck --wgpu --gallery
+./build/cpp_ffi --selfcheck --wgpu --demoapp
+```
+
+The self-checks assert the *same* expected pixels for both backends, so
+`--selfcheck` (OpenGL) and `--selfcheck --wgpu` are a direct comparison: the
+same `DrawList`, two backends, identical output.
+
+> One gotcha is encoded in `src/main.cpp`: `glReadPixels` is bottom-up, so the
+> OpenGL check flips y; `wgpu_ffi_read_pixels` is already top-down. Two
+> samplers, `sample` and `sample_top_down`.
+
 ## Verification (no screenshots)
 
 - `--dump` builds the UI and prints the `DrawList` command stream with no GPU;
@@ -126,8 +161,9 @@ that visible (86 `unsupported` of 145 commands).
   check covers the background, a panel fill, the bar's accent fill and its
   track; `--selfcheck --gallery` covers the background, a card, and the primary
   / destructive / hovered-secondary buttons; `--selfcheck --demoapp` checks the
-  real gallery's sidebar surface and that the full frame arrived. This is the
-  backend's own pixel buffer, which is the project's no-screenshot rule.
+  real gallery's sidebar surface and that the full frame arrived. `--selfcheck
+  --wgpu` runs the same checks through `wgpu_ffi`'s offscreen readback. This is
+  the backend's own pixel buffer, which is the project's no-screenshot rule.
 
 The Rust side is covered by `cargo test -p draw_ffi`; `draw_ffi` is a root
 workspace member, so `cargo test --workspace` includes it. The C++ side is not a
