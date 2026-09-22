@@ -60,7 +60,13 @@ pub(super) const EXAMPLES: &[&[ExampleFn]] = &[
         display::content::code_block,
         display::content::terminal,
         display::content::empty_state,
-        display::content::glyphs,
+    ],
+    // Icons
+    &[
+        display::icons::set,
+        display::icons::sizes,
+        display::icons::tones,
+        display::icons::context,
     ],
     // Controls
     &[

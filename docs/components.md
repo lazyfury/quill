@@ -499,8 +499,9 @@ tree.add_child(row, Icon::new(Glyph::Search, theme).size(20.0));
 ```
 
 Glyphs: `Check`, `Cross`, `Dash`, `Minus`, `Plus`, `ChevronDown` / `Up` /
-`Left` / `Right`, `Warning`, `Info`, `Search`, `Dot`. `Icon` takes `size`,
-`tone` / `color` and an optional `stroke` width; for a custom shape call
+`Left` / `Right`, `Warning`, `Info`, `Search`, `Dot`, `Grid`, `List`,
+`TextLines`, `Square`, `Toggle`. `Icon` takes `size`, `tone` / `color` and an
+optional `stroke` width; for a custom shape call
 `draw_components::paint_glyph(..)` inside a `foreground` decorator.
 
 ## Request redraw

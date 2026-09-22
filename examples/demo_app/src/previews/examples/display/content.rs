@@ -2,12 +2,10 @@
 //! empty states.
 
 use draw_components::{
-    Badge, Card, CodeBlock, Column, Component, Divider, EmptyState, Glyph, Grid, Icon, Row,
-    Terminal, Text,
+    Badge, Card, CodeBlock, Column, Component, Divider, EmptyState, Row, Terminal, Text,
 };
 use draw_core::Edges;
 use draw_theme::{space, Tone};
-use draw_ui::{Align, Track};
 
 use super::super::Ctx;
 
@@ -80,40 +78,4 @@ pub(crate) fn terminal(card: Card, ctx: &mut Ctx) -> Card {
 pub(crate) fn empty_state(card: Card, ctx: &mut Ctx) -> Card {
     let theme = ctx.theme;
     card.child(EmptyState::new("No results", theme).description("Try a different search."))
-}
-
-pub(crate) fn glyphs(card: Card, ctx: &mut Ctx) -> Card {
-    let theme = ctx.theme;
-    let items = [
-        ("Check", Glyph::Check),
-        ("Cross", Glyph::Cross),
-        ("Dash", Glyph::Dash),
-        ("Minus", Glyph::Minus),
-        ("Plus", Glyph::Plus),
-        ("Chevron", Glyph::ChevronDown),
-        ("Search", Glyph::Search),
-        ("Warning", Glyph::Warning),
-        ("Info", Glyph::Info),
-    ];
-    let mut grid = Grid::new(vec![Track::Fr(1.0), Track::Fr(1.0), Track::Fr(1.0)]).gap(space::SM);
-    for (name, glyph) in items {
-        grid = grid.child(
-            Row::new()
-                .align(Align::Center)
-                .gap(space::XS)
-                .child(Icon::new(glyph, theme))
-                .child(Text::caption(name, theme).tone(Tone::Muted)),
-        );
-    }
-    card.child(grid).child(
-        Row::new()
-            .align(Align::Center)
-            .gap(space::SM)
-            .child(
-                Icon::new(Glyph::Warning, theme)
-                    .tone(Tone::Warning)
-                    .size(18.0),
-            )
-            .child(Text::small("Saved with warnings", theme)),
-    )
 }

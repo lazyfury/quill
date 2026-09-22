@@ -38,6 +38,10 @@ pub const GROUPS: &[Group] = &[
         blurb: "Code, terminal and empty-state surfaces.",
     },
     Group {
+        name: "Icons",
+        blurb: "Built-in vector glyphs, drawn in code.",
+    },
+    Group {
         name: "Controls",
         blurb: "Buttons, toggles and a draggable handle.",
     },
@@ -153,10 +157,28 @@ pub const ITEMS: &[&[Item]] = &[
             blurb: "Icon placeholder, title and description.",
             snippet: "EmptyState::new(\"Nothing here\", theme)",
         },
+    ],
+    // Icons
+    &[
         Item {
-            name: "Glyphs",
-            blurb: "In-code vector icons: check, cross, warning, …",
-            snippet: "Icon::new(Glyph::Warning, theme).tone(Tone::Warning)",
+            name: "Glyph set",
+            blurb: "Every built-in symbol, authored in code.",
+            snippet: "Icon::new(Glyph::Warning, theme)",
+        },
+        Item {
+            name: "Sizes",
+            blurb: "One glyph at 12 / 16 / 20 / 28px.",
+            snippet: "Icon::new(Glyph::Search, theme).size(24.0)",
+        },
+        Item {
+            name: "Tones",
+            blurb: "Semantic colours resolved from the palette.",
+            snippet: "Icon::new(Glyph::Check, theme).tone(Tone::Success)",
+        },
+        Item {
+            name: "In context",
+            blurb: "Glyphs composed into UI rows.",
+            snippet: "Row::new().child(Icon::new(glyph, theme)).child(label)",
         },
     ],
     // Controls

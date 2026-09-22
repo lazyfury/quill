@@ -1,10 +1,11 @@
 //! Basic vector glyphs drawn from primitives — no SVG files, no extra crate.
 //!
-//! Each [`Glyph`] is a tiny shape in a 24×24 viewbox (lines, stroked circles
-//! and dots), painted into any rectangle by [`paint_glyph`]. Components stroke
-//! them with the public [`PaintContext`] primitives, so the core stays
-//! file- and backend-free: the checkbox's check mark, a menu chevron, a warning
-//! triangle and friends are all geometry in code.
+//! Each [`Glyph`] is a tiny shape in a 24×24 viewbox (lines, stroked circles,
+//! stroked rounded rectangles and dots), painted into any rectangle by
+//! [`paint_glyph`]. Components stroke them with the public [`PaintContext`]
+//! primitives, so the core stays file- and backend-free: the checkbox's check
+//! mark, a menu chevron, a warning triangle and friends are all geometry in
+//! code.
 //!
 //! ```ignore
 //! use draw_components::{paint_glyph, Glyph};
@@ -22,6 +23,7 @@ pub const GLYPH_VIEWBOX: f32 = 24.0;
 /// A small monochrome symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Glyph {
+    // Marks
     /// A check mark.
     Check,
     /// A diagonal cross (close / error).
@@ -32,10 +34,12 @@ pub enum Glyph {
     Minus,
     /// A plus sign.
     Plus,
+    // Navigation
     ChevronDown,
     ChevronUp,
     ChevronLeft,
     ChevronRight,
+    // Status
     /// A triangle with an exclamation mark.
     Warning,
     /// A circled "i".
@@ -44,6 +48,17 @@ pub enum Glyph {
     Search,
     /// A single dot.
     Dot,
+    // Structure
+    /// A 2×2 grid.
+    Grid,
+    /// Rows of list entries.
+    List,
+    /// Left-aligned lines of text.
+    TextLines,
+    /// A single rounded square outline.
+    Square,
+    /// A toggle pill with a knob.
+    Toggle,
 }
 
 /// The geometry of one glyph in the 24×24 viewbox.
@@ -54,10 +69,13 @@ struct Shape {
     dots: &'static [(f32, f32, f32)],
     /// Stroked circles: `(x, y, radius)`.
     circles: &'static [(f32, f32, f32)],
+    /// Stroked rounded rectangles: `(x, y, width, height, radius)`.
+    rects: &'static [(f32, f32, f32, f32, f32)],
 }
 
 const NO_LINES: &[((f32, f32), (f32, f32))] = &[];
 const NO_CIRCLES: &[(f32, f32, f32)] = &[];
+const NO_RECTS: &[(f32, f32, f32, f32, f32)] = &[];
 
 impl Glyph {
     fn shape(self) -> Shape {
@@ -66,46 +84,55 @@ impl Glyph {
                 lines: &[((4.5, 12.5), (10.0, 18.0)), ((10.0, 18.0), (19.5, 6.5))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::Cross => Shape {
                 lines: &[((6.0, 6.0), (18.0, 18.0)), ((18.0, 6.0), (6.0, 18.0))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::Dash => Shape {
                 lines: &[((8.0, 12.0), (16.0, 12.0))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::Minus => Shape {
                 lines: &[((5.0, 12.0), (19.0, 12.0))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::Plus => Shape {
                 lines: &[((12.0, 5.0), (12.0, 19.0)), ((5.0, 12.0), (19.0, 12.0))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::ChevronDown => Shape {
                 lines: &[((6.0, 9.5), (12.0, 15.5)), ((12.0, 15.5), (18.0, 9.5))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::ChevronUp => Shape {
                 lines: &[((6.0, 14.5), (12.0, 8.5)), ((12.0, 8.5), (18.0, 14.5))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::ChevronLeft => Shape {
                 lines: &[((15.0, 6.0), (9.0, 12.0)), ((9.0, 12.0), (15.0, 18.0))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::ChevronRight => Shape {
                 lines: &[((9.0, 6.0), (15.0, 12.0)), ((15.0, 12.0), (9.0, 18.0))],
                 dots: &[],
                 circles: &[],
+                rects: NO_RECTS,
             },
             Glyph::Warning => Shape {
                 lines: &[
@@ -116,21 +143,63 @@ impl Glyph {
                 ],
                 dots: &[(12.0, 16.4, 1.2)],
                 circles: NO_CIRCLES,
+                rects: NO_RECTS,
             },
             Glyph::Info => Shape {
                 lines: &[((12.0, 11.0), (12.0, 16.5))],
                 dots: &[(12.0, 7.6, 1.3)],
                 circles: &[(12.0, 12.0, 9.0)],
+                rects: NO_RECTS,
             },
             Glyph::Search => Shape {
                 lines: &[((14.7, 14.7), (20.0, 20.0))],
                 dots: &[],
                 circles: &[(10.5, 10.5, 6.0)],
+                rects: NO_RECTS,
             },
             Glyph::Dot => Shape {
                 lines: NO_LINES,
                 dots: &[(12.0, 12.0, 2.6)],
                 circles: NO_CIRCLES,
+                rects: NO_RECTS,
+            },
+            Glyph::Grid => Shape {
+                lines: &[((12.0, 4.0), (12.0, 20.0)), ((4.0, 12.0), (20.0, 12.0))],
+                dots: &[],
+                circles: &[],
+                rects: &[(4.0, 4.0, 16.0, 16.0, 2.0)],
+            },
+            Glyph::List => Shape {
+                lines: &[
+                    ((10.5, 7.0), (19.5, 7.0)),
+                    ((10.5, 12.0), (19.5, 12.0)),
+                    ((10.5, 17.0), (19.5, 17.0)),
+                ],
+                dots: &[(6.0, 7.0, 1.3), (6.0, 12.0, 1.3), (6.0, 17.0, 1.3)],
+                circles: NO_CIRCLES,
+                rects: NO_RECTS,
+            },
+            Glyph::TextLines => Shape {
+                lines: &[
+                    ((5.0, 7.0), (19.0, 7.0)),
+                    ((5.0, 12.0), (15.5, 12.0)),
+                    ((5.0, 17.0), (19.0, 17.0)),
+                ],
+                dots: &[],
+                circles: &[],
+                rects: NO_RECTS,
+            },
+            Glyph::Square => Shape {
+                lines: NO_LINES,
+                dots: &[],
+                circles: NO_CIRCLES,
+                rects: &[(4.5, 4.5, 15.0, 15.0, 2.5)],
+            },
+            Glyph::Toggle => Shape {
+                lines: NO_LINES,
+                dots: &[(16.0, 12.0, 2.9)],
+                circles: NO_CIRCLES,
+                rects: &[(3.0, 7.0, 18.0, 10.0, 5.0)],
             },
         }
     }
@@ -152,6 +221,10 @@ pub fn paint_glyph(glyph: Glyph, ctx: &mut PaintContext, rect: Rect, color: Colo
     for (x, y, radius) in shape.circles {
         ctx.stroke_circle(map(*x, *y), radius * scale, stroke, color);
     }
+    for (x, y, width, height, radius) in shape.rects {
+        let rect = Rect::from_min_max(map(*x, *y), map(x + width, y + height));
+        ctx.stroke_rounded_rect(rect, radius * scale, stroke, color);
+    }
     for (x, y, radius) in shape.dots {
         ctx.fill_circle(map(*x, *y), radius * scale, color);
     }
@@ -161,6 +234,28 @@ pub fn paint_glyph(glyph: Glyph, ctx: &mut PaintContext, rect: Rect, color: Colo
 mod tests {
     use super::*;
     use draw_render::DrawCommand;
+
+    /// Every glyph, so a new one is covered by the tests below.
+    const ALL: &[Glyph] = &[
+        Glyph::Check,
+        Glyph::Cross,
+        Glyph::Dash,
+        Glyph::Minus,
+        Glyph::Plus,
+        Glyph::ChevronDown,
+        Glyph::ChevronUp,
+        Glyph::ChevronLeft,
+        Glyph::ChevronRight,
+        Glyph::Warning,
+        Glyph::Info,
+        Glyph::Search,
+        Glyph::Dot,
+        Glyph::Grid,
+        Glyph::List,
+        Glyph::TextLines,
+        Glyph::Square,
+        Glyph::Toggle,
+    ];
 
     fn commands(glyph: Glyph) -> Vec<DrawCommand> {
         let mut ctx = PaintContext::new();
@@ -176,22 +271,8 @@ mod tests {
 
     #[test]
     fn every_glyph_paints_at_least_one_primitive() {
-        for glyph in [
-            Glyph::Check,
-            Glyph::Cross,
-            Glyph::Dash,
-            Glyph::Minus,
-            Glyph::Plus,
-            Glyph::ChevronDown,
-            Glyph::ChevronUp,
-            Glyph::ChevronLeft,
-            Glyph::ChevronRight,
-            Glyph::Warning,
-            Glyph::Info,
-            Glyph::Search,
-            Glyph::Dot,
-        ] {
-            let list = commands(glyph);
+        for glyph in ALL {
+            let list = commands(*glyph);
             assert!(!list.is_empty(), "{glyph:?} painted nothing");
             assert!(
                 list.iter()

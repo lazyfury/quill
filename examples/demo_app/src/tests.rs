@@ -85,7 +85,7 @@ fn a_short_window_scrolls_the_preview() {
 #[test]
 fn the_theme_page_paints_palette_colours() {
     let mut app = laid_out();
-    app.show_group(7);
+    app.show_group(8);
     app.layout(app.viewport());
 
     let mut ctx = PaintContext::new();
@@ -107,6 +107,29 @@ fn the_theme_page_paints_palette_colours() {
     assert!(
         !filled(Color::new(0.13, 0.15, 0.20, 1.0)),
         "no swatch should fall back to the default Panel grey"
+    );
+}
+
+#[test]
+fn the_icons_page_paints_glyph_strokes() {
+    let mut app = laid_out();
+    app.show_group(4);
+    app.layout(app.viewport());
+
+    let mut ctx = PaintContext::new();
+    app.paint(&mut ctx);
+    let list = ctx.into_draw_list();
+    assert!(
+        list.commands()
+            .iter()
+            .any(|command| matches!(command, DrawCommand::Line { .. })),
+        "the Icons page should stroke glyph lines"
+    );
+    assert!(
+        list.commands()
+            .iter()
+            .any(|command| matches!(command, DrawCommand::FillCircle { .. })),
+        "the Icons page should fill glyph dots"
     );
 }
 

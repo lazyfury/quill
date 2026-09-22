@@ -10,6 +10,7 @@ use draw_theme::{radius, Theme};
 use draw_ui::SurfaceStyle;
 
 pub(crate) mod content;
+pub(crate) mod icons;
 pub(crate) mod layout;
 pub(crate) mod text;
 pub(crate) mod theme;
