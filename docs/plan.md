@@ -36,6 +36,7 @@ audited by `draw_profile`'s inspector, or it is not "done".
 | Component | Status | Notes |
 |---|---|---|
 | `Text`, `Card`, `Divider`, `Badge`, `Button`, `CodeBlock`, `Terminal`, `EmptyState` | done | |
+| `Icon` / `Glyph` | done | in-code vector symbols (check / cross / dash / warning / chevrons / …); `paint_glyph`; used by the checkbox check mark |
 | `Checkbox`, `Switch` | done | shared `Rc<Cell<_>>` state |
 | `Radio` / `RadioGroup` | next | same interaction layer as `Checkbox` |
 | `Tabs` | next | active indicator, keyboard focus |

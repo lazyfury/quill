@@ -39,6 +39,7 @@
 //! - Controls: [`Button`], [`Checkbox`], [`Switch`].
 //! - Scroll: [`List`] (virtualized rows) and [`ScrollView`] (a clipped, offset
 //!   viewport with a draggable scrollbar).
+//! - Icons: [`Glyph`] + [`Icon`] — in-code vector geometry, no SVG files.
 //! - Menus: [`Menu`] + [`MenuItem`], placed with [`Overlays::menu`].
 //! - Floating: [`Overlays`] (`confirm`, `popover`, `menu`, `tips`, `message`).
 //!
@@ -51,6 +52,7 @@ pub const CRATE: &str = "draw_components";
 /// primitives. See the [crate docs](crate) for the themed layer.
 pub mod base;
 mod components;
+mod glyph;
 pub mod node_ref;
 mod overlay;
 mod router;
@@ -61,10 +63,11 @@ pub use base::{
     Label, Panel, Row, Spec, VBox,
 };
 pub use components::{
-    Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, List, ListColumn,
-    ListState, Menu, MenuItem, ResizeHandle, RowSource, ScrollView, ScrollViewState, Switch,
-    Terminal, Text, MENU_MIN_WIDTH,
+    Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, Icon, List,
+    ListColumn, ListState, Menu, MenuItem, ResizeHandle, RowSource, ScrollView, ScrollViewState,
+    Switch, Terminal, Text, MENU_MIN_WIDTH,
 };
+pub use glyph::{paint_glyph, Glyph, GLYPH_VIEWBOX};
 pub use node_ref::{NodeRef, Ref};
 pub use overlay::{OverlayId, Overlays, Placement};
 pub use router::Router;

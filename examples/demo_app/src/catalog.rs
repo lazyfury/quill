@@ -153,6 +153,11 @@ pub const ITEMS: &[&[Item]] = &[
             blurb: "Icon placeholder, title and description.",
             snippet: "EmptyState::new(\"Nothing here\", theme)",
         },
+        Item {
+            name: "Glyphs",
+            blurb: "In-code vector icons: check, cross, warning, …",
+            snippet: "Icon::new(Glyph::Warning, theme).tone(Tone::Warning)",
+        },
     ],
     // Controls
     &[

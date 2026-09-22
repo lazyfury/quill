@@ -4,6 +4,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::base::{Component, Flex, Label, Spec};
+use crate::glyph::{paint_glyph, Glyph};
 use draw_core::{Edges, Size, Vec2};
 use draw_theme::{radius, Space, TextSize, Theme};
 use draw_ui::{Align, SurfaceStyle, TextOptions, Widget};
@@ -100,11 +101,12 @@ impl Component for Checkbox {
                         &SurfaceStyle::new(fill).border(border).radius(radius::SM),
                     );
                     if checked {
-                        draw_ui::fill_rounded_rect(
+                        paint_glyph(
+                            Glyph::Check,
                             ctx,
-                            draw_ui::inset(rect, 4.0),
-                            1.5,
+                            draw_ui::inset(rect, 2.0),
                             theme.palette().on_accent,
+                            1.8,
                         );
                     }
                 }),
@@ -272,3 +274,52 @@ impl Component for Switch {
 }
 
 crate::impl_scene_child!(Checkbox, Switch);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use draw_core::ViewportSize;
+    use draw_render::{DrawCommand, PaintContext};
+    use draw_scene::SceneTree;
+    use draw_theme::{default_theme, Mode};
+
+    /// Paints one mounted control and returns the emitted commands.
+    fn painted(component: impl Component + 'static) -> Vec<DrawCommand> {
+        let mut tree = SceneTree::new();
+        tree.add_child(
+            tree.root(),
+            Flex::column()
+                .gap(0.0)
+                .padding(Edges::ZERO)
+                .child(component),
+        );
+        draw_ui::layout(&mut tree, ViewportSize::new(Size::new(240.0, 48.0)));
+        let mut ctx = PaintContext::new();
+        draw_ui::paint(&tree, &mut ctx);
+        ctx.into_draw_list().commands().to_vec()
+    }
+
+    #[test]
+    fn a_checked_box_draws_the_check_mark() {
+        let theme = default_theme(Mode::Dark);
+        let commands = painted(Checkbox::new("Done", theme).checked(true));
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, DrawCommand::Line { .. })),
+            "the checked box should stroke a check mark"
+        );
+    }
+
+    #[test]
+    fn an_unchecked_box_draws_no_check_mark() {
+        let theme = default_theme(Mode::Dark);
+        let commands = painted(Checkbox::new("Todo", theme));
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, DrawCommand::Line { .. })),
+            "the empty box should not stroke a check mark"
+        );
+    }
+}

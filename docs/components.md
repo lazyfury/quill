@@ -482,6 +482,27 @@ delegating to `Overlays`: `image_editor` checks the pointer against its
 menu-title nodes on `PointerDown`, closes the overlay, and lets the click reach
 the tree (clicking the open title closes it; clicking another switches).
 
+## Icons
+
+`draw_components::Glyph` + `Icon` draw small monochrome symbols from geometry
+(lines, stroked circles and dots) — **no SVG files and no image assets**, so the
+core stays file- and backend-free. `paint_glyph` paints a glyph into any
+rectangle (the `Checkbox` check mark uses it), and `Icon` is the themed
+component:
+
+```rust
+use draw_components::{Glyph, Icon};
+use draw_theme::Tone;
+
+tree.add_child(row, Icon::new(Glyph::Warning, theme).tone(Tone::Warning));
+tree.add_child(row, Icon::new(Glyph::Search, theme).size(20.0));
+```
+
+Glyphs: `Check`, `Cross`, `Dash`, `Minus`, `Plus`, `ChevronDown` / `Up` /
+`Left` / `Right`, `Warning`, `Info`, `Search`, `Dot`. `Icon` takes `size`,
+`tone` / `color` and an optional `stroke` width; for a custom shape call
+`draw_components::paint_glyph(..)` inside a `foreground` decorator.
+
 ## Request redraw
 
 The UI is immediate-mode over a persistent tree. Mutate state, call

@@ -176,6 +176,7 @@ set, so the demo is itself the token-swap proof.
 | `CodeBlock` | code surface, optional filename/language. |
 | `Terminal` | header dots, command and output lines. |
 | `EmptyState` | icon placeholder, title, description. |
+| `Glyph` / `Icon` | in-code vector icons (check, cross, warning, search, chevrons, …) drawn from primitives — no SVG files. |
 | `Checkbox` | compact control with shared state and `on_change`. |
 | `Switch` | compact on/off control. |
 | `List` | virtualized rows: mounts the viewport's rows (+1 buffer) and recycles them; `ListState` (`sync`/`scroll_by`/`scroll_to`/`invalidate`), wheel + click, container clip. |

@@ -60,6 +60,7 @@ pub(super) const EXAMPLES: &[&[ExampleFn]] = &[
         display::content::code_block,
         display::content::terminal,
         display::content::empty_state,
+        display::content::glyphs,
     ],
     // Controls
     &[
