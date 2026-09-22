@@ -1,8 +1,8 @@
 # quill
 
-A backend-neutral 2D/UI drawing core in Rust, with HTML Canvas 2D (WASM) as the
-first render backend. Inspired by Godot's `SceneTree -> Node -> CanvasItem ->
-Node2D / Control` model, but with a Rust-friendly API.
+A backend-neutral 2D/UI drawing core in Rust. Inspired by Godot's
+`SceneTree -> Node -> CanvasItem -> Node2D / Control` model, but with a
+Rust-friendly API.
 
 ## Architecture
 

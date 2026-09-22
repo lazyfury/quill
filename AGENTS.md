@@ -5,8 +5,8 @@ this file is the short source of truth for rules and status.
 
 ## Goal
 
-Backend-neutral 2D/UI drawing core in Rust. Canvas 2D (WASM) is the first
-backend. Godot-inspired: `SceneTree -> Node -> CanvasItem -> Node2D / Control`.
+Backend-neutral 2D/UI drawing core in Rust. Godot-inspired:
+`SceneTree -> Node -> CanvasItem -> Node2D / Control`.
 
 ## Pipeline (must hold)
 
@@ -57,9 +57,10 @@ Input -> SceneTree -> Update -> Layout -> Paint -> DrawList -> RenderBackend -> 
     approval, and record any approved change in the docs.
 11. **Do not start work on your own.** Implement only the agreed task; report
     unrelated findings instead of acting on them.
-12. **Accept and commit per task.** Present each task as a reviewable diff, get
-    approval, then commit it as its own commit (stage reports still follow
-    rule 6).
+12. **Accept and commit per user task.** A user-proposed task is reviewed and
+    committed as a whole once it is complete — not as agent-internal todo
+    subtasks. Present the finished task as a reviewable diff, get approval, then
+    commit it (stage reports still follow rule 6).
 
 ## Dependency direction
 
