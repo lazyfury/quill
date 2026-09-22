@@ -202,28 +202,10 @@ notes are `docs/godot-migration.md`.
 - **Next (future stages):** Phase 6 `draw_game` capabilities, Phase 7 native
   continuous loop, Phase 8 observability/tests/docs, Phase 9 `quill` facade. See
   `docs/godot-migration.md`.
-- **Current stage:** none — next up Phase 6 `draw_game` (#6, planned). Generated
-  by `python3 tools/tasks.py brief` (see "Task tracking").
-
-## Task tracking (`tools/`)
-
-Working task/stage state lives in `tools/tasks.db` (SQLite, gitignored);
-`tools/schema.sql` and `tools/tasks.py` are committed. It syncs the plan stages
-with the day-to-day tasks:
-
-```bash
-python3 tools/tasks.py stage list          # plan phases (id / title / status)
-python3 tools/tasks.py stage start NAME    # set the one current stage
-python3 tools/tasks.py stage current       # print the current stage (id + title)
-python3 tools/tasks.py task add "…" --stage NAME
-python3 tools/tasks.py task done ID --commit HASH
-python3 tools/tasks.py brief               # one line to paste under "Current stage"
-python3 tools/tasks.py report              # full Markdown summary
-```
+- **Current stage:** none — next up Phase 6 `draw_game` (#6, planned).
 
 On acceptance of a whole user task, the agent writes the durable summary into
-this file (the "Current stage" bullet under "Stages" plus any doc updates); the
-tool never edits `AGENTS.md`.
+this file (the "Current stage" bullet under "Stages" plus any doc updates).
 
 ## Per-stage gate (must run)
 
