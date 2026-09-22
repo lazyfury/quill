@@ -251,21 +251,16 @@ crate/module instead of being embedded where it happens to be used.
       Recorded in `docs/design-system.md`. **Superseded by Stage 25.10/25.11:** the
       `View`/`ViewExt`/`BuildContext`/`Modify` layer and the `add_*`/`mount`
       helpers were deleted; components compose natively with `.child()`.
-- [ ] Stage 25 — Godot-style unified scene (planning approved; Phases 1-5,
-      the UI-state migration and the component-native API complete, Phase 6
-      next). One `SceneTree` for world + UI, `Viewport`/`Camera2D` driving the
-      world, and UI under a `CanvasLayer` in viewport coordinates; every node
-      owns its own state and `draw_ui` is a set of free functions over the tree
-      (no `Ui` object). Full phase plan, target architecture, decisions and open
-      questions: `docs/godot-migration.md`. Phases: 1 `draw_scene` extension
-      point + layers (done), 2 `Viewport`/`Camera2D` (done), 3 `CanvasLayer`
-      painting (done), 4 unified tree: 4a `Ui` borrows the tree, 4b
-      `ControlData` onto the node slot, 4c migrate demos, 4d all control runtime
-      + GUI state onto nodes, 4e layout cache onto the root, 4f theme + measurer
-      onto the root (theme now a passed-in value again, 25.11), 4g remove
-      `Ui`/`UiHost` in favor of free functions (done), 5 unified lifecycle/input
-      (done), 6 `draw_game` capabilities, 7 native continuous loop, 8
-      observability/tests/docs.
+- [x] Stage 25 — Godot-style unified scene (accepted). One `SceneTree` for
+      world + UI, `Viewport`/`Camera2D` driving the world, and UI under a
+      `CanvasLayer` in viewport coordinates; every node owns its own state and
+      `draw_ui` is a set of free functions over the tree (no `Ui` object).
+      Phases 1-5 and sub-stages 25.1-25.16 landed. Phases 6-9 (`draw_game`,
+      native continuous loop, observability, `quill` facade) are **future
+      stages**, not part of Stage 25's acceptance. Post-25.16 work: `draw_font`
+      (system font service + numeric `FontWeight`) and `Theme` as a trait +
+      `DefaultTheme`. Full phase plan, target architecture, decisions and open
+      questions: `docs/godot-migration.md`.
       **Stage 25.10/25.11 (component-native API):** `draw_scene::SceneChild` +
       `SceneTree::add_child`; `draw_components::Component` carries a `Spec` and exposes
       modifiers as methods; `draw_components` components take a

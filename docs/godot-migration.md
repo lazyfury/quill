@@ -1,7 +1,10 @@
 # Godot-style migration
 
-Status: **Stage 25.11 — component-native API (`add_child` + `.child()`), theme
-off the tree; Phase 6 next.**
+Status: **Stage 25 accepted.** Phases 1-5 and sub-stages 25.1-25.16 landed;
+Phases 6-9 (`draw_game`, native continuous loop, observability, `quill` facade)
+are future stages, not part of Stage 25's acceptance. Post-25.16 work:
+`draw_font` (system font service + numeric `FontWeight`) and `Theme` as a trait
++ `DefaultTheme`.
 
 Goal: turn quill from "a UI toolkit that also has a scene tree" into a
 **2D-first scene engine** modeled on Godot, where a single `SceneTree` owns both
@@ -249,9 +252,10 @@ uses it for split-view resizing.
 pointer position). Multi-touch / gamepad remain future work; GUI focus/hover
 were already in `Ui` and a cross-layer focus test was added.
 
-### Phase 6 — game capabilities (new crate `draw_game`)
+### Phase 6 — game capabilities (new crate `draw_game`) — NOT STARTED
 
-Additive, outside the frozen core where possible.
+Additive, outside the frozen core where possible. (Only the `Visual::Image` and
+`Line` items below have landed early, in Stage 25.12 and for `image_editor`.)
 
 - Sprites/textures: `Sprite2D` (or `Visual::Image`) with atlas / animation /
   flip / 9-slice; texture registration already exists in the backends.
