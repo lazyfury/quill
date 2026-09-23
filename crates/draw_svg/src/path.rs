@@ -12,8 +12,10 @@ use crate::{Subpath, SvgError};
 const TOLERANCE: f32 = 0.02;
 /// Recursion guard for pathological control polygons.
 const MAX_DEPTH: u32 = 16;
-/// Angular step when sampling elliptical arcs (~5.6°).
-const ARC_STEP: f32 = std::f32::consts::PI / 32.0;
+/// Angular step when sampling elliptical arcs (~5.6°) is replaced by a
+/// radius-aware length step so a tiny rounded corner does not flatten into
+/// dozens of segments.
+const ARC_LENGTH: f32 = 1.0;
 const TAU: f32 = std::f32::consts::TAU;
 
 /// Parses a `d` attribute into flattened subpaths (user space).
@@ -302,7 +304,8 @@ fn flatten_arc(
         delta += TAU;
     }
 
-    let segments = (delta.abs() / ARC_STEP).ceil().max(1.0) as u32;
+    let radius = ((rx + ry) * 0.5).max(f32::EPSILON);
+    let segments = ((radius * delta.abs()) / ARC_LENGTH).ceil().max(1.0) as u32;
     let before = out.len();
     for step in 1..=segments {
         let angle = theta1 + delta * (step as f32 / segments as f32);
