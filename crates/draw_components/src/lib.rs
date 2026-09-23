@@ -64,8 +64,8 @@ pub use base::{
 };
 pub use components::{
     Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, Icon, List,
-    ListColumn, ListState, Menu, MenuItem, ResizeHandle, RowSource, ScrollView, ScrollViewState,
-    Switch, Terminal, Text, MENU_MIN_WIDTH,
+    ListColumn, ListLead, ListState, Menu, MenuItem, ResizeHandle, RowSource, ScrollView,
+    ScrollViewState, Switch, Terminal, Text, MENU_MIN_WIDTH,
 };
 pub use glyph::{paint_glyph, Glyph, GLYPH_VIEWBOX};
 pub use node_ref::{NodeRef, Ref};

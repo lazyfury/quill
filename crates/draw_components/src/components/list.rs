@@ -4,7 +4,8 @@ use std::cell::{Cell, RefCell};
 use std::ops::Range;
 use std::rc::Rc;
 
-use draw_core::{Color, Edges, NodeId, Vec2};
+use draw_core::{Color, Edges, NodeId, Rect, Size, Vec2};
+use draw_render::PaintContext;
 use draw_scene::SceneTree;
 use draw_theme::{default_theme, Mode, Space, TextSize, Theme, Tone};
 use draw_ui::{
@@ -14,7 +15,7 @@ use draw_ui::{
 use crate::base::{
     apply_spec, set_on_click, set_on_scroll, set_text, update_control, Component, Spec,
 };
-use crate::{Row, Text};
+use crate::{Checkbox, Flex, NodeRef, Row, Text};
 
 /// Supplies the cell text of one row on demand.
 ///
@@ -61,6 +62,94 @@ impl ListColumn {
     }
 }
 
+/// A per-row leading cell, mounted before the text columns.
+///
+/// Leads are laid out left to right in the order they are added, so a tree puts
+/// an indentation spacer, a checkbox and an icon before its name column. Every
+/// lead is bound to the slot's current data row on each (re)bind, so a recycled
+/// row always shows the right state.
+#[derive(Clone)]
+pub enum ListLead {
+    /// A checkbox; `checked(index)` drives it and `on_toggle(index)` fires on
+    /// click. Clicking the box does not activate the row (the nearest callback
+    /// wins), so checking and selecting stay separate.
+    Checkbox {
+        checked: Rc<dyn Fn(usize) -> bool>,
+        on_toggle: Rc<dyn Fn(usize)>,
+    },
+    /// A spacer whose width depends on the row (tree indentation).
+    Spacer { width: Rc<dyn Fn(usize) -> f32> },
+    /// A caller-drawn icon of `width` (e.g. an SVG document).
+    Icon {
+        width: f32,
+        draw: Rc<dyn Fn(&mut PaintContext, Rect, usize)>,
+    },
+}
+
+/// The mounted node(s) backing one [`ListLead`] in a row slot.
+enum LeadSlot {
+    Checkbox(Rc<std::cell::Cell<bool>>),
+    Spacer(NodeRef),
+    Icon,
+}
+
+/// A lead that strokes a caller-provided draw closure into its cell. It is
+/// `MouseFilter::Ignore`, so a click lands on the row behind it.
+struct LeadIcon {
+    spec: Spec,
+    width: f32,
+    first: Rc<std::cell::Cell<usize>>,
+    slot: usize,
+    draw: Rc<dyn Fn(&mut PaintContext, Rect, usize)>,
+}
+
+impl LeadIcon {
+    fn new(
+        width: f32,
+        first: Rc<std::cell::Cell<usize>>,
+        slot: usize,
+        draw: Rc<dyn Fn(&mut PaintContext, Rect, usize)>,
+    ) -> Self {
+        Self {
+            spec: Spec::leaf(),
+            width,
+            first,
+            slot,
+            draw,
+        }
+    }
+}
+
+impl Component for LeadIcon {
+    fn spec(&mut self) -> &mut Spec {
+        &mut self.spec
+    }
+
+    fn name(&self) -> &'static str {
+        "LeadIcon"
+    }
+
+    fn widget(&self) -> Widget {
+        Widget::Panel {
+            color: Color::TRANSPARENT,
+            border: None,
+        }
+    }
+
+    fn prepare(&mut self) {
+        // A non-zero height avoids a degenerate background fill; the icon is
+        // centred in the cell regardless.
+        self.spec.data.min_size = Size::new(self.width, self.width);
+        self.spec.data.mouse_filter = MouseFilter::Ignore;
+        let first = self.first.clone();
+        let slot = self.slot;
+        let draw = self.draw.clone();
+        self.spec.foreground = Some(Box::new(move |ctx, rect, _| {
+            draw(ctx, rect, first.get() + slot);
+        }));
+    }
+}
+
 /// The mounted rows of a list, shared with the application.
 ///
 /// Cloning is cheap and shares one state, so a view keeps a handle and drives
@@ -74,6 +163,7 @@ struct ListInner {
     container: Option<NodeId>,
     theme: &'static dyn Theme,
     columns: Vec<ListColumn>,
+    leads: Vec<ListLead>,
     source: RowSource,
     on_activate: Option<Rc<dyn Fn(usize)>>,
     count: Rc<Cell<usize>>,
@@ -98,6 +188,7 @@ struct ListInner {
 
 struct Slot {
     root: NodeId,
+    leads: Vec<LeadSlot>,
     cells: Vec<Vec<NodeId>>,
     /// Data index currently bound to this slot ([`UNBOUND`] = needs a bind).
     bound: usize,
@@ -111,6 +202,7 @@ impl ListState {
                 container: None,
                 theme,
                 columns: Vec::new(),
+                leads: Vec::new(),
                 source: Rc::new(|_| Vec::new()),
                 on_activate: None,
                 count: Rc::new(Cell::new(0)),
@@ -309,8 +401,8 @@ impl ListInner {
         changed
     }
 
-    /// Mounts one recycled row: a flex row of text cells, a state-driven
-    /// background and a click that selects.
+    /// Mounts one recycled row: a flex row of leading cells plus text cells, a
+    /// state-driven background and a click that selects.
     fn mount_slot(&self, tree: &mut SceneTree, container: NodeId) -> Slot {
         let theme = self.theme;
         let first = self.first.clone();
@@ -321,7 +413,7 @@ impl ListInner {
         // `first`, so a recycled row always answers for what it is showing.
         let paint_first = first.clone();
         let paint_selected = selected.clone();
-        let click_first = first;
+        let click_first = first.clone();
         let click_selected = selected;
 
         let mut row = Row::new()
@@ -333,6 +425,49 @@ impl ListInner {
             // Rows are placed by the list, not by their parent: left/right span
             // the container, top/bottom come from the scroll offset.
             .anchors(Edges::new(0.0, 0.0, 1.0, 0.0));
+
+        // Leading cells first, so they sit left of the text columns.
+        let mut leads = Vec::new();
+        for lead in &self.leads {
+            match lead {
+                ListLead::Checkbox { checked, on_toggle } => {
+                    let state = Rc::new(std::cell::Cell::new(checked(first.get() + slot_index)));
+                    let toggle = on_toggle.clone();
+                    let slot_first = first.clone();
+                    row = row.child(
+                        Checkbox::new("", theme)
+                            .state(state.clone())
+                            .min_size(0.0, self.row_height)
+                            .on_change(move |_| toggle(slot_first.get() + slot_index)),
+                    );
+                    leads.push(LeadSlot::Checkbox(state));
+                }
+                ListLead::Spacer { .. } => {
+                    let node = NodeRef::new();
+                    row = row.child(
+                        Flex::new()
+                            .padding(Edges::ZERO)
+                            .mouse_filter(MouseFilter::Ignore)
+                            .min_size(0.0, 0.0)
+                            .ref_(&node),
+                    );
+                    leads.push(LeadSlot::Spacer(node));
+                }
+                ListLead::Icon { width, draw } => {
+                    row = row.child(LeadIcon::new(
+                        *width,
+                        first.clone(),
+                        slot_index,
+                        draw.clone(),
+                    ));
+                    leads.push(LeadSlot::Icon);
+                }
+            }
+        }
+
+        // Then the text columns. The `NodeRef`s capture them in order, so the
+        // leads can be prepended without re-deriving the child list.
+        let mut columns = Vec::new();
         for column in &self.columns {
             let cell = Text::new("", theme)
                 .size(TextSize::Small)
@@ -340,16 +475,19 @@ impl ListInner {
                 .max_lines(1)
                 .ellipsis(true)
                 .shrink(0.0);
+            let node = NodeRef::new();
             row = row.child(match column.width {
-                Some(width) => cell.basis(SizeBasis::Px(width)),
-                None => cell.grow(1.0),
+                Some(width) => cell.basis(SizeBasis::Px(width)).ref_(&node),
+                None => cell.grow(1.0).ref_(&node),
             });
+            columns.push(node);
         }
         let root = tree.add_child(container, row);
-        let cells = tree
-            .children(root)
-            .map(|ids| ids.iter().map(|id| vec![*id]).collect())
-            .unwrap_or_default();
+        let cells: Vec<Vec<NodeId>> = columns
+            .iter()
+            .filter_map(|node| node.get())
+            .map(|id| vec![id])
+            .collect();
 
         draw_ui::add_decor(
             tree,
@@ -375,6 +513,7 @@ impl ListInner {
 
         Slot {
             root,
+            leads,
             cells,
             bound: UNBOUND,
         }
@@ -382,9 +521,26 @@ impl ListInner {
 
     fn bind_slot(&mut self, tree: &mut SceneTree, slot_index: usize, index: usize) {
         let cells = (self.source)(index);
+        let leads = self.leads.clone();
         let Some(slot) = self.slots.get_mut(slot_index) else {
             return;
         };
+        for (lead, mounted) in leads.iter().zip(slot.leads.iter()) {
+            match (lead, mounted) {
+                (ListLead::Checkbox { checked, .. }, LeadSlot::Checkbox(state)) => {
+                    state.set(checked(index));
+                }
+                (ListLead::Spacer { width }, LeadSlot::Spacer(node)) => {
+                    let width = width(index);
+                    if let Some(node) = node.get() {
+                        if update_control(tree, node, |data| data.min_size.width = width) {
+                            draw_ui::mark_dirty(tree, node);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         for (column, nodes) in slot.cells.iter().enumerate() {
             let text = cells.get(column).cloned().unwrap_or_default();
             for node in nodes {
@@ -429,6 +585,7 @@ pub struct List {
     gap: f32,
     source: RowSource,
     columns: Vec<ListColumn>,
+    leads: Vec<ListLead>,
     count: Rc<Cell<usize>>,
     selected: Rc<Cell<Option<usize>>>,
     on_activate: Option<Rc<dyn Fn(usize)>>,
@@ -450,6 +607,7 @@ impl List {
             gap: theme.spacing(Space::MD),
             source: Rc::new(source),
             columns: vec![ListColumn::flexible()],
+            leads: Vec::new(),
             count: Rc::new(Cell::new(0)),
             selected: Rc::new(Cell::new(None)),
             on_activate: None,
@@ -461,6 +619,48 @@ impl List {
         if !columns.is_empty() {
             self.columns = columns;
         }
+        self
+    }
+
+    /// Adds a per-row leading cell, before the text columns. Leads stack left to
+    /// right in call order (indentation, checkbox, icon, …).
+    pub fn lead(mut self, lead: ListLead) -> Self {
+        self.leads.push(lead);
+        self
+    }
+
+    /// Adds a checkbox lead: `checked` drives the box, `on_toggle` fires on
+    /// click. The box owns the click, so checking does not activate the row.
+    pub fn checkboxes(
+        mut self,
+        checked: impl Fn(usize) -> bool + 'static,
+        on_toggle: impl Fn(usize) + 'static,
+    ) -> Self {
+        self.leads.push(ListLead::Checkbox {
+            checked: Rc::new(checked),
+            on_toggle: Rc::new(on_toggle),
+        });
+        self
+    }
+
+    /// Adds a per-row indentation spacer of `width(index)` logical pixels.
+    pub fn spacer(mut self, width: impl Fn(usize) -> f32 + 'static) -> Self {
+        self.leads.push(ListLead::Spacer {
+            width: Rc::new(width),
+        });
+        self
+    }
+
+    /// Adds a caller-drawn icon cell of `width` (e.g. an SVG document).
+    pub fn icon(
+        mut self,
+        width: f32,
+        draw: impl Fn(&mut PaintContext, Rect, usize) + 'static,
+    ) -> Self {
+        self.leads.push(ListLead::Icon {
+            width,
+            draw: Rc::new(draw),
+        });
         self
     }
 
@@ -537,6 +737,7 @@ impl Component for List {
             inner.container = Some(id);
             inner.theme = self.theme;
             inner.columns = std::mem::take(&mut self.columns);
+            inner.leads = std::mem::take(&mut self.leads);
             inner.source = self.source;
             inner.on_activate = self.on_activate.take();
             inner.count = self.count;
@@ -921,5 +1122,121 @@ mod tests {
             0..(taller / ROW) as usize,
             "the buffer slot sits below the edge until the offset is fractional"
         );
+    }
+
+    /// A list with a leading spacer and checkbox, to drive the lead-binding
+    /// path (the tree view's indentation + selection).
+    struct LeadFixture {
+        tree: SceneTree,
+        state: ListState,
+        selected: Rc<Cell<Option<usize>>>,
+        toggled: Rc<RefCell<Vec<usize>>>,
+        activated: Rc<RefCell<Vec<usize>>>,
+        widths: Rc<RefCell<Vec<f32>>>,
+    }
+
+    impl LeadFixture {
+        fn new(count: usize) -> Self {
+            let mut tree = SceneTree::new();
+            let root = tree.add_child(
+                tree.root(),
+                Flex::column()
+                    .gap(0.0)
+                    .padding(Edges::ZERO)
+                    .mouse_filter(MouseFilter::Ignore),
+            );
+            let count_cell = Rc::new(Cell::new(count));
+            let selected = Rc::new(Cell::new(None));
+            let toggled: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
+            let activated: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
+            let widths: Rc<RefCell<Vec<f32>>> =
+                Rc::new(RefCell::new((0..count).map(|i| i as f32 * 8.0).collect()));
+
+            let width_for = widths.clone();
+            let toggle_for = toggled.clone();
+            let activate_for = activated.clone();
+            let list = List::new(default_theme(Mode::Light), ROW, |_| vec!["row".to_string()])
+                .count(count_cell)
+                .selected(selected.clone())
+                .columns(vec![ListColumn::flexible()])
+                .spacer(move |index| width_for.borrow().get(index).copied().unwrap_or(0.0))
+                .checkboxes(|_| false, move |index| toggle_for.borrow_mut().push(index))
+                .on_activate(move |index| activate_for.borrow_mut().push(index));
+            let state = list.state();
+            tree.add_child(root, list.grow(1.0));
+            let mut fixture = Self {
+                tree,
+                state,
+                selected,
+                toggled,
+                activated,
+                widths,
+            };
+            fixture.frame();
+            fixture
+        }
+
+        fn frame(&mut self) {
+            let viewport = ViewportSize::new(Size::new(WIDTH, HEIGHT));
+            draw_ui::layout(&mut self.tree, viewport);
+            if self.state.sync(&mut self.tree) {
+                draw_ui::layout(&mut self.tree, viewport);
+            }
+            self.tree.update();
+        }
+
+        fn lead(&self, slot: usize, index: usize) -> NodeId {
+            self.tree.children(self.state.rows()[slot]).unwrap()[index]
+        }
+
+        fn click(&mut self, position: Vec2) {
+            for event in [
+                InputEvent::PointerDown {
+                    position,
+                    button: draw_core::PointerButton::Left,
+                },
+                InputEvent::PointerUp {
+                    position,
+                    button: draw_core::PointerButton::Left,
+                },
+            ] {
+                handle_input(&mut self.tree, &event);
+            }
+        }
+    }
+
+    /// A checkbox lead owns its click: it toggles and does **not** activate the
+    /// row, so checking and selecting stay separate gestures.
+    #[test]
+    fn a_checkbox_lead_toggles_without_activating_the_row() {
+        let mut fixture = LeadFixture::new(100);
+        let checkbox = fixture.lead(0, 1);
+        let center = draw_ui::control(&fixture.tree, checkbox)
+            .unwrap()
+            .rect
+            .center();
+
+        fixture.click(center);
+        assert_eq!(*fixture.toggled.borrow(), vec![0]);
+        assert!(fixture.activated.borrow().is_empty(), "no row activation");
+        assert_eq!(fixture.selected.get(), None, "no row selection");
+    }
+
+    /// A spacer lead is bound per row, so scrolling rebinds the indentation.
+    #[test]
+    fn a_spacer_lead_binds_the_row_width() {
+        let mut fixture = LeadFixture::new(100);
+        let width = |fixture: &LeadFixture, slot: usize| {
+            draw_ui::control(&fixture.tree, fixture.lead(slot, 0))
+                .unwrap()
+                .min_size
+                .width
+        };
+        assert_eq!(width(&fixture, 0), 0.0);
+
+        fixture.state.scroll_by(3.0 * ROW);
+        fixture.frame();
+        assert_eq!(width(&fixture, 0), 3.0 * 8.0);
+        assert_eq!(width(&fixture, 1), 4.0 * 8.0);
     }
 }

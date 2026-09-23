@@ -64,6 +64,7 @@ impl Component for Checkbox {
         Widget::Flex(
             draw_ui::FlexStyle::row()
                 .align(Align::Center)
+                .padding(Edges::ZERO)
                 .gap(self.theme.spacing(Space::SM)),
         )
     }
@@ -74,7 +75,11 @@ impl Component for Checkbox {
             .state
             .clone()
             .unwrap_or_else(|| Rc::new(Cell::new(self.initial)));
-        self.spec.data.min_size = Size::new(0.0, theme.row_height());
+        // Fill the row by default, but let a caller pin a smaller height (a
+        // virtualized list row is shorter than the theme's row height).
+        if self.spec.data.min_size.height <= 0.0 {
+            self.spec.data.min_size.height = theme.row_height();
+        }
 
         let paint_state = state.clone();
         self.spec.child(
