@@ -135,7 +135,7 @@ impl Component for MenuItem {
         };
         self.spec.child(
             Label::new(self.label.clone())
-                .font_size(TextSize::Small.px())
+                .font_size(theme.font_size(TextSize::Small))
                 .color(color)
                 .text_options(TextOptions::no_wrap()),
         );
@@ -147,7 +147,7 @@ impl Component for MenuItem {
             };
             self.spec.child(
                 Label::new(shortcut)
-                    .font_size(TextSize::Caption.px())
+                    .font_size(theme.font_size(TextSize::Caption))
                     .color(shortcut_color)
                     .text_options(TextOptions::no_wrap()),
             );

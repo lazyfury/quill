@@ -13,7 +13,7 @@ use draw_core::{Color, FontWeight};
 
 use crate::density::{ControlSize, Density};
 use crate::palette::Palette;
-use crate::scale::{Motion, Radius, Space, TextSize};
+use crate::scale::{Motion, Radius, Space, TextSize, TypeScale};
 
 /// Light or dark appearance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -133,6 +133,9 @@ pub trait Theme {
     }
 
     /// Font size for a text role.
+    ///
+    /// Defaults to the documented [`TextSize::px`]; [`DefaultTheme`] owns a
+    /// [`TypeScale`](crate::TypeScale) and overrides this.
     fn font_size(&self, size: TextSize) -> f32 {
         size.px()
     }
@@ -199,6 +202,8 @@ pub struct DefaultTheme {
     /// Layout density (spacing / control metrics). Colors and type are
     /// unaffected, so a compact theme is a token swap.
     pub density: Density,
+    /// The theme's type scale: the pixel size of each text role.
+    pub type_scale: TypeScale,
 }
 
 impl Default for DefaultTheme {
@@ -213,6 +218,7 @@ impl DefaultTheme {
             mode: Mode::Light,
             palette: Palette::light(),
             density: Density::default(),
+            type_scale: TypeScale::DEFAULT,
         }
     }
 
@@ -221,6 +227,7 @@ impl DefaultTheme {
             mode: Mode::Dark,
             palette: Palette::dark(),
             density: Density::default(),
+            type_scale: TypeScale::DEFAULT,
         }
     }
 
@@ -233,6 +240,17 @@ impl DefaultTheme {
     /// This theme with [`Density::COMPACT`] (tighter spacing, mini controls).
     pub fn compact(self) -> Self {
         self.with_density(Density::COMPACT)
+    }
+
+    /// Returns a copy of this theme with a different type scale.
+    pub fn with_type_scale(mut self, type_scale: TypeScale) -> Self {
+        self.type_scale = type_scale;
+        self
+    }
+
+    /// This theme with every type role multiplied by `factor`.
+    pub fn with_font_scale(self, factor: f32) -> Self {
+        self.with_type_scale(self.type_scale.scaled(factor))
     }
 
     /// Builds the theme for an explicit mode.
@@ -263,6 +281,10 @@ impl Theme for DefaultTheme {
 
     fn density(&self) -> Density {
         self.density
+    }
+
+    fn font_size(&self, size: TextSize) -> f32 {
+        self.type_scale.get(size)
     }
 }
 
@@ -297,6 +319,22 @@ mod tests {
     fn defaults_to_light() {
         assert_eq!(DefaultTheme::default().mode, Mode::Light);
         assert_eq!(DefaultTheme::light().background().to_rgba8()[0], 0xFF);
+    }
+
+    #[test]
+    fn a_theme_owns_its_type_scale() {
+        // The default scale matches the documented sizes.
+        assert_eq!(
+            DefaultTheme::dark().font_size(TextSize::Body),
+            TextSize::Body.px()
+        );
+        // A theme can scale every role without touching a component.
+        let theme = DefaultTheme::dark().with_font_scale(0.5);
+        assert_eq!(theme.font_size(TextSize::Body), TextSize::Body.px() * 0.5);
+        assert_eq!(
+            theme.font_size(TextSize::Heading),
+            TextSize::Heading.px() * 0.5
+        );
     }
 
     #[test]

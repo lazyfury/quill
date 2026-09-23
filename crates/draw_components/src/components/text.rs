@@ -125,10 +125,6 @@ impl Text {
     pub fn bold(self) -> Self {
         self.weight(FontWeight::BOLD)
     }
-
-    pub fn size_px(&self) -> f32 {
-        self.size.px()
-    }
 }
 
 impl Component for Text {
@@ -146,7 +142,7 @@ impl Component for Text {
             .unwrap_or_else(|| self.theme.font_weight(self.size));
         Widget::Label {
             text: self.text.clone(),
-            font_size: self.size.px(),
+            font_size: self.theme.font_size(self.size),
             color: self.color.unwrap_or_else(|| self.tone.color(self.theme)),
             options: self.options.weight(weight),
         }
@@ -163,6 +159,13 @@ mod tests {
     fn weight_of(text: Text) -> FontWeight {
         match text.widget() {
             Widget::Label { options, .. } => options.weight,
+            _ => panic!("Text must build a Label"),
+        }
+    }
+
+    fn size_of(text: Text) -> f32 {
+        match text.widget() {
+            Widget::Label { font_size, .. } => font_size,
             _ => panic!("Text must build a Label"),
         }
     }
@@ -200,5 +203,27 @@ mod tests {
         let theme: &'static dyn Theme = Box::leak(Box::new(BoldHeadings(DefaultTheme::dark())));
         assert_eq!(weight_of(Text::heading("x", theme)), FontWeight::BOLD);
         assert_eq!(weight_of(Text::new("x", theme)), FontWeight::NORMAL);
+    }
+
+    #[test]
+    fn a_theme_can_scale_the_type() {
+        struct BiggerType(DefaultTheme);
+        impl Theme for BiggerType {
+            fn palette(&self) -> &Palette {
+                self.0.palette()
+            }
+            fn mode(&self) -> Mode {
+                self.0.mode()
+            }
+            fn font_size(&self, size: TextSize) -> f32 {
+                self.0.font_size(size) * 2.0
+            }
+        }
+        let theme: &'static dyn Theme = Box::leak(Box::new(BiggerType(DefaultTheme::dark())));
+        assert_eq!(
+            size_of(Text::heading("x", theme)),
+            TextSize::Heading.px() * 2.0
+        );
+        assert_eq!(size_of(Text::new("x", theme)), TextSize::Body.px() * 2.0);
     }
 }

@@ -685,12 +685,12 @@ fn build_entry(
                     .surface(surface)
                     .child(
                         Label::new(title.clone())
-                            .font_size(TextSize::Heading.px())
+                            .font_size(theme.font_size(TextSize::Heading))
                             .color(palette.foreground),
                     )
                     .child(
                         Label::new(message.clone())
-                            .font_size(TextSize::Body.px())
+                            .font_size(theme.font_size(TextSize::Body))
                             .color(palette.muted),
                     )
                     .child(
@@ -718,7 +718,7 @@ fn build_entry(
                 tree.add_child(
                     node,
                     Label::new(title.clone())
-                        .font_size(TextSize::Subheading.px())
+                        .font_size(theme.font_size(TextSize::Subheading))
                         .color(palette.foreground),
                 );
             }
@@ -759,7 +759,7 @@ fn build_entry(
             tree.add_child(
                 node,
                 Label::new(text.clone())
-                    .font_size(TextSize::Small.px())
+                    .font_size(theme.font_size(TextSize::Small))
                     .color(palette.background)
                     .mouse_filter(MouseFilter::Ignore),
             );
@@ -787,7 +787,7 @@ fn build_entry(
             tree.add_child(
                 node,
                 Label::new(text.clone())
-                    .font_size(TextSize::Small.px())
+                    .font_size(theme.font_size(TextSize::Small))
                     .color(tone.color(theme))
                     .mouse_filter(MouseFilter::Ignore),
             );

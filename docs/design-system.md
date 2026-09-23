@@ -64,7 +64,12 @@ Semantic accents (`accent`, `success`, `warning`, `error`, `info`), `on_accent`,
 
 - Spacing: `space::{XXXS..COLOSSAL}` = `2,4,6,8,12,16,20,24,32,40,48,64,80`.
 - Radius: `radius::{NONE,SM,MD,LG,PANEL,FULL}` = `0,4,6,8,10,9999`.
-- Type: `TextSize::{Display,Title,Heading,Subheading,Body,Small,Caption}`.
+- Type: `TextSize::{Display,Title,Heading,Subheading,Body,Small,Caption}` names
+  the role; `TypeScale` owns the pixel size. Components resolve a role through
+  `Theme::font_size(TextSize)` (the trait default is `TextSize::px()`, while
+  `DefaultTheme` reads its `type_scale`), so a theme can scale or replace any
+  role. `DefaultTheme::with_font_scale(0.9)` scales them all; line height is
+  derived from the resolved size by the text measurer.
 - Controls: `control::{HEIGHT,HEIGHT_SM,HEIGHT_LG,ICON,ROW,ROW_SM,TAB}` (the base / comfortable values).
 - Motion: `motion::{FAST,NORMAL,SLOW}` = 100/150/200 ms.
 
@@ -353,6 +358,18 @@ backward-compatible addition and record it here.
   the nearest face (shared atlas). Additive and backward compatible: `draw_text`
   still draws `Normal`, and all existing `TextOptions` constructors default to
   `Normal`. See [`docs/font.md`](font.md).
+- **Theme-driven font sizes** (Stage 25.x): the `Theme::font_size(TextSize)` token
+  existed but no component read it — `Text` used `TextSize::px()` directly and
+  `Button` / `Menu` / controls / surfaces / overlays hardcoded `TextSize::X.px()`.
+  Every one now resolves through `theme.font_size(..)`, so a theme can scale any
+  text role (the default still returns `TextSize::px()`, so nothing changes
+  visually). `TypeScale` is the theme-owned config: `DefaultTheme` carries one
+  (seeded from `TextSize::px()`) and `with_font_scale(..)` / `with_type_scale(..)`
+  replace it, so the sizes are the theme's, not the enum's. Layout line height
+  already came from `TextMeasurer::line_height` for the resolved pixel size; the
+  unused `TextSize::line_height()` and `Text::size_px()` were removed. `Text` and
+  `Button` gain a test that a custom theme scales their label, and `draw_theme`
+  tests that a theme owns its type scale.
 - **Wrapping flex containers report the stacked cross size** (driven by
   `image_editor`'s new-document preset row): `measure_flex` computed a
   container's preferred cross size from the tallest single item even when `wrap`

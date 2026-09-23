@@ -13,6 +13,8 @@
 //! assert_eq!(theme.spacing(Space::MD), 12.0);
 //! assert_eq!(theme.compact().spacing(Space::MD), 9.0);
 //! assert_eq!(TextSize::Body.px(), 15.0);
+//! assert_eq!(theme.font_size(TextSize::Body), 15.0);
+//! assert_eq!(theme.with_font_scale(0.5).font_size(TextSize::Body), 7.5);
 //! ```
 //!
 //! The visual language is intentionally restrained: monochrome surfaces, thin
@@ -32,6 +34,7 @@ pub use density::{ControlSize, Density};
 pub use palette::{Palette, Semantic};
 pub use scale::{
     border, control, motion, radius, space, Border, Control, Motion, Radius, Space, TextSize,
+    TypeScale,
 };
 pub use theme::{compact_theme, default_theme, DefaultTheme, Mode, SurfaceLevel, Theme};
 pub use tone::{SurfaceTone, Tone};

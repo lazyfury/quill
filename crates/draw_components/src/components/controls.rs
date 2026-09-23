@@ -118,7 +118,7 @@ impl Component for Checkbox {
         );
 
         let label = self.label.clone();
-        let body = TextSize::Body.px();
+        let body = theme.font_size(TextSize::Body);
         let foreground = theme.palette().foreground;
         self.spec.child(
             Label::new(label)
@@ -256,7 +256,7 @@ impl Component for Switch {
         );
 
         if let Some(label) = self.label.clone() {
-            let body = TextSize::Body.px();
+            let body = theme.font_size(TextSize::Body);
             let foreground = theme.palette().foreground;
             self.spec.child(
                 Label::new(label)

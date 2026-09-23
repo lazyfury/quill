@@ -39,7 +39,7 @@ impl Button {
             text: text.into(),
             variant: ButtonVariant::Secondary,
             size: theme.default_control(),
-            font_size: TextSize::Small.px(),
+            font_size: theme.font_size(TextSize::Small),
             weight: FontWeight::NORMAL,
             on_click: None,
         }
@@ -209,8 +209,8 @@ mod tests {
     use draw_core::{Size, ViewportSize};
     use draw_render::{DrawCommand, PaintContext};
     use draw_scene::SceneTree;
-    use draw_theme::{compact_theme, default_theme, Mode};
-    use draw_ui::{control, MouseFilter};
+    use draw_theme::{compact_theme, default_theme, DefaultTheme, Mode, Palette};
+    use draw_ui::{control, Control, MouseFilter};
 
     fn column(tree: &mut SceneTree, button: Button) -> draw_core::NodeId {
         let root = tree.root();
@@ -287,5 +287,31 @@ mod tests {
         let height = control(&tree, forced).unwrap().rect.size.height;
         assert!(height >= compact.control_height(ControlSize::Regular));
         assert!(height > compact.control_height(ControlSize::Mini));
+    }
+
+    #[test]
+    fn a_theme_can_scale_the_button_label() {
+        struct BiggerType(DefaultTheme);
+        impl Theme for BiggerType {
+            fn palette(&self) -> &Palette {
+                self.0.palette()
+            }
+            fn mode(&self) -> Mode {
+                self.0.mode()
+            }
+            fn font_size(&self, size: TextSize) -> f32 {
+                self.0.font_size(size) * 2.0
+            }
+        }
+        let theme: &'static dyn Theme = Box::leak(Box::new(BiggerType(DefaultTheme::dark())));
+        let mut tree = SceneTree::new();
+        let id = column(&mut tree, Button::new("A", theme));
+        let label = tree.children(id).unwrap().into_iter().find_map(|child| {
+            match tree.data::<Control>(*child).map(|data| &data.widget) {
+                Some(Widget::Label { font_size, .. }) => Some(*font_size),
+                _ => None,
+            }
+        });
+        assert_eq!(label, Some(TextSize::Small.px() * 2.0));
     }
 }

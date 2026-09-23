@@ -364,7 +364,7 @@ impl Component for CodeBlock {
         }
         self.spec.child(
             Label::new(self.code.clone())
-                .font_size(TextSize::Small.px())
+                .font_size(theme.font_size(TextSize::Small))
                 .color(theme.palette().foreground)
                 .text_options(TextOptions::no_wrap())
                 .anchors(Edges::ZERO)
@@ -465,7 +465,7 @@ impl Component for Terminal {
         if let Some(command) = self.command.clone() {
             self.spec.child(
                 Label::new(format!("$ {command}"))
-                    .font_size(TextSize::Small.px())
+                    .font_size(theme.font_size(TextSize::Small))
                     .color(theme.palette().foreground)
                     .text_options(TextOptions::no_wrap())
                     .anchors(Edges::ZERO)
@@ -476,7 +476,7 @@ impl Component for Terminal {
         if !output.is_empty() {
             self.spec.child(
                 Label::new(output)
-                    .font_size(TextSize::Small.px())
+                    .font_size(theme.font_size(TextSize::Small))
                     .color(theme.palette().muted)
                     .text_options(TextOptions::no_wrap())
                     .anchors(Edges::ZERO)

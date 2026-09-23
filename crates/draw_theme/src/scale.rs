@@ -106,7 +106,12 @@ pub enum TextSize {
 }
 
 impl TextSize {
-    /// Font size in logical pixels.
+    /// Font size in logical pixels — the documented default for a role.
+    ///
+    /// This seeds [`TypeScale::DEFAULT`]; components read
+    /// [`Theme::font_size`](crate::Theme::font_size), so a theme owns the actual
+    /// size and may scale any role. Layout line height is derived from the
+    /// resolved pixel size by the text measurer, not from this table.
     pub const fn px(self) -> f32 {
         match self {
             Self::Display => 56.0,
@@ -118,19 +123,60 @@ impl TextSize {
             Self::Caption => 11.5,
         }
     }
+}
 
-    /// Recommended line height for this size.
-    pub const fn line_height(self) -> f32 {
-        let ratio = match self {
-            Self::Display => 1.10,
-            Self::Title => 1.20,
-            Self::Heading => 1.30,
-            Self::Subheading => 1.40,
-            Self::Body => 1.50,
-            Self::Small => 1.45,
-            Self::Caption => 1.40,
-        };
-        self.px() * ratio
+/// A theme's type scale: the pixel size of each text role.
+///
+/// [`TextSize`] names the role; the theme owns the size. [`TextSize::px`] only
+/// seeds [`TypeScale::DEFAULT`], so a theme can scale or replace any role
+/// without touching a component.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TypeScale {
+    pub display: f32,
+    pub title: f32,
+    pub heading: f32,
+    pub subheading: f32,
+    pub body: f32,
+    pub small: f32,
+    pub caption: f32,
+}
+
+impl TypeScale {
+    /// The documented default scale (seeded from [`TextSize::px`]).
+    pub const DEFAULT: Self = Self {
+        display: TextSize::Display.px(),
+        title: TextSize::Title.px(),
+        heading: TextSize::Heading.px(),
+        subheading: TextSize::Subheading.px(),
+        body: TextSize::Body.px(),
+        small: TextSize::Small.px(),
+        caption: TextSize::Caption.px(),
+    };
+
+    /// Every role multiplied by `factor`.
+    pub fn scaled(self, factor: f32) -> Self {
+        Self {
+            display: self.display * factor,
+            title: self.title * factor,
+            heading: self.heading * factor,
+            subheading: self.subheading * factor,
+            body: self.body * factor,
+            small: self.small * factor,
+            caption: self.caption * factor,
+        }
+    }
+
+    /// The pixel size for `role`.
+    pub const fn get(self, role: TextSize) -> f32 {
+        match role {
+            TextSize::Display => self.display,
+            TextSize::Title => self.title,
+            TextSize::Heading => self.heading,
+            TextSize::Subheading => self.subheading,
+            TextSize::Body => self.body,
+            TextSize::Small => self.small,
+            TextSize::Caption => self.caption,
+        }
     }
 }
 
