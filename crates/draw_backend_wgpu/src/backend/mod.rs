@@ -154,6 +154,40 @@ pub enum TextureFilter {
     Nearest,
 }
 
+/// An optional post-process applied when a registered texture is drawn.
+///
+/// Like [`TextureFilter`], it is a backend-side property of a [`TextureId`],
+/// not part of the neutral `DrawImage` command. It exists for low-resolution
+/// canvases (a pixel-art emulator frame) that want a CRT/LCD look; the effect
+/// is a fragment shader that reads the texture and the current `uv`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TextureEffect {
+    /// A plain textured blit.
+    #[default]
+    None,
+    /// Alternate source rows darkened — horizontal scanlines.
+    Scanlines,
+    /// Scanlines plus an aperture-grille colour mask.
+    Crt,
+    /// A dark grid between source pixels (an LCD pixel grid).
+    Lcd,
+    /// A 5-tap unsharp mask.
+    Sharpen,
+}
+
+impl TextureEffect {
+    /// The fragment entry point in `shader.wgsl` for this effect.
+    pub(super) fn entry_point(self) -> &'static str {
+        match self {
+            TextureEffect::None => "fs_main",
+            TextureEffect::Scanlines => "fs_scanlines",
+            TextureEffect::Crt => "fs_crt",
+            TextureEffect::Lcd => "fs_lcd",
+            TextureEffect::Sharpen => "fs_sharpen",
+        }
+    }
+}
+
 /// Which texture a draw range samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Surface {
@@ -257,6 +291,11 @@ pub struct WgpuBackend {
     pub(super) texture_sizes: HashMap<TextureId, (u32, u32)>,
     /// Per-texture sampling filter; absent means [`TextureFilter::Linear`].
     pub(super) texture_filters: HashMap<TextureId, TextureFilter>,
+    /// Per-texture post-process; absent means [`TextureEffect::None`].
+    pub(super) texture_effects: HashMap<TextureId, TextureEffect>,
+    /// Effect pipelines, one per (effect, target format), built on demand.
+    pub(super) effect_pipelines:
+        HashMap<(TextureEffect, wgpu::TextureFormat), wgpu::RenderPipeline>,
     /// Kept so [`WgpuBackend::update_texture`] can rewrite pixels in place
     /// instead of allocating a new GPU texture every frame.
     pub(super) texture_objects: HashMap<TextureId, wgpu::Texture>,
@@ -455,6 +494,39 @@ impl WgpuBackend {
     /// The filter recorded for `id` (`Linear` when none was set).
     fn filter_for(&self, id: TextureId) -> TextureFilter {
         self.texture_filters.get(&id).copied().unwrap_or_default()
+    }
+
+    /// Sets the post-process applied when `id` is drawn. `None` clears it.
+    pub fn set_texture_effect(&mut self, id: TextureId, effect: TextureEffect) {
+        if effect == TextureEffect::None {
+            self.texture_effects.remove(&id);
+        } else {
+            self.texture_effects.insert(id, effect);
+        }
+    }
+
+    /// The effect recorded for `id` (`None` when none was set).
+    pub(super) fn effect_for(&self, id: TextureId) -> TextureEffect {
+        self.texture_effects.get(&id).copied().unwrap_or_default()
+    }
+
+    /// Ensures an effect pipeline exists for `effect`/`format`.
+    pub(super) fn ensure_effect_pipeline(
+        &mut self,
+        format: wgpu::TextureFormat,
+        effect: TextureEffect,
+    ) {
+        if self.effect_pipelines.contains_key(&(effect, format)) {
+            return;
+        }
+        let pipeline = pipeline::create_render_pipeline(
+            &self.device,
+            &self.shader,
+            &self.bind_group_layout,
+            format,
+            effect.entry_point(),
+        );
+        self.effect_pipelines.insert((effect, format), pipeline);
     }
 
     /// The GPU sampler for a filter.

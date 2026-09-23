@@ -11,6 +11,7 @@ pub(super) fn create_render_pipeline(
     shader: &wgpu::ShaderModule,
     bind_group_layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
+    fragment_entry: &str,
 ) -> wgpu::RenderPipeline {
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("draw_backend_wgpu.pipeline_layout"),
@@ -35,7 +36,7 @@ pub(super) fn create_render_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(fragment_entry),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,

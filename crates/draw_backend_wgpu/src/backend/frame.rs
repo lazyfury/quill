@@ -53,8 +53,13 @@ impl WgpuBackend {
         if self.pipelines.contains_key(&format) {
             return;
         }
-        let pipeline =
-            create_render_pipeline(&self.device, &self.shader, &self.bind_group_layout, format);
+        let pipeline = create_render_pipeline(
+            &self.device,
+            &self.shader,
+            &self.bind_group_layout,
+            format,
+            "fs_main",
+        );
         self.pipelines.insert(format, pipeline);
     }
 
@@ -140,13 +145,32 @@ impl WgpuBackend {
     }
 
     /// Encodes and submits the render pass for the current frame.
-    pub(super) fn render_frame(&self) {
-        let Some(frame) = self.frame.as_ref() else {
+    pub(super) fn render_frame(&mut self) {
+        let Some((format, width, height, msaa_view, view)) = self.frame.as_ref().map(|frame| {
+            (
+                frame.format,
+                frame.width,
+                frame.height,
+                frame.msaa_view.clone(),
+                frame.view.clone(),
+            )
+        }) else {
             return;
         };
-        let Some(pipeline) = self.pipelines.get(&frame.format) else {
+
+        // Build any effect pipeline the registered textures need for this
+        // target format, before the pass borrows the caches immutably.
+        let mut effects: Vec<TextureEffect> = self.texture_effects.values().copied().collect();
+        effects.sort_by_key(|effect| *effect as u8);
+        effects.dedup();
+        for effect in effects {
+            self.ensure_effect_pipeline(format, effect);
+        }
+
+        let Some(default_pipeline) = self.pipelines.get(&format) else {
             return;
         };
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -177,8 +201,8 @@ impl WgpuBackend {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("draw_backend_wgpu.pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &frame.msaa_view,
-                    resolve_target: Some(&frame.view),
+                    view: &msaa_view,
+                    resolve_target: Some(&view),
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(clear),
                         store: wgpu::StoreOp::Discard,
@@ -190,15 +214,33 @@ impl WgpuBackend {
             });
 
             if let Some(buffer) = &vertex_buffer {
-                pass.set_pipeline(pipeline);
                 pass.set_vertex_buffer(0, buffer.slice(..));
+                let mut current: Option<*const wgpu::RenderPipeline> = None;
                 for range in &self.ranges {
+                    // A texture with an effect is drawn through that effect's
+                    // pipeline; everything else uses the plain one.
+                    let effect = match range.surface {
+                        Surface::Texture(id) => self.effect_for(id),
+                        _ => TextureEffect::None,
+                    };
+                    let pipeline = if effect == TextureEffect::None {
+                        default_pipeline
+                    } else {
+                        self.effect_pipelines
+                            .get(&(effect, format))
+                            .unwrap_or(default_pipeline)
+                    };
+                    let key = pipeline as *const wgpu::RenderPipeline;
+                    if current != Some(key) {
+                        pass.set_pipeline(pipeline);
+                        current = Some(key);
+                    }
                     pass.set_bind_group(0, self.bind_group_for(range.surface), &[]);
                     match range.scissor {
                         Some(scissor) => {
                             pass.set_scissor_rect(scissor[0], scissor[1], scissor[2], scissor[3])
                         }
-                        None => pass.set_scissor_rect(0, 0, frame.width, frame.height),
+                        None => pass.set_scissor_rect(0, 0, width, height),
                     }
                     pass.draw(range.vertices.clone(), 0..1);
                 }

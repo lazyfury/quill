@@ -51,7 +51,7 @@ mod font;
 mod shader;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use backend::{PixelBuffer, TextureFilter, WgpuBackend, WgpuError};
+pub use backend::{PixelBuffer, TextureEffect, TextureFilter, WgpuBackend, WgpuError};
 #[cfg(not(target_arch = "wasm32"))]
 pub use font::{
     FontConfig, FontFamilyInfo, FontId, FontMetrics, FontMode, FontRequest, FontServer,
