@@ -59,6 +59,7 @@ type ContentFn = Rc<dyn Fn(&mut SceneTree, NodeId)>;
 const MARGIN: f32 = 8.0;
 const OFFSET: f32 = 8.0;
 const CONFIRM_WIDTH: f32 = 320.0;
+const MODAL_WIDTH: f32 = 380.0;
 const MESSAGE_DURATION: f32 = 2.5;
 
 /// Identifies an open overlay.
@@ -86,6 +87,15 @@ enum Kind {
     Popover {
         title: Option<String>,
         content: ContentFn,
+    },
+    /// A centered modal with custom content and a standard confirm / cancel row.
+    /// Unlike a popover it takes a scrim and owns the input (e.g. a password
+    /// field the host drives).
+    Modal {
+        title: String,
+        content: ContentFn,
+        confirm: String,
+        cancel: String,
     },
     /// A drop-down menu: like a popover but the content owns all chrome
     /// (a [`Menu`](crate::Menu) draws its own surface), so no default padding or
@@ -238,6 +248,33 @@ impl Overlays {
         self.push(entry)
     }
 
+    /// Opens a centered modal dialog with custom `content` and a confirm /
+    /// cancel row. It is modal (scrim + it owns the input) and closes on Escape
+    /// / a click outside. Close it via [`Overlays::on_confirm`] /
+    /// [`Overlays::on_cancel`].
+    pub fn modal(
+        &mut self,
+        title: impl Into<String>,
+        content: impl Fn(&mut SceneTree, NodeId) + 'static,
+    ) -> OverlayId {
+        let mut entry = Entry::new(
+            OverlayId(0),
+            Kind::Modal {
+                title: title.into(),
+                content: Rc::new(content),
+                confirm: "OK".into(),
+                cancel: "Cancel".into(),
+            },
+            Anchor::ViewportSize,
+            Placement::Center,
+        );
+        entry.modal = true;
+        entry.dismiss_on_outside = true;
+        entry.dismiss_on_escape = true;
+        entry.scrim = Some(Color::new(0.0, 0.0, 0.0, 0.35));
+        self.push(entry)
+    }
+
     /// Opens a drop-down menu anchored below `target`, built by `content`.
     ///
     /// `content` owns its chrome, so it typically adds a
@@ -296,8 +333,10 @@ impl Overlays {
     /// Overrides the confirm button label (default `"OK"`).
     pub fn confirm_label(&mut self, id: OverlayId, label: impl Into<String>) -> &mut Self {
         if let Some(entry) = self.entry_mut(id) {
-            if let Kind::Confirm { confirm, .. } = &mut entry.kind {
-                *confirm = label.into();
+            match &mut entry.kind {
+                Kind::Confirm { confirm, .. } => *confirm = label.into(),
+                Kind::Modal { confirm, .. } => *confirm = label.into(),
+                _ => {}
             }
         }
         self
@@ -306,8 +345,10 @@ impl Overlays {
     /// Overrides the cancel button label (default `"Cancel"`).
     pub fn cancel_label(&mut self, id: OverlayId, label: impl Into<String>) -> &mut Self {
         if let Some(entry) = self.entry_mut(id) {
-            if let Kind::Confirm { cancel, .. } = &mut entry.kind {
-                *cancel = label.into();
+            match &mut entry.kind {
+                Kind::Confirm { cancel, .. } => *cancel = label.into(),
+                Kind::Modal { cancel, .. } => *cancel = label.into(),
+                _ => {}
             }
         }
         self
@@ -392,6 +433,20 @@ impl Overlays {
         for id in ids {
             self.close(id);
         }
+    }
+
+    /// Requests a rebuild of the overlay tree on the next
+    /// [`layout`](Overlays::layout). Call it when a shared value a `content`
+    /// closure reads has changed (a live field), so the content is re-created
+    /// with the new value.
+    pub fn invalidate(&mut self) {
+        self.dirty = true;
+    }
+
+    /// Rewrites a text node inside the overlay tree (e.g. a live field's value)
+    /// without rebuilding it.
+    pub fn set_text(&mut self, node: NodeId, text: impl Into<String>) {
+        crate::set_text(&mut self.tree, node, text);
     }
 
     /// Advances auto-dismiss timers.
@@ -704,6 +759,50 @@ fn build_entry(
                     ),
             )
         }
+        Kind::Modal {
+            title,
+            content,
+            confirm,
+            cancel,
+        } => {
+            let id = entry.id;
+            let cancel_actions = actions.clone();
+            let confirm_actions = actions;
+            let cancel = Button::ghost(cancel.clone(), theme).on_click(move || {
+                cancel_actions.borrow_mut().push(Action::Cancel(id));
+            });
+            let confirm = Button::primary(confirm.clone(), theme).on_click(move || {
+                confirm_actions.borrow_mut().push(Action::Confirm(id));
+            });
+
+            let node = tree.add_child(
+                root,
+                Flex::column()
+                    .gap(theme.spacing(Space::MD))
+                    .padding(Edges::all(theme.spacing(Space::LG)))
+                    .anchors(Edges::ZERO)
+                    .offsets(Edges::ZERO)
+                    .min_size(MODAL_WIDTH, 0.0)
+                    .surface(surface)
+                    .child(
+                        Label::new(title.clone())
+                            .font_size(theme.font_size(TextSize::Heading))
+                            .color(palette.foreground),
+                    ),
+            );
+            content(tree, node);
+            tree.add_child(
+                node,
+                Flex::row()
+                    .align(Align::Center)
+                    .justify(Justify::End)
+                    .gap(theme.spacing(Space::SM))
+                    .padding(Edges::ZERO)
+                    .child(cancel)
+                    .child(confirm),
+            );
+            node
+        }
         Kind::Popover { title, content } => {
             let node = tree.add_child(
                 root,
@@ -793,5 +892,46 @@ fn build_entry(
             );
             node
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use draw_theme::{default_theme, Mode};
+
+    fn viewport() -> ViewportSize {
+        ViewportSize::new(Size::new(640.0, 420.0))
+    }
+
+    #[test]
+    fn a_modal_owns_input_and_closes_on_escape() {
+        let theme = default_theme(Mode::Dark);
+        let mut overlays = Overlays::new(theme);
+        let host = SceneTree::new();
+        let id = overlays.modal("输入密码", |_tree, _node| {});
+        overlays.layout(&host, viewport());
+        assert!(overlays.is_open(id), "the modal is open");
+
+        // A modal consumes every event so nothing underneath can react...
+        assert!(overlays
+            .handle_input(&InputEvent::KeyDown { key: Key::Enter })
+            .is_handled());
+        // ...and Escape dismisses it.
+        assert!(overlays
+            .handle_input(&InputEvent::KeyDown { key: Key::Escape })
+            .is_handled());
+        assert!(!overlays.is_open(id));
+    }
+
+    #[test]
+    fn a_modal_carries_a_scrim_and_a_title() {
+        let theme = default_theme(Mode::Dark);
+        let mut overlays = Overlays::new(theme);
+        let host = SceneTree::new();
+        let id = overlays.modal("标题", |_tree, _node| {});
+        overlays.layout(&host, viewport());
+        let rect = overlays.rect(id).expect("modal laid out");
+        assert!(rect.size.width >= MODAL_WIDTH - 1e-3);
     }
 }

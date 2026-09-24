@@ -253,6 +253,17 @@ impl draw_scene::GuiInput for GuiStage {
 }
 
 fn activate(tree: &mut SceneTree, id: NodeId) {
+    // A disabled control (or one disabled via an ancestor) never fires.
+    let mut guard = Some(id);
+    while let Some(node) = guard {
+        if tree
+            .data::<Control>(node)
+            .is_some_and(|control| control.data.disabled)
+        {
+            return;
+        }
+        guard = tree.parent(node);
+    }
     if let Some(control) = tree.data_mut::<Control>(id) {
         if let Widget::Button(button) = &mut control.widget {
             button.state.click_count += 1;
@@ -349,6 +360,9 @@ pub fn hovered_cursor(tree: &SceneTree) -> Cursor {
     let mut current = Some(hit);
     while let Some(node) = current {
         if let Some(control) = tree.data::<Control>(node) {
+            if control.data.disabled {
+                return Cursor::Default;
+            }
             if let Some(provider) = &control.cursor_provider {
                 let cursor = provider();
                 if cursor != Cursor::Default {

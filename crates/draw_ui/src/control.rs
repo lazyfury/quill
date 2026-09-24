@@ -42,6 +42,10 @@ pub struct ControlData {
     pub mouse_filter: MouseFilter,
     /// Cursor the host should show while the pointer is over this control.
     pub cursor: Cursor,
+    /// Dimmed and inert: hover is ignored and a click never fires. Components
+    /// that paint disabled state read it through
+    /// [`InteractState::disabled`](crate::InteractState::disabled).
+    pub disabled: bool,
     /// How this control participates in its parent container's layout.
     pub layout: LayoutStyle,
     /// Whether this control clips its subtree to its own rectangle.
@@ -70,6 +74,7 @@ impl Default for ControlData {
             rect: Rect::ZERO,
             mouse_filter: MouseFilter::Stop,
             cursor: Cursor::Default,
+            disabled: false,
             layout: LayoutStyle::default(),
             clip: false,
             clip_rect: None,

@@ -23,6 +23,8 @@ pub struct InteractState {
     pub hovered: bool,
     pub pressed: bool,
     pub focused: bool,
+    /// The control (or an ancestor) is disabled, so hover / press are ignored.
+    pub disabled: bool,
 }
 
 /// Chrome attached to one control node.

@@ -208,6 +208,7 @@ impl Ui {
             focused: state
                 .focused
                 .is_some_and(|node| is_self_or_ancestor(tree, node, id)),
+            disabled: control_of(tree, id).is_some_and(|control| control.data.disabled),
         }
     }
 

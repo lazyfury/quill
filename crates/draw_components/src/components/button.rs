@@ -1,9 +1,10 @@
 //! Themed buttons.
 
 use crate::base::{Component, Label, Spec};
-use draw_core::{Color, Edges, FontWeight};
+use draw_core::{Color, Edges, FontWeight, NodeId};
+use draw_scene::SceneTree;
 use draw_theme::{radius, ControlSize, TextSize, Theme};
-use draw_ui::{Align, Justify, SurfaceStyle, TextOptions, Widget};
+use draw_ui::{Align, Control, Justify, SurfaceStyle, TextOptions, Widget};
 
 /// Visual weight of a button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -30,6 +31,8 @@ pub struct Button {
     weight: FontWeight,
     /// Overrides the variant's label color when set.
     text_color: Option<Color>,
+    /// Dimmed and inert: no hover, no click, muted label.
+    disabled: bool,
     on_click: Option<Box<dyn FnMut()>>,
 }
 
@@ -44,6 +47,7 @@ impl Button {
             font_size: theme.font_size(TextSize::Small),
             weight: FontWeight::NORMAL,
             text_color: None,
+            disabled: false,
             on_click: None,
         }
     }
@@ -109,6 +113,14 @@ impl Button {
         self
     }
 
+    /// Dims the button and makes it inert: the label uses the muted tone, hover
+    /// and press are ignored, and the click callback never runs. Available state
+    /// still drives the cursor.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
         self.on_click = Some(Box::new(callback));
         self
@@ -137,6 +149,8 @@ impl Component for Button {
     fn prepare(&mut self) {
         let theme = self.theme;
         let variant = self.variant;
+        let disabled = self.disabled;
+        self.spec.data.disabled = disabled;
 
         // The theme provides the default height; an explicit `min_size` from the
         // caller (e.g. the toolbar's 32x28 icon buttons) wins.
@@ -149,6 +163,17 @@ impl Component for Button {
         if self.spec.background.is_none() {
             self.spec.background = Some(Box::new(move |st| {
                 let palette = theme.palette();
+                // A disabled button keeps a neutral resting surface and never
+                // reacts to hover / press (runtime state, not just build time).
+                if st.disabled || disabled {
+                    let fill = match variant {
+                        ButtonVariant::Ghost => Color::TRANSPARENT,
+                        _ => palette.surface_raised,
+                    };
+                    return SurfaceStyle::new(fill)
+                        .border(palette.border)
+                        .radius(radius::MD);
+                }
                 match variant {
                     ButtonVariant::Primary => {
                         let fill = if st.pressed {
@@ -192,10 +217,14 @@ impl Component for Button {
             }));
         }
 
-        let color = self.text_color.unwrap_or(match self.variant {
-            ButtonVariant::Primary | ButtonVariant::Destructive => theme.palette().on_accent,
-            _ => theme.palette().foreground,
-        });
+        let color = if disabled {
+            theme.palette().subtle
+        } else {
+            self.text_color.unwrap_or(match self.variant {
+                ButtonVariant::Primary | ButtonVariant::Destructive => theme.palette().on_accent,
+                _ => theme.palette().foreground,
+            })
+        };
         let text = self.text.clone();
         let font_size = self.font_size;
         self.spec.child(
@@ -205,21 +234,65 @@ impl Component for Button {
                 .weight(self.weight)
                 .text_options(TextOptions::no_wrap()),
         );
-        self.spec.on_click = self.on_click.take();
+        // A disabled button drops its callback, so the click can never run.
+        self.spec.on_click = if disabled { None } else { self.on_click.take() };
     }
 }
 
 crate::impl_scene_child!(Button);
 
+/// Enables / disables a themed [`Button`] at runtime.
+///
+/// Sets the control's disabled flag — so hover is ignored, the cursor stays
+/// default and a click never fires — and recolors its label child between
+/// `enabled_color` and `disabled_color`. (The build-time
+/// [`Button::disabled`] covers the static case; this covers a state that
+/// changes while the button stays mounted.)
+pub fn set_disabled(
+    tree: &mut SceneTree,
+    id: NodeId,
+    disabled: bool,
+    enabled_color: Color,
+    disabled_color: Color,
+) {
+    let changed = match tree.data_mut::<Control>(id) {
+        Some(control) => {
+            let changed = control.data.disabled != disabled;
+            control.data.disabled = disabled;
+            changed
+        }
+        None => return,
+    };
+    if !changed {
+        return;
+    }
+    if let Some(children) = tree.children(id).map(|children| children.to_vec()) {
+        for child in children {
+            if let Some(control) = tree.data_mut::<Control>(child) {
+                if let Widget::Label { color, .. } = &mut control.widget {
+                    *color = if disabled {
+                        disabled_color
+                    } else {
+                        enabled_color
+                    };
+                }
+            }
+        }
+    }
+    draw_ui::mark_dirty(tree, id);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::base::Flex;
-    use draw_core::{Size, ViewportSize};
+    use draw_core::{InputEvent, PointerButton, Size, Vec2, ViewportSize};
     use draw_render::{DrawCommand, PaintContext};
     use draw_scene::SceneTree;
     use draw_theme::{compact_theme, default_theme, DefaultTheme, Mode, Palette};
     use draw_ui::{control, Control, MouseFilter};
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     fn column(tree: &mut SceneTree, button: Button) -> draw_core::NodeId {
         let root = tree.root();
@@ -232,6 +305,21 @@ mod tests {
                 .child(button),
         );
         tree.children(page).unwrap()[0]
+    }
+
+    fn click(tree: &mut SceneTree, position: Vec2) {
+        for event in [
+            InputEvent::PointerDown {
+                position,
+                button: PointerButton::Left,
+            },
+            InputEvent::PointerUp {
+                position,
+                button: PointerButton::Left,
+            },
+        ] {
+            draw_ui::handle_input(tree, &event);
+        }
     }
 
     #[test]
@@ -322,5 +410,67 @@ mod tests {
             }
         });
         assert_eq!(label, Some(TextSize::Small.px() * 2.0));
+    }
+
+    #[test]
+    fn a_disabled_button_ignores_clicks() {
+        let theme = default_theme(Mode::Dark);
+        let clicked = Rc::new(Cell::new(false));
+        let flag = clicked.clone();
+        let mut tree = SceneTree::new();
+        let id = column(
+            &mut tree,
+            Button::new("A", theme)
+                .disabled(true)
+                .on_click(move || flag.set(true)),
+        );
+        draw_ui::layout(&mut tree, ViewportSize::new(Size::new(400.0, 300.0)));
+        let center = control(&tree, id).unwrap().rect.center();
+        click(&mut tree, center);
+        assert!(!clicked.get(), "a disabled button must not fire");
+    }
+
+    #[test]
+    fn an_enabled_button_still_fires() {
+        let theme = default_theme(Mode::Dark);
+        let clicked = Rc::new(Cell::new(false));
+        let flag = clicked.clone();
+        let mut tree = SceneTree::new();
+        let id = column(
+            &mut tree,
+            Button::new("A", theme).on_click(move || flag.set(true)),
+        );
+        draw_ui::layout(&mut tree, ViewportSize::new(Size::new(400.0, 300.0)));
+        let center = control(&tree, id).unwrap().rect.center();
+        click(&mut tree, center);
+        assert!(clicked.get(), "the control case must still fire");
+    }
+
+    #[test]
+    fn runtime_disabling_blocks_clicks_and_restores() {
+        let theme = default_theme(Mode::Dark);
+        let clicks = Rc::new(Cell::new(0));
+        let counter = clicks.clone();
+        let mut tree = SceneTree::new();
+        let id = column(
+            &mut tree,
+            Button::new("A", theme).on_click(move || counter.set(counter.get() + 1)),
+        );
+        let viewport = ViewportSize::new(Size::new(400.0, 300.0));
+        draw_ui::layout(&mut tree, viewport);
+        let center = control(&tree, id).unwrap().rect.center();
+        click(&mut tree, center);
+        assert_eq!(clicks.get(), 1);
+
+        let muted = Color::new(0.5, 0.5, 0.5, 1.0);
+        set_disabled(&mut tree, id, true, Color::WHITE, muted);
+        draw_ui::layout(&mut tree, viewport);
+        click(&mut tree, center);
+        assert_eq!(clicks.get(), 1, "a disabled button must not fire");
+
+        set_disabled(&mut tree, id, false, Color::WHITE, muted);
+        draw_ui::layout(&mut tree, viewport);
+        click(&mut tree, center);
+        assert_eq!(clicks.get(), 2, "re-enabling restores the click");
     }
 }

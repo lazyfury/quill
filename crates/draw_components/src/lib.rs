@@ -63,9 +63,9 @@ pub use base::{
     Flex, Grid, HBox, Label, Panel, Row, Spec, VBox,
 };
 pub use components::{
-    Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState, Icon, List,
-    ListColumn, ListLead, ListState, Menu, MenuItem, ResizeHandle, RowSource, ScrollView,
-    ScrollViewState, Switch, Terminal, Text, MENU_MIN_WIDTH,
+    set_disabled, Badge, Button, ButtonVariant, Card, Checkbox, CodeBlock, Divider, EmptyState,
+    Icon, List, ListColumn, ListLead, ListState, Menu, MenuItem, ResizeHandle, RowSource,
+    ScrollView, ScrollViewState, Select, Switch, Terminal, Text, TextInput, MENU_MIN_WIDTH,
 };
 pub use glyph::{paint_glyph, Glyph, GLYPH_VIEWBOX};
 pub use node_ref::{NodeRef, Ref};
