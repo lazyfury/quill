@@ -9,16 +9,35 @@ use draw_core::{Edges, Size, Vec2};
 use draw_theme::{radius, Space, TextSize, Theme};
 use draw_ui::{Align, SurfaceStyle, TextOptions, Widget};
 
+/// The three visual states of a [`Checkbox`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CheckState {
+    /// An empty box.
+    #[default]
+    Unchecked,
+    /// A filled box with a check mark.
+    Checked,
+    /// A filled box with a dash — some, but not all, of a group are selected.
+    Indeterminate,
+}
+
+impl CheckState {
+    /// Whether the box is fully checked.
+    pub fn is_checked(self) -> bool {
+        matches!(self, Self::Checked)
+    }
+}
+
 /// A compact checkbox with a label.
 ///
-/// State lives in an `Rc<Cell<bool>>` so the check mark repaints without
+/// State lives in an `Rc<Cell<CheckState>>` so the mark repaints without
 /// remounting. Pass an external handle with [`Checkbox::state`] to read it.
 pub struct Checkbox {
     spec: Spec,
     theme: &'static dyn Theme,
     label: String,
-    initial: bool,
-    state: Option<Rc<Cell<bool>>>,
+    initial: CheckState,
+    state: Option<Rc<Cell<CheckState>>>,
     on_change: Option<Box<dyn FnMut(bool)>>,
 }
 
@@ -28,19 +47,30 @@ impl Checkbox {
             spec: Spec::leaf(),
             theme,
             label: label.into(),
-            initial: false,
+            initial: CheckState::Unchecked,
             state: None,
             on_change: None,
         }
     }
 
+    /// The initial two-state value (`false` = unchecked, `true` = checked).
     pub fn checked(mut self, checked: bool) -> Self {
-        self.initial = checked;
+        self.initial = if checked {
+            CheckState::Checked
+        } else {
+            CheckState::Unchecked
+        };
+        self
+    }
+
+    /// The initial three-state value.
+    pub fn check_state(mut self, state: CheckState) -> Self {
+        self.initial = state;
         self
     }
 
     /// Shares state with the caller (e.g. to read the value after a click).
-    pub fn state(mut self, state: Rc<Cell<bool>>) -> Self {
+    pub fn state(mut self, state: Rc<Cell<CheckState>>) -> Self {
         self.state = Some(state);
         self
     }
@@ -89,13 +119,14 @@ impl Component for Checkbox {
                 .offsets(Edges::ZERO)
                 .min_size(16.0, 16.0)
                 .foreground(move |ctx, rect, st| {
-                    let checked = paint_state.get();
-                    let fill = if checked {
+                    let state = paint_state.get();
+                    let on = state != CheckState::Unchecked;
+                    let fill = if on {
                         theme.palette().accent
                     } else {
                         theme.palette().background
                     };
-                    let border = if checked || st.hovered {
+                    let border = if on || st.hovered {
                         theme.palette().accent
                     } else {
                         theme.palette().border
@@ -105,9 +136,14 @@ impl Component for Checkbox {
                         rect,
                         &SurfaceStyle::new(fill).border(border).radius(radius::SM),
                     );
-                    if checked {
+                    let glyph = match state {
+                        CheckState::Checked => Some(Glyph::Check),
+                        CheckState::Indeterminate => Some(Glyph::Dash),
+                        CheckState::Unchecked => None,
+                    };
+                    if let Some(glyph) = glyph {
                         paint_glyph(
-                            Glyph::Check,
+                            glyph,
                             ctx,
                             draw_ui::inset(rect, 2.0),
                             theme.palette().on_accent,
@@ -130,10 +166,15 @@ impl Component for Checkbox {
         let click_state = state;
         let mut on_change = self.on_change.take();
         self.spec.on_click = Some(Box::new(move || {
-            let next = !click_state.get();
+            // A click on an indeterminate box selects the whole group; a click
+            // on a checked box clears it.
+            let next = match click_state.get() {
+                CheckState::Checked => CheckState::Unchecked,
+                CheckState::Unchecked | CheckState::Indeterminate => CheckState::Checked,
+            };
             click_state.set(next);
             if let Some(callback) = on_change.as_mut() {
-                callback(next);
+                callback(next.is_checked());
             }
         }));
     }
@@ -326,5 +367,18 @@ mod tests {
                 .any(|command| matches!(command, DrawCommand::Line { .. })),
             "the empty box should not stroke a check mark"
         );
+    }
+
+    #[test]
+    fn an_indeterminate_box_draws_a_horizontal_dash() {
+        let theme = default_theme(Mode::Dark);
+        let commands = painted(Checkbox::new("", theme).check_state(CheckState::Indeterminate));
+        let dash = commands.iter().any(|command| {
+            matches!(
+                command,
+                DrawCommand::Line { from, to, .. } if (from.y - to.y).abs() < 0.01
+            )
+        });
+        assert!(dash, "the indeterminate box should stroke a dash");
     }
 }

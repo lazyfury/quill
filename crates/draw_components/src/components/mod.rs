@@ -12,8 +12,8 @@ mod surfaces;
 mod text;
 mod text_input;
 
-pub use button::{set_disabled, Button, ButtonVariant};
-pub use controls::{Checkbox, Switch};
+pub use button::{set_button_text, set_disabled, Button, ButtonVariant};
+pub use controls::{CheckState, Checkbox, Switch};
 pub use icon::Icon;
 pub use list::{List, ListColumn, ListLead, ListState, RowSource};
 pub use menu::{Menu, MenuItem, MENU_MIN_WIDTH};

@@ -13,9 +13,10 @@ use draw_ui::{
 };
 
 use crate::base::{
-    apply_spec, set_on_click, set_on_scroll, set_text, update_control, Component, Spec,
+    apply_spec, set_on_click, set_on_scroll, set_on_secondary, set_text, update_control, Component,
+    Spec,
 };
-use crate::{Checkbox, Flex, NodeRef, Row, Text};
+use crate::{CheckState, Checkbox, Flex, NodeRef, Row, Text};
 
 /// Supplies the cell text of one row on demand.
 ///
@@ -70,11 +71,11 @@ impl ListColumn {
 /// row always shows the right state.
 #[derive(Clone)]
 pub enum ListLead {
-    /// A checkbox; `checked(index)` drives it and `on_toggle(index)` fires on
+    /// A checkbox; `state(index)` drives it and `on_toggle(index)` fires on
     /// click. Clicking the box does not activate the row (the nearest callback
     /// wins), so checking and selecting stay separate.
     Checkbox {
-        checked: Rc<dyn Fn(usize) -> bool>,
+        state: Rc<dyn Fn(usize) -> CheckState>,
         on_toggle: Rc<dyn Fn(usize)>,
     },
     /// A spacer whose width depends on the row (tree indentation).
@@ -88,7 +89,7 @@ pub enum ListLead {
 
 /// The mounted node(s) backing one [`ListLead`] in a row slot.
 enum LeadSlot {
-    Checkbox(Rc<std::cell::Cell<bool>>),
+    Checkbox(Rc<std::cell::Cell<crate::CheckState>>),
     Spacer(NodeRef),
     Icon,
 }
@@ -166,6 +167,8 @@ struct ListInner {
     leads: Vec<ListLead>,
     source: RowSource,
     on_activate: Option<Rc<dyn Fn(usize)>>,
+    /// Called with the data index and the pointer position on a right click.
+    on_context: Option<Rc<dyn Fn(usize, Vec2)>>,
     count: Rc<Cell<usize>>,
     /// Recycled row slots, in viewport order.
     slots: Vec<Slot>,
@@ -205,6 +208,7 @@ impl ListState {
                 leads: Vec::new(),
                 source: Rc::new(|_| Vec::new()),
                 on_activate: None,
+                on_context: None,
                 count: Rc::new(Cell::new(0)),
                 slots: Vec::new(),
                 first: Rc::new(Cell::new(0)),
@@ -408,6 +412,7 @@ impl ListInner {
         let first = self.first.clone();
         let selected = self.selected.clone();
         let activate = self.on_activate.clone();
+        let context = self.on_context.clone();
         let slot_index = self.slots.len();
         // Both callbacks read the slot's current data row through the shared
         // `first`, so a recycled row always answers for what it is showing.
@@ -430,17 +435,17 @@ impl ListInner {
         let mut leads = Vec::new();
         for lead in &self.leads {
             match lead {
-                ListLead::Checkbox { checked, on_toggle } => {
-                    let state = Rc::new(std::cell::Cell::new(checked(first.get() + slot_index)));
+                ListLead::Checkbox { state, on_toggle } => {
+                    let state_cell = Rc::new(std::cell::Cell::new(state(first.get() + slot_index)));
                     let toggle = on_toggle.clone();
                     let slot_first = first.clone();
                     row = row.child(
                         Checkbox::new("", theme)
-                            .state(state.clone())
+                            .state(state_cell.clone())
                             .min_size(0.0, self.row_height)
                             .on_change(move |_| toggle(slot_first.get() + slot_index)),
                     );
-                    leads.push(LeadSlot::Checkbox(state));
+                    leads.push(LeadSlot::Checkbox(state_cell));
                 }
                 ListLead::Spacer { .. } => {
                     let node = NodeRef::new();
@@ -510,6 +515,12 @@ impl ListInner {
                 callback(index);
             }
         });
+        if let Some(context) = context {
+            let context_first = first.clone();
+            set_on_secondary(tree, root, move |position| {
+                context(context_first.get() + slot_index, position);
+            });
+        }
 
         Slot {
             root,
@@ -527,8 +538,8 @@ impl ListInner {
         };
         for (lead, mounted) in leads.iter().zip(slot.leads.iter()) {
             match (lead, mounted) {
-                (ListLead::Checkbox { checked, .. }, LeadSlot::Checkbox(state)) => {
-                    state.set(checked(index));
+                (ListLead::Checkbox { state, .. }, LeadSlot::Checkbox(cell)) => {
+                    cell.set(state(index));
                 }
                 (ListLead::Spacer { width }, LeadSlot::Spacer(node)) => {
                     let width = width(index);
@@ -589,6 +600,7 @@ pub struct List {
     count: Rc<Cell<usize>>,
     selected: Rc<Cell<Option<usize>>>,
     on_activate: Option<Rc<dyn Fn(usize)>>,
+    on_context: Option<Rc<dyn Fn(usize, Vec2)>>,
 }
 
 impl List {
@@ -611,6 +623,7 @@ impl List {
             count: Rc::new(Cell::new(0)),
             selected: Rc::new(Cell::new(None)),
             on_activate: None,
+            on_context: None,
         }
     }
 
@@ -629,15 +642,16 @@ impl List {
         self
     }
 
-    /// Adds a checkbox lead: `checked` drives the box, `on_toggle` fires on
-    /// click. The box owns the click, so checking does not activate the row.
+    /// Adds a checkbox lead: `state` drives the box (checked / unchecked /
+    /// indeterminate) and `on_toggle` fires on click. The box owns the click,
+    /// so checking does not activate the row.
     pub fn checkboxes(
         mut self,
-        checked: impl Fn(usize) -> bool + 'static,
+        state: impl Fn(usize) -> CheckState + 'static,
         on_toggle: impl Fn(usize) + 'static,
     ) -> Self {
         self.leads.push(ListLead::Checkbox {
-            checked: Rc::new(checked),
+            state: Rc::new(state),
             on_toggle: Rc::new(on_toggle),
         });
         self
@@ -679,6 +693,13 @@ impl List {
     /// Called with the data index when a row is clicked.
     pub fn on_activate(mut self, callback: impl Fn(usize) + 'static) -> Self {
         self.on_activate = Some(Rc::new(callback));
+        self
+    }
+
+    /// Called with the data index and the pointer position on a secondary
+    /// (right) click — the caller opens a context menu at the position.
+    pub fn on_context(mut self, callback: impl Fn(usize, Vec2) + 'static) -> Self {
+        self.on_context = Some(Rc::new(callback));
         self
     }
 
@@ -740,6 +761,7 @@ impl Component for List {
             inner.leads = std::mem::take(&mut self.leads);
             inner.source = self.source;
             inner.on_activate = self.on_activate.take();
+            inner.on_context = self.on_context.take();
             inner.count = self.count;
             inner.selected = self.selected;
             inner.row_height = self.row_height;
@@ -1132,6 +1154,7 @@ mod tests {
         selected: Rc<Cell<Option<usize>>>,
         toggled: Rc<RefCell<Vec<usize>>>,
         activated: Rc<RefCell<Vec<usize>>>,
+        contexted: Rc<RefCell<Vec<(usize, Vec2)>>>,
         widths: Rc<RefCell<Vec<f32>>>,
     }
 
@@ -1149,19 +1172,27 @@ mod tests {
             let selected = Rc::new(Cell::new(None));
             let toggled: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
             let activated: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
+            let contexted: Rc<RefCell<Vec<(usize, Vec2)>>> = Rc::new(RefCell::new(Vec::new()));
             let widths: Rc<RefCell<Vec<f32>>> =
                 Rc::new(RefCell::new((0..count).map(|i| i as f32 * 8.0).collect()));
 
             let width_for = widths.clone();
             let toggle_for = toggled.clone();
             let activate_for = activated.clone();
+            let context_for = contexted.clone();
             let list = List::new(default_theme(Mode::Light), ROW, |_| vec!["row".to_string()])
                 .count(count_cell)
                 .selected(selected.clone())
                 .columns(vec![ListColumn::flexible()])
                 .spacer(move |index| width_for.borrow().get(index).copied().unwrap_or(0.0))
-                .checkboxes(|_| false, move |index| toggle_for.borrow_mut().push(index))
-                .on_activate(move |index| activate_for.borrow_mut().push(index));
+                .checkboxes(
+                    |_| CheckState::Unchecked,
+                    move |index| toggle_for.borrow_mut().push(index),
+                )
+                .on_activate(move |index| activate_for.borrow_mut().push(index))
+                .on_context(move |index, position| {
+                    context_for.borrow_mut().push((index, position))
+                });
             let state = list.state();
             tree.add_child(root, list.grow(1.0));
             let mut fixture = Self {
@@ -1170,6 +1201,7 @@ mod tests {
                 selected,
                 toggled,
                 activated,
+                contexted,
                 widths,
             };
             fixture.frame();
@@ -1203,6 +1235,33 @@ mod tests {
                 handle_input(&mut self.tree, &event);
             }
         }
+
+        fn right_click(&mut self, position: Vec2) {
+            for event in [
+                InputEvent::PointerDown {
+                    position,
+                    button: draw_core::PointerButton::Right,
+                },
+                InputEvent::PointerUp {
+                    position,
+                    button: draw_core::PointerButton::Right,
+                },
+            ] {
+                handle_input(&mut self.tree, &event);
+            }
+        }
+    }
+
+    /// A right click reports the row's data index and the pointer position, so
+    /// the caller can open a context menu at the cursor.
+    #[test]
+    fn a_right_click_reports_the_row_and_position() {
+        let mut fixture = LeadFixture::new(100);
+        let row = fixture.state.rows()[1];
+        let rect = draw_ui::control(&fixture.tree, row).unwrap().rect;
+        let point = Vec2::new(rect.center().x, rect.top() + 3.0);
+        fixture.right_click(point);
+        assert_eq!(*fixture.contexted.borrow(), vec![(1, point)]);
     }
 
     /// A checkbox lead owns its click: it toggles and does **not** activate the

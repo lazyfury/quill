@@ -1,6 +1,6 @@
 //! Themed buttons.
 
-use crate::base::{Component, Label, Spec};
+use crate::base::{set_text, Component, Label, Spec};
 use draw_core::{Color, Edges, FontWeight, NodeId};
 use draw_scene::SceneTree;
 use draw_theme::{radius, ControlSize, TextSize, Theme};
@@ -282,6 +282,28 @@ pub fn set_disabled(
     draw_ui::mark_dirty(tree, id);
 }
 
+/// Replaces a themed [`Button`]'s label text at runtime.
+///
+/// A button builds its label as a child node in `prepare`, so there is no
+/// `NodeRef` for it. This finds that label child and rewrites it, marking the
+/// tree dirty. Returns whether a label child was found (and rewritten).
+pub fn set_button_text(tree: &mut SceneTree, id: NodeId, text: impl Into<String>) -> bool {
+    let Some(children) = tree.children(id).map(|children| children.to_vec()) else {
+        return false;
+    };
+    let text = text.into();
+    for child in children {
+        if matches!(
+            tree.data::<Control>(child).map(|control| &control.widget),
+            Some(Widget::Label { .. })
+        ) {
+            set_text(tree, child, text);
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,5 +494,23 @@ mod tests {
         draw_ui::layout(&mut tree, viewport);
         click(&mut tree, center);
         assert_eq!(clicks.get(), 2, "re-enabling restores the click");
+    }
+
+    #[test]
+    fn runtime_relabelling_rewrites_the_label_child() {
+        let theme = default_theme(Mode::Dark);
+        let mut tree = SceneTree::new();
+        let id = column(&mut tree, Button::new("Start", theme).child(Flex::row()));
+        draw_ui::layout(&mut tree, ViewportSize::new(Size::new(400.0, 300.0)));
+
+        assert!(set_button_text(&mut tree, id, "Stop"));
+
+        let label = tree.children(id).unwrap().into_iter().find_map(|child| {
+            match tree.data::<Control>(*child).map(|data| &data.widget) {
+                Some(Widget::Label { text, .. }) => Some(text.clone()),
+                _ => None,
+            }
+        });
+        assert_eq!(label.as_deref(), Some("Stop"));
     }
 }
