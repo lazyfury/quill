@@ -130,6 +130,8 @@ struct Entry {
     elapsed: f32,
     scrim: Option<Color>,
     root: Option<NodeId>,
+    /// A scroll viewport inside this overlay (a capped menu), synced each layout.
+    scroll: Option<crate::ScrollViewState>,
     on_confirm: Option<Callback>,
     on_cancel: Option<Callback>,
     on_close: Option<Callback>,
@@ -150,6 +152,7 @@ impl Entry {
             elapsed: 0.0,
             scrim: None,
             root: None,
+            scroll: None,
             on_confirm: None,
             on_cancel: None,
             on_close: None,
@@ -295,6 +298,30 @@ impl Overlays {
         );
         entry.dismiss_on_outside = true;
         entry.dismiss_on_escape = true;
+        self.push(entry)
+    }
+
+    /// Like [`Overlays::menu`], but the content is a scroll viewport the layer
+    /// drives: pass the [`ScrollViewState`](crate::ScrollViewState) of the
+    /// [`ScrollView`](crate::ScrollView) mounted inside `content`. A menu taller
+    /// than its `max_height` then scrolls with the wheel.
+    pub fn menu_scroll(
+        &mut self,
+        target: NodeId,
+        scroll: crate::ScrollViewState,
+        content: impl Fn(&mut SceneTree, NodeId) + 'static,
+    ) -> OverlayId {
+        let mut entry = Entry::new(
+            OverlayId(0),
+            Kind::Menu {
+                content: Rc::new(content),
+            },
+            Anchor::Target(target),
+            Placement::BelowStart,
+        );
+        entry.dismiss_on_outside = true;
+        entry.dismiss_on_escape = true;
+        entry.scroll = Some(scroll);
         self.push(entry)
     }
 
@@ -500,6 +527,24 @@ impl Overlays {
         }
 
         draw_ui::layout(&mut self.tree, viewport);
+
+        // Sync any capped menu viewports before placement: the menu's height is
+        // measured first, then clamped to the cap, then positioned.
+        for _ in 0..2 {
+            let mut changed = false;
+            for entry in &mut self.entries {
+                if let Some(scroll) = entry.scroll.as_mut() {
+                    if scroll.sync(&mut self.tree) {
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+            draw_ui::layout(&mut self.tree, viewport);
+        }
+
         let viewport_rect = viewport.logical_rect();
         let mut moved = false;
         for entry in &mut self.entries {
@@ -898,6 +943,7 @@ fn build_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Menu, MenuItem};
     use draw_theme::{default_theme, Mode};
 
     fn viewport() -> ViewportSize {
@@ -933,5 +979,46 @@ mod tests {
         overlays.layout(&host, viewport());
         let rect = overlays.rect(id).expect("modal laid out");
         assert!(rect.size.width >= MODAL_WIDTH - 1e-3);
+    }
+
+    #[test]
+    fn a_scrolled_menu_is_capped_and_the_wheel_scrolls_it() {
+        let theme = default_theme(Mode::Dark);
+        let mut overlays = Overlays::new(theme);
+        let mut host = SceneTree::new();
+        let target = host.add_child(host.root(), crate::Flex::column().min_size(100.0, 20.0));
+        draw_ui::layout(&mut host, viewport());
+
+        let scroll = crate::ScrollViewState::new();
+        let view = scroll.clone();
+        let id = overlays.menu_scroll(target, scroll.clone(), move |tree, node| {
+            let mut menu = Menu::new(theme);
+            for index in 0..40 {
+                menu = menu.item(MenuItem::new(format!("item {index}"), theme));
+            }
+            tree.add_child(
+                node,
+                crate::ScrollView::with_state(theme, view.clone())
+                    .min_size(200.0, 0.0)
+                    .max_height(120.0)
+                    .child(menu),
+            );
+        });
+        overlays.layout(&host, viewport());
+
+        let rect = overlays.rect(id).expect("menu laid out");
+        assert!(
+            rect.size.height <= 121.0,
+            "capped, got {}",
+            rect.size.height
+        );
+        assert!(scroll.max_offset() > 0.0, "a long menu scrolls");
+
+        overlays.handle_input(&InputEvent::Wheel {
+            position: rect.center(),
+            delta: draw_core::Vec2::new(0.0, 40.0),
+        });
+        overlays.layout(&host, viewport());
+        assert!(scroll.offset() > 0.0, "the wheel scrolled the menu");
     }
 }

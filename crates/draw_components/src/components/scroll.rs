@@ -63,10 +63,12 @@ struct ScrollInner {
     content_height: f32,
     /// Pointer pixels → scroll pixels while dragging the thumb.
     drag_scale: f32,
+    /// When set, the viewport height shrinks to `min(content, max_height)`.
+    max_height: Option<f32>,
 }
 
 impl ScrollViewState {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             inner: Rc::new(RefCell::new(ScrollInner {
                 container: None,
@@ -79,6 +81,7 @@ impl ScrollViewState {
                 viewport_height: 0.0,
                 content_height: 0.0,
                 drag_scale: 0.0,
+                max_height: None,
             })),
         }
     }
@@ -119,11 +122,26 @@ impl ScrollViewState {
         inner.max_offset = (content_height - inner.viewport_height).max(0.0);
         inner.offset = inner.offset.clamp(0.0, inner.max_offset);
 
+        let mut changed = false;
+
+        // With a max height, the viewport shrinks to the content (never taller
+        // than the cap), so a short menu has no empty area and a tall one
+        // scrolls.
+        if let Some(max) = inner.max_height {
+            let target = content_height.min(max);
+            let current = draw_ui::control(tree, container)
+                .map(|data| data.min_size.height)
+                .unwrap_or(0.0);
+            if (current - target).abs() > 0.5 {
+                update_control(tree, container, |data| data.min_size.height = target);
+                changed = true;
+            }
+        }
+
         let track_h = (inner.viewport_height - 2.0 * SCROLLBAR_MARGIN).max(0.0);
         let show_bar = inner.scrollbar && inner.max_offset > 0.0 && track_h > 0.0;
         let reserve = if show_bar { SCROLLBAR_WIDTH } else { 0.0 };
 
-        let mut changed = false;
         let want = Edges::new(0.0, -inner.offset, -reserve, content_height - inner.offset);
         if draw_ui::control(tree, content).is_some_and(|data| data.offsets != want) {
             update_control(tree, content, |data| data.offsets = want);
@@ -241,15 +259,23 @@ pub struct ScrollView {
     theme: &'static dyn Theme,
     state: ScrollViewState,
     scrollbar: bool,
+    max_height: Option<f32>,
 }
 
 impl ScrollView {
     pub fn new(theme: &'static dyn Theme) -> Self {
+        Self::with_state(theme, ScrollViewState::new())
+    }
+
+    /// Builds a viewport that drives a pre-existing state (so a rebuild reuses
+    /// the same offset; used by the overlay layer's menus).
+    pub fn with_state(theme: &'static dyn Theme, state: ScrollViewState) -> Self {
         Self {
             spec: Spec::default(),
             theme,
-            state: ScrollViewState::new(),
+            state,
             scrollbar: true,
+            max_height: None,
         }
     }
 
@@ -257,6 +283,13 @@ impl ScrollView {
     /// wheel still scrolls).
     pub fn scrollbar(mut self, scrollbar: bool) -> Self {
         self.scrollbar = scrollbar;
+        self
+    }
+
+    /// Caps the viewport height: it shrinks to the content when shorter, and
+    /// scrolls when taller. Without this the viewport takes its parent's height.
+    pub fn max_height(mut self, max_height: f32) -> Self {
+        self.max_height = Some(max_height);
         self
     }
 
@@ -289,6 +322,13 @@ impl Component for ScrollView {
         // wheel is routed to (`set_on_scroll` in `build`).
         self.spec.data.clip = true;
         self.spec.data.mouse_filter = MouseFilter::Stop;
+        // Start at the cap so the first layout has a viewport; `sync` then
+        // shrinks it to the content when shorter. Anchors are cleared so the
+        // parent sizes to the capped viewport instead of the viewport filling.
+        if let Some(max) = self.max_height {
+            self.spec.data.anchors = Edges::ZERO;
+            self.spec.data.min_size.height = self.spec.data.min_size.height.max(max);
+        }
     }
 
     fn build(mut self, tree: &mut SceneTree, parent: NodeId) -> NodeId {
@@ -344,6 +384,7 @@ impl Component for ScrollView {
             inner.track = Some(track);
             inner.thumb = Some(thumb);
             inner.scrollbar = self.scrollbar;
+            inner.max_height = self.max_height;
         }
 
         let scrolling = self.state.clone();
@@ -543,5 +584,45 @@ mod tests {
         assert_eq!(fixture.state.offset(), 0.0);
         assert_eq!(fixture.state.content_height(), 1000.0);
         assert_eq!(fixture.state.max_offset(), 800.0);
+    }
+
+    /// Mount a `max_height` viewport inside a column and return its node.
+    fn capped(content_height: f32, max_height: f32) -> (SceneTree, ScrollViewState, NodeId) {
+        let theme = default_theme(Mode::Dark);
+        let view = ScrollView::new(theme).max_height(max_height).child(
+            Column::new().gap(0.0).child(
+                Panel::new()
+                    .color(Color::BLACK)
+                    .flat()
+                    .min_size(0.0, content_height),
+            ),
+        );
+        let state = view.state();
+        let mut tree = SceneTree::new();
+        let column = tree.add_child(tree.root(), Column::new().gap(0.0).child(view));
+        let node = tree.children(column).unwrap()[0];
+        layout(&mut tree, viewport());
+        for _ in 0..4 {
+            if state.clone().sync(&mut tree) {
+                layout(&mut tree, viewport());
+            }
+        }
+        (tree, state, node)
+    }
+
+    #[test]
+    fn max_height_caps_tall_content_and_scrolls() {
+        let (tree, state, node) = capped(1000.0, 80.0);
+        let h = draw_ui::control(&tree, node).unwrap().rect.size.height;
+        assert!((h - 80.0).abs() < 1.5, "capped at 80, got {h}");
+        assert!(state.max_offset() > 0.0, "tall content scrolls");
+    }
+
+    #[test]
+    fn max_height_shrinks_to_short_content() {
+        let (tree, state, node) = capped(30.0, 80.0);
+        let h = draw_ui::control(&tree, node).unwrap().rect.size.height;
+        assert!((h - 30.0).abs() < 1.5, "shrinks to 30, got {h}");
+        assert_eq!(state.max_offset(), 0.0);
     }
 }
