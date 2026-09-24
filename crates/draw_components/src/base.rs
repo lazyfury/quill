@@ -41,6 +41,8 @@ pub struct Spec {
     pub background: Option<Box<dyn Fn(InteractState) -> SurfaceStyle>>,
     pub foreground: Option<Box<dyn Fn(&mut PaintContext, Rect, InteractState)>>,
     pub on_click: Option<Box<dyn FnMut()>>,
+    /// Secondary (right) click callback: the pointer position (context menus).
+    pub on_secondary: Option<Box<dyn FnMut(Vec2)>>,
     pub on_drag: Option<Box<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>>,
     /// Absolute-position pointer callback: press + move while held, with the
     /// control's rect and the pointer position (sliders / pickers).
@@ -57,6 +59,7 @@ impl Default for Spec {
             background: None,
             foreground: None,
             on_click: None,
+            on_secondary: None,
             on_drag: None,
             on_pointer: None,
             on_scroll: None,
@@ -214,6 +217,13 @@ pub trait Component: Sized {
         self
     }
 
+    /// Runs `callback` on a secondary (right) click, with the pointer position
+    /// in viewport coordinates (used to open a context menu at the cursor).
+    fn on_secondary_click(mut self, callback: impl FnMut(Vec2) + 'static) -> Self {
+        self.spec().on_secondary = Some(Box::new(callback));
+        self
+    }
+
     /// Runs `callback` on drag start/move/end while the node is held, with the
     /// delta since the previous event. Gives the node pointer capture.
     fn on_drag(mut self, callback: impl FnMut(&mut SceneTree, DragPhase, Vec2) + 'static) -> Self {
@@ -340,6 +350,9 @@ pub fn apply_spec(tree: &mut SceneTree, id: NodeId, spec: Spec) {
     if let Some(callback) = spec.on_click {
         set_on_click(tree, id, callback);
     }
+    if let Some(callback) = spec.on_secondary {
+        set_on_secondary(tree, id, callback);
+    }
     if let Some(callback) = spec.on_drag {
         set_on_drag(tree, id, callback);
     }
@@ -370,6 +383,20 @@ where
     match tree.data_mut::<Control>(id) {
         Some(control) => {
             control.callback = Some(Rc::new(RefCell::new(callback)));
+            true
+        }
+        None => false,
+    }
+}
+
+/// Registers a secondary (right) click callback on `id`.
+pub fn set_on_secondary<F>(tree: &mut SceneTree, id: NodeId, callback: F) -> bool
+where
+    F: FnMut(Vec2) + 'static,
+{
+    match tree.data_mut::<Control>(id) {
+        Some(control) => {
+            control.secondary_callback = Some(Rc::new(RefCell::new(callback)));
             true
         }
         None => false,

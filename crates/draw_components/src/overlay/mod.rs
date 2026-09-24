@@ -31,7 +31,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::base::{Component, Flex, Label};
-use draw_core::{Color, Edges, EventResult, InputEvent, Key, NodeId, Size, ViewportSize};
+use draw_core::{
+    Color, Edges, EventResult, InputEvent, Key, NodeId, Rect, Size, Vec2, ViewportSize,
+};
 use draw_render::PaintContext;
 use draw_scene::SceneTree;
 use draw_theme::{radius, Space, SurfaceLevel, TextSize, Theme, Tone};
@@ -71,6 +73,8 @@ pub struct OverlayId(u64);
 enum Anchor {
     /// A control in the host UI (resolved from its laid-out rect).
     Target(NodeId),
+    /// A point in viewport coordinates (a context menu at the cursor).
+    Point(Vec2),
     /// The viewport itself (modal dialogs / toasts).
     ViewportSize,
 }
@@ -294,6 +298,26 @@ impl Overlays {
                 content: Rc::new(content),
             },
             Anchor::Target(target),
+            Placement::BelowStart,
+        );
+        entry.dismiss_on_outside = true;
+        entry.dismiss_on_escape = true;
+        self.push(entry)
+    }
+
+    /// Like [`Overlays::menu`], but anchored at a viewport point instead of a
+    /// control — a context menu at the pointer (right click).
+    pub fn menu_at(
+        &mut self,
+        position: Vec2,
+        content: impl Fn(&mut SceneTree, NodeId) + 'static,
+    ) -> OverlayId {
+        let mut entry = Entry::new(
+            OverlayId(0),
+            Kind::Menu {
+                content: Rc::new(content),
+            },
+            Anchor::Point(position),
             Placement::BelowStart,
         );
         entry.dismiss_on_outside = true;
@@ -556,6 +580,7 @@ impl Overlays {
                 .unwrap_or(Size::ZERO);
             let anchor = match entry.anchor {
                 Anchor::Target(id) => draw_ui::control(host_tree, id).map(|control| control.rect),
+                Anchor::Point(point) => Some(Rect::from_min_size(point, Size::ZERO)),
                 Anchor::ViewportSize => None,
             };
             let rect = placement::place(

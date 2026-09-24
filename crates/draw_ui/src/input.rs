@@ -171,6 +171,25 @@ pub fn handle_input(tree: &mut SceneTree, event: &InputEvent) -> EventResult {
                 EventResult::Ignored
             }
         }
+        InputEvent::PointerDown {
+            position,
+            button: PointerButton::Right,
+        } => {
+            // A secondary click walks up to the nearest control that registered
+            // a context callback (a list row) and hands it the pointer position.
+            let mut current = hit_test(tree, *position);
+            while let Some(id) = current {
+                if let Some(callback) = tree
+                    .data::<Control>(id)
+                    .and_then(|control| control.secondary_callback.clone())
+                {
+                    (callback.borrow_mut())(*position);
+                    return EventResult::Handled;
+                }
+                current = tree.parent(id);
+            }
+            EventResult::Ignored
+        }
         InputEvent::PointerUp {
             position,
             button: PointerButton::Left,
