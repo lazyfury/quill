@@ -28,6 +28,8 @@ pub struct Button {
     size: ControlSize,
     font_size: f32,
     weight: FontWeight,
+    /// Overrides the variant's label color when set.
+    text_color: Option<Color>,
     on_click: Option<Box<dyn FnMut()>>,
 }
 
@@ -41,6 +43,7 @@ impl Button {
             size: theme.default_control(),
             font_size: theme.font_size(TextSize::Small),
             weight: FontWeight::NORMAL,
+            text_color: None,
             on_click: None,
         }
     }
@@ -98,6 +101,12 @@ impl Button {
     /// Shorthand for [`weight`](Self::weight)`(`[`FontWeight::BOLD`]`)`.
     pub fn bold(self) -> Self {
         self.weight(FontWeight::BOLD)
+    }
+
+    /// Overrides the label color (default: the variant's label color).
+    pub fn text_color(mut self, color: Color) -> Self {
+        self.text_color = Some(color);
+        self
     }
 
     pub fn on_click(mut self, callback: impl FnMut() + 'static) -> Self {
@@ -183,10 +192,10 @@ impl Component for Button {
             }));
         }
 
-        let color = match self.variant {
+        let color = self.text_color.unwrap_or(match self.variant {
             ButtonVariant::Primary | ButtonVariant::Destructive => theme.palette().on_accent,
             _ => theme.palette().foreground,
-        };
+        });
         let text = self.text.clone();
         let font_size = self.font_size;
         self.spec.child(

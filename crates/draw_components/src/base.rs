@@ -444,6 +444,22 @@ pub fn set_text(tree: &mut SceneTree, id: NodeId, text: impl Into<String>) -> bo
     true
 }
 
+/// Replaces a label's color (no-op on non-text widgets).
+///
+/// Color does not affect layout, so the tree is not marked dirty: the paint
+/// stage reads the widget's color every frame.
+pub fn set_text_color(tree: &mut SceneTree, id: NodeId, color: Color) -> bool {
+    let Some(control) = tree.data_mut::<Control>(id) else {
+        return false;
+    };
+    match &mut control.widget {
+        Widget::Label { color: current, .. } => *current = color,
+        Widget::Button(button) => button.text_color = color,
+        _ => {}
+    }
+    true
+}
+
 /// Mutates a control's layout data and marks the tree dirty.
 pub fn update_control(tree: &mut SceneTree, id: NodeId, f: impl FnOnce(&mut ControlData)) -> bool {
     let changed = match tree.data_mut::<Control>(id) {
