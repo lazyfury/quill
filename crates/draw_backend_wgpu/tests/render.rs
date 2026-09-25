@@ -11,7 +11,9 @@ use draw_backend_wgpu::{
     wgpu, FontConfig, FontMode, PixelBuffer, TextureFilter, WgpuBackend, PIXEL_GLYPH_RATIO,
 };
 use draw_core::{Color, FontWeight, Rect, Size, Vec2, ViewportSize};
-use draw_render::{CornerRadii, Paint, PaintContext, RenderBackend, TextAlign, TextureId};
+use draw_render::{
+    CornerRadii, Paint, PaintContext, RenderBackend, RenderTargetId, TextAlign, TextureId,
+};
 
 /// Attempts to create a backend; `None` means "skip, no GPU adapter".
 fn backend() -> Option<WgpuBackend> {
@@ -340,6 +342,38 @@ fn draw_image_samples_a_texture_registered_through_the_trait() {
 
     let pixels = render(&mut backend, ctx, viewport(16.0, 16.0));
     assert_pixel(&pixels, 8, 8, [255, 255, 255, 255]);
+}
+
+#[test]
+fn a_render_target_is_sampleable_as_a_texture() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    let target = RenderTargetId::from_raw(90);
+    backend.create_render_target(target, 16, 16).unwrap();
+
+    // Render solid red into the target (a complete offscreen pass).
+    let mut inner = PaintContext::new();
+    inner.fill_rect(
+        Rect::from_min_size(Vec2::ZERO, Size::splat(16.0)),
+        Color::RED,
+    );
+    backend
+        .render_to_target(target, &inner.into_draw_list())
+        .unwrap();
+
+    // Composite the target as a texture over a 32x32 frame.
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        target.texture(),
+        Rect::from_min_size(Vec2::ZERO, Size::splat(32.0)),
+        None,
+        Paint::new(Color::WHITE),
+    );
+    let pixels = render(&mut backend, ctx, viewport(32.0, 32.0));
+    assert_pixel(&pixels, 16, 16, [255, 0, 0, 255]);
+
+    backend.destroy_render_target(target).unwrap();
 }
 
 #[test]

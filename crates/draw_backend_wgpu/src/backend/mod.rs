@@ -45,7 +45,7 @@ use std::sync::mpsc;
 use bytemuck::{Pod, Zeroable};
 
 use draw_core::{Color, Rect, Transform2D, Vec2, ViewportSize};
-use draw_render::{DrawList, Paint, RenderBackend, TextureId};
+use draw_render::{DrawList, Paint, RenderBackend, RenderTargetId, TextureId};
 
 use crate::font::{Font, FontConfig, FontMetrics};
 use pipeline::{bind_group, upload_texture};
@@ -253,6 +253,19 @@ pub(super) struct MsaaTarget {
     pub(super) view: wgpu::TextureView,
 }
 
+/// A user-created offscreen render target (`RenderBackend::create_render_target`).
+///
+/// Holds the texture (so it stays alive and can be sampled) and its view (the
+/// render pass attachment).
+pub(super) struct RenderTarget {
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) view: wgpu::TextureView,
+    /// Kept alive; sampled through the bind group in `textures`.
+    #[allow(dead_code)]
+    pub(super) texture: wgpu::Texture,
+}
+
 /// The render target of the frame currently being built.
 ///
 /// Offscreen frames point at [`OffscreenTarget::view`]; window frames point at
@@ -299,6 +312,8 @@ pub struct WgpuBackend {
     /// Kept so [`WgpuBackend::update_texture`] can rewrite pixels in place
     /// instead of allocating a new GPU texture every frame.
     pub(super) texture_objects: HashMap<TextureId, wgpu::Texture>,
+    /// User-created offscreen render targets, keyed by handle.
+    pub(super) render_targets: HashMap<RenderTargetId, RenderTarget>,
 
     pub(super) offscreen: Option<OffscreenTarget>,
     pub(super) msaa: Option<MsaaTarget>,
@@ -764,5 +779,81 @@ impl RenderBackend for WgpuBackend {
         rgba: &[u8],
     ) -> Result<(), Self::Error> {
         WgpuBackend::register_texture(self, id, width, height, rgba)
+    }
+
+    fn create_render_target(
+        &mut self,
+        id: RenderTargetId,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Self::Error> {
+        if width == 0 || height == 0 {
+            return Err(WgpuError::InvalidTexture("zero width or height".into()));
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("draw_backend_wgpu.render_target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TARGET_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let group = bind_group(
+            &self.device,
+            &self.bind_group_layout,
+            &view,
+            self.sampler(TextureFilter::Linear),
+            "render_target",
+        );
+
+        let texture_id = id.texture();
+        self.textures.insert(texture_id, group);
+        self.texture_sizes.insert(texture_id, (width, height));
+        self.render_targets.insert(
+            id,
+            RenderTarget {
+                width,
+                height,
+                view,
+                texture,
+            },
+        );
+        Ok(())
+    }
+
+    fn destroy_render_target(&mut self, id: RenderTargetId) -> Result<(), Self::Error> {
+        self.render_targets.remove(&id);
+        let texture_id = id.texture();
+        self.textures.remove(&texture_id);
+        self.texture_sizes.remove(&texture_id);
+        self.texture_filters.remove(&texture_id);
+        self.texture_effects.remove(&texture_id);
+        Ok(())
+    }
+
+    fn render_to_target(&mut self, id: RenderTargetId, list: &DrawList) -> Result<(), Self::Error> {
+        let Some(target) = self.render_targets.get(&id) else {
+            return Err(WgpuError::InvalidTexture("unknown render target".into()));
+        };
+        let (view, width, height) = (target.view.clone(), target.width, target.height);
+        let scale = if self.scale_factor > 0.0 {
+            self.scale_factor
+        } else {
+            1.0
+        };
+        let viewport = ViewportSize::new(draw_core::Size::new(
+            width as f32 / scale,
+            height as f32 / scale,
+        ));
+        self.begin_frame_with_view(view, width, height, TARGET_FORMAT, viewport)?;
+        self.submit(list)?;
+        self.end_frame()
     }
 }

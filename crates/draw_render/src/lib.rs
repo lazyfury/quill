@@ -19,12 +19,14 @@ pub const CRATE: &str = "draw_render";
 mod backend;
 mod command;
 mod list;
+mod target;
 mod texture;
 
 pub use backend::RenderBackend;
 pub use command::{CornerRadii, DrawCommand, Paint, TextAlign};
 pub use draw_core::FontWeight;
 pub use list::{DrawList, PaintContext};
+pub use target::RenderTargetId;
 pub use texture::TextureId;
 
 #[cfg(test)]

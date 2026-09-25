@@ -263,9 +263,8 @@ notes are `docs/godot-migration.md`.
   timestep, `examples/game_demo`, remaining `quill` facade backend features.
   Phase 8 observability remains.
 - **Current stage:** Stage 29 (`GameView`/sub-viewport + fixed timestep) —
-  sub-stage 29.1 (`draw_scene` fixed step: `set_physics_process` +
-  `SceneTree::physics_process`) accepted; next 29.2 (`draw_render` render-target
-  contract + wgpu/recording).
+  sub-stages 29.1 (`draw_scene` fixed step) and 29.2 (`draw_render` render-target
+  contract: `RenderTargetId` + wgpu/recording) accepted; next 29.3 (`GameView`).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

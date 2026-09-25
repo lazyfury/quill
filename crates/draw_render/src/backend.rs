@@ -1,6 +1,7 @@
 use draw_core::ViewportSize;
 
 use crate::list::DrawList;
+use crate::target::RenderTargetId;
 use crate::texture::TextureId;
 
 /// A backend that turns a [`DrawList`] into output for a frame.
@@ -42,6 +43,41 @@ pub trait RenderBackend {
         _width: u32,
         _height: u32,
         _rgba: &[u8],
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    /// Creates (or recreates) an empty offscreen render target of
+    /// `width`x`height` **device** pixels.
+    ///
+    /// Sample it later with `DrawImage { texture: id.texture(), .. }`
+    /// ([`RenderTargetId::texture`]).
+    ///
+    /// The default implementation ignores the target and returns `Ok(())`, so a
+    /// backend without offscreen support (or a headless one) needs no code.
+    fn create_render_target(
+        &mut self,
+        _id: RenderTargetId,
+        _width: u32,
+        _height: u32,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    /// Destroys a render target. A no-op for an unknown id or an unsupporting
+    /// backend.
+    fn destroy_render_target(&mut self, _id: RenderTargetId) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    /// Renders `list` into `id` as a complete offscreen pass (clear + draw),
+    /// independent of the main frame.
+    ///
+    /// Call `create_render_target` first. The default implementation is a no-op.
+    fn render_to_target(
+        &mut self,
+        _id: RenderTargetId,
+        _list: &DrawList,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

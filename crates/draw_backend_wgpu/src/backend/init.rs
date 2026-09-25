@@ -163,6 +163,7 @@ impl WgpuBackend {
             textures: HashMap::new(),
             texture_sizes: HashMap::new(),
             texture_objects: HashMap::new(),
+            render_targets: HashMap::new(),
             texture_filters: HashMap::new(),
             texture_effects: HashMap::new(),
             effect_pipelines: HashMap::new(),

@@ -13,7 +13,9 @@ mod assert;
 mod backend;
 
 pub use assert::CommandAsserts;
-pub use backend::{RecordedFrame, RecordingBackend, RecordingError};
+pub use backend::{
+    RecordedFrame, RecordingBackend, RecordingError, RegisteredTarget, RegisteredTexture,
+};
 
 #[cfg(test)]
 mod tests {

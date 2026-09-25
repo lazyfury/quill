@@ -1,7 +1,7 @@
 use std::fmt;
 
 use draw_core::ViewportSize;
-use draw_render::{DrawCommand, DrawList, RenderBackend, TextureId};
+use draw_render::{DrawCommand, DrawList, RenderBackend, RenderTargetId, TextureId};
 
 /// Errors from the frame lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +12,8 @@ pub enum RecordingError {
     NotRecording,
     /// `register_texture` got a zero size or too few bytes.
     InvalidTexture,
+    /// `render_to_target` used an id that was never created.
+    UnknownTarget,
 }
 
 impl fmt::Display for RecordingError {
@@ -20,6 +22,7 @@ impl fmt::Display for RecordingError {
             Self::AlreadyRecording => f.write_str("already recording a frame"),
             Self::NotRecording => f.write_str("no frame is currently recording"),
             Self::InvalidTexture => f.write_str("invalid texture dimensions or byte length"),
+            Self::UnknownTarget => f.write_str("unknown render target"),
         }
     }
 }
@@ -32,6 +35,23 @@ pub struct RegisteredTexture {
     pub id: TextureId,
     pub width: u32,
     pub height: u32,
+}
+
+/// Metadata for an offscreen render target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegisteredTarget {
+    pub id: RenderTargetId,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// A render target plus the lists rendered into it.
+#[derive(Debug, Clone, Default)]
+struct TargetRecord {
+    id: RenderTargetId,
+    width: u32,
+    height: u32,
+    frames: Vec<DrawList>,
 }
 
 /// One recorded frame: its viewport plus the concatenated commands of every
@@ -61,6 +81,7 @@ pub struct RecordingBackend {
     frames: Vec<RecordedFrame>,
     current: Option<RecordedFrame>,
     textures: Vec<RegisteredTexture>,
+    targets: Vec<TargetRecord>,
 }
 
 impl RecordingBackend {
@@ -101,6 +122,36 @@ impl RecordingBackend {
             .iter()
             .copied()
             .find(|texture| texture.id == id)
+    }
+
+    /// Metadata for one render target.
+    pub fn render_target(&self, id: RenderTargetId) -> Option<RegisteredTarget> {
+        self.targets
+            .iter()
+            .find(|target| target.id == id)
+            .map(|target| RegisteredTarget {
+                id: target.id,
+                width: target.width,
+                height: target.height,
+            })
+    }
+
+    /// Number of lists rendered into `id`.
+    pub fn target_frame_count(&self, id: RenderTargetId) -> usize {
+        self.targets
+            .iter()
+            .find(|target| target.id == id)
+            .map_or(0, |target| target.frames.len())
+    }
+
+    /// The commands of the `index`-th list rendered into `id`.
+    pub fn target_commands(&self, id: RenderTargetId, index: usize) -> Option<&[DrawCommand]> {
+        self.targets
+            .iter()
+            .find(|target| target.id == id)?
+            .frames
+            .get(index)
+            .map(|list| list.commands())
     }
 
     /// Discards all completed frames (does not touch an open frame).
@@ -157,6 +208,41 @@ impl RenderBackend for RecordingBackend {
             Some(slot) => *slot = registered,
             None => self.textures.push(registered),
         }
+        Ok(())
+    }
+
+    fn create_render_target(
+        &mut self,
+        id: RenderTargetId,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Self::Error> {
+        if width == 0 || height == 0 {
+            return Err(RecordingError::InvalidTexture);
+        }
+        let record = TargetRecord {
+            id,
+            width,
+            height,
+            frames: Vec::new(),
+        };
+        match self.targets.iter_mut().find(|target| target.id == id) {
+            Some(slot) => *slot = record,
+            None => self.targets.push(record),
+        }
+        Ok(())
+    }
+
+    fn destroy_render_target(&mut self, id: RenderTargetId) -> Result<(), Self::Error> {
+        self.targets.retain(|target| target.id != id);
+        Ok(())
+    }
+
+    fn render_to_target(&mut self, id: RenderTargetId, list: &DrawList) -> Result<(), Self::Error> {
+        let Some(target) = self.targets.iter_mut().find(|target| target.id == id) else {
+            return Err(RecordingError::UnknownTarget);
+        };
+        target.frames.push(list.clone());
         Ok(())
     }
 }
@@ -262,5 +348,49 @@ mod tests {
             Err(RecordingError::InvalidTexture)
         );
         assert!(backend.textures().is_empty());
+    }
+
+    #[test]
+    fn render_targets_record_metadata_and_frames() {
+        let mut backend = RecordingBackend::new();
+        let id = RenderTargetId::from_raw(50);
+        assert!(backend.render_target(id).is_none());
+
+        backend.create_render_target(id, 64, 32).unwrap();
+        assert_eq!(
+            backend.render_target(id),
+            Some(RegisteredTarget {
+                id,
+                width: 64,
+                height: 32
+            })
+        );
+
+        let mut ctx = PaintContext::new();
+        ctx.fill_rect(
+            Rect::from_min_size(draw_core::Vec2::ZERO, Size::splat(4.0)),
+            Color::RED,
+        );
+        backend.render_to_target(id, &ctx.into_draw_list()).unwrap();
+        backend.render_to_target(id, &DrawList::new()).unwrap();
+        assert_eq!(backend.target_frame_count(id), 2);
+        assert_eq!(backend.target_commands(id, 0).unwrap().len(), 1);
+        assert!(backend.target_commands(id, 2).is_none());
+
+        backend.destroy_render_target(id).unwrap();
+        assert!(backend.render_target(id).is_none());
+        assert_eq!(
+            backend.render_to_target(id, &DrawList::new()),
+            Err(RecordingError::UnknownTarget)
+        );
+    }
+
+    #[test]
+    fn a_zero_size_render_target_is_rejected() {
+        let mut backend = RecordingBackend::new();
+        assert_eq!(
+            backend.create_render_target(RenderTargetId::from_raw(1), 0, 8),
+            Err(RecordingError::InvalidTexture)
+        );
     }
 }

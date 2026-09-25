@@ -460,6 +460,18 @@ backward-compatible addition and record it here.
   owns the accumulator, runs `physics_process` once per fixed step and `process`
   once per rendered frame. Additive: `process` and the node shapes are unchanged.
 
+- **Render-target contract: `RenderTargetId` + `RenderBackend::create_render_target`
+  / `destroy_render_target` / `render_to_target`** (Stage 29.2): the IR had no way
+  to render a `DrawList` into an offscreen texture and then sample it, so a
+  sub-viewport could not be isolated. A `RenderTargetId` shares the `TextureId`
+  id space — `RenderTargetId::texture()` is the handle to pass to `DrawImage` —
+  and the three trait methods are defaulted to `Ok(())`, so a headless or
+  image-less backend needs no code. wgpu creates a
+  `RENDER_ATTACHMENT | TEXTURE_BINDING` texture and runs a complete offscreen
+  pass (`render_to_target`); `RecordingBackend` stores target metadata and the
+  rendered lists (`render_target` / `target_frame_count` / `target_commands`).
+  Raw offscreen support for the Canvas backend is deferred.
+
 ## Deferred
 
 Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /
