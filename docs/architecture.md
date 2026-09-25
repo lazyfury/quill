@@ -169,6 +169,14 @@ logical size plus the world -> screen `canvas_transform`.)
   renders its own `SceneTree` to an offscreen target at `logical * scale` and
   composites it — and a `FixedTimestep` clock. `quill` surfaces `GameView` when
   `ui` + `game` are enabled. Single-threaded; no separate game thread.
+- Stage 30 — `examples/game_demo` [done]: a top-down collect game built on the
+  game layer — a `GameView` embedded in a `draw_ui` HUD, animated sprites from an
+  embedded PNG atlas (`draw_assets` + `SpriteFrames`), `Camera2D` follow, `Area`
+  coin pickups scoring, a `draw_anim` spawn tween and a 120 Hz `FixedTimestep`.
+  Window host (`winit` + `draw_backend_wgpu`) with on-demand redraw; `--selfcheck`
+  drives the same pipeline headlessly through `draw_backend_recording`. Render
+  targets share the texture id space, so their ids are kept disjoint from uploaded
+  textures (the wgpu backend rejects a collision).
 
 ## Debugging & performance inspection
 

@@ -142,6 +142,12 @@ multi_tree    -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
                  draw_theme, draw_backend_recording  (headless, no window host)
 wgpu_demo     -> draw_core, draw_render, draw_scene, draw_ui, demo_app,
                  draw_backend_wgpu, draw_profile, draw_debug_ui, winit
+game_demo     -> draw_core, draw_render, draw_scene, draw_ui, draw_theme,
+                 draw_components, draw_anim, draw_assets, draw_game (feature
+                 `ui`), draw_backend_wgpu, draw_backend_recording, winit
+                 (window host: a top-down collect game in a `GameView` + HUD;
+                  `--selfcheck` drives the real pipeline headlessly through
+                  `draw_backend_recording` — no window, no screenshot)
 deepseek_balance -> draw_core, draw_render, draw_scene, draw_theme, draw_ui,
                  draw_components, draw_backend_wgpu, winit, ureq,
                  deepseek_util (own sub-crate `examples/deepseek_balance/util`:
@@ -169,10 +175,10 @@ it graduated to its own repo (a sibling checkout, `../image_editor`) and consume
 these crates through relative path deps, so it is no longer part of this
 checkout.
 
-Planned (Stages 28-31, see `docs/godot-migration.md`):
+Planned (future stages, see `docs/godot-migration.md`):
 
 ```
-examples/game_demo -> draw_game, draw_scene, draw_anim, one backend  # Stage 30
+# Stage 31: remaining `quill` facade backend features (wgpu/canvas/wasm/...)
 ```
 
 The core crates stay fine-grained on purpose; applications use the `quill`
@@ -210,6 +216,7 @@ None of the demos is a dependency of the core crates.
 | `examples/multi_tree` | root member | single crate, headless (`draw_backend_recording`) | `cargo test -p multi_tree` | dependency block above |
 | `examples/web_demo` | root member | WASM / Canvas host | `cargo test -p web_demo`; build `./examples/web_demo/build.sh` | `examples/web_demo/README.md` |
 | `examples/wgpu_demo` | root member | native `wgpu` + `winit` | `cargo test -p wgpu_demo`; run `cargo run -p wgpu_demo --release` | `examples/wgpu_demo/README.md`, `docs/debug.md` |
+| `examples/game_demo` | root member | top-down game in a `GameView` + HUD; native `wgpu` + `winit` | `cargo test -p game_demo`; run `cargo run -p game_demo --release`; `cargo run -p game_demo -- --selfcheck` | dependency block above |
 | `examples/deepseek_balance` | **standalone** (own workspace) | own `util` sub-crate (member of that workspace); native `wgpu` + `winit` + `ureq` | `cargo test --manifest-path examples/deepseek_balance/Cargo.toml`; `cargo run --manifest-path examples/deepseek_balance/Cargo.toml -- --selfcheck` | dependency block above, crate module docs |
 | `examples/file_browser` | **standalone** (own workspace) | single crate; native `wgpu` + `winit` | `cargo test --manifest-path examples/file_browser/Cargo.toml`; `cargo run --manifest-path examples/file_browser/Cargo.toml -- --selfcheck` (`--dump` too) | dependency block above |
 | `examples/cpp_ffi` | **standalone** (C++/CMake; no Cargo workspace) | C++17 UI + OpenGL 3.3 backend; links `draw_ffi` + `demoapp_ffi` + `wgpu_ffi` | `./examples/cpp_ffi/build.sh`; `./examples/cpp_ffi/build/cpp_ffi --selfcheck` (`--dump`, `--gallery`, `--demoapp`, `--wgpu` too) | `examples/cpp_ffi/README.md`, `docs/cpp-ffi.md` |
@@ -249,21 +256,20 @@ crate/module instead of being embedded where it happens to be used.
 
 ## Stages
 
-All stages through **Stage 29 are complete and accepted.** The full ledger (one
+All stages through **Stage 30 are complete and accepted.** The full ledger (one
 line per stage, with what each landed) is `docs/architecture.md` →
 "Implementation stages"; the Godot-style migration's phase plan and per-substage
 notes are `docs/godot-migration.md`.
 
-- **Current status:** Stage 29 (`GameView`/sub-viewport + fixed timestep)
-  accepted — 29.1 `SceneTree::physics_process`, 29.2 `RenderTargetId` +
-  render-target contract (wgpu/recording), 29.3 `draw_game::GameView` (behind the
-  optional `ui` feature), 29.4 `FixedTimestep` clock. Previously: Stage 28
-  (`draw_game` 2D game layer), Stage 27 (refresh decoupling), Stage 26
-  (`draw_anim` + `quill` facade skeleton), Stage 25 (Godot-style unified scene),
-  `draw_font`, `Theme` trait.
-- **Next (future stages):** Stages 30-31 — `examples/game_demo`, remaining
-  `quill` facade backend features. Phase 8 observability remains.
-- **Current stage:** none — next up Stage 30 (`examples/game_demo`).
+- **Current status:** Stage 30 (`examples/game_demo`: top-down collect game in a
+  `GameView` + HUD, window host + `--selfcheck`) accepted. Previously: Stage 29
+  (`GameView`/sub-viewport + fixed timestep), Stage 28 (`draw_game` 2D game
+  layer), Stage 27 (refresh decoupling), Stage 26 (`draw_anim` + `quill` facade
+  skeleton), Stage 25 (Godot-style unified scene), `draw_font`, `Theme` trait.
+- **Next (future stages):** Stage 31 — remaining `quill` facade backend features
+  (`wgpu`/`canvas`/`wasm`/`profile`/`debug`/`recording`/`bench`). Phase 8
+  observability remains.
+- **Current stage:** none — next up Stage 31 (`quill` facade backend features).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

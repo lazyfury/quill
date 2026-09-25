@@ -392,6 +392,15 @@ offscreen target at `logical * scale`, composited by a `draw_ui` Control; 29.4
 stays `Wait` / on-demand. Single-threaded; L4 (separate game thread) is out of
 scope.
 
+**Stage 30 done (accepted).** `examples/game_demo` — a top-down collect game: a
+`GameView` (embedded sub-viewport + HUD), an embedded PNG atlas decoded by
+`draw_assets` into `SpriteFrames`, `Camera2D` follow, `Area` coin pickups, a
+`draw_anim` spawn tween and a 120 Hz `FixedTimestep`. Window host (`winit` +
+`draw_backend_wgpu`, on-demand redraw); `--selfcheck` runs the real pipeline
+headlessly through `draw_backend_recording`. `GameView` gained `play_animation` /
+`stop_animation`; render-target ids must stay disjoint from uploaded texture ids
+(a wgpu target creation now rejects a collision).
+
 ## Dependency order
 
 ```

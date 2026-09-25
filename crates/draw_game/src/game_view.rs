@@ -28,7 +28,7 @@ use draw_scene::SceneTree;
 use draw_ui::{add_decor, foreground_decor, Control, ControlData, Widget};
 
 use crate::clock::FixedTimestep;
-use crate::{Areas, SpriteAnimations, Timers};
+use crate::{Areas, SpriteAnimations, SpriteFrames, Timers};
 
 /// An embedded game viewport: sub-tree + runners + offscreen target + UI control.
 pub struct GameView {
@@ -130,6 +130,16 @@ impl GameView {
 
     pub fn areas(&mut self) -> &mut Areas {
         &mut self.areas
+    }
+
+    /// Starts (or restarts) a sprite-sheet animation on a node in the world.
+    pub fn play_animation(&mut self, node: NodeId, frames: SpriteFrames) {
+        self.sprites.play(&mut self.world, node, frames);
+    }
+
+    /// Stops the sprite-sheet animation on a node.
+    pub fn stop_animation(&mut self, node: NodeId) -> bool {
+        self.sprites.stop(node)
     }
 
     /// The viewport's logical size (the control's rect in the UI).

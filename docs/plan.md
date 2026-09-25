@@ -149,6 +149,19 @@ host is already continuous. Next:
 - Keyboard navigation (arrow keys move between groups and cards).
 - Command palette overlay using the `List`/`Input` components.
 
+## Demo (`examples/game_demo`)
+
+A top-down collect game and the reference game host. The world runs in a
+`draw_game::GameView` (embedded sub-viewport) with a `draw_ui` HUD: an embedded
+PNG atlas decoded by `draw_assets` drives `SpriteFrames` walk animation, a
+`Camera2D` follows the player, `Area` coin pickups score, a `draw_anim` tween
+scales the player in, and movement runs at a 120 Hz `FixedTimestep`. The window
+host is `winit` + `draw_backend_wgpu` with on-demand redraw; `--selfcheck`
+renders the same pipeline headlessly through `draw_backend_recording`. Next:
+
+- Enemy/obstacle behaviour and a game-over/restart flow.
+- Interpolation between fixed steps for smoother motion at low step rates.
+
 ## Demo (`image_editor`)
 
 A Photoshop-style editor built on `draw_ui` / `draw_components`. It graduated to

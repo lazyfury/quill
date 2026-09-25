@@ -790,6 +790,14 @@ impl RenderBackend for WgpuBackend {
         if width == 0 || height == 0 {
             return Err(WgpuError::InvalidTexture("zero width or height".into()));
         }
+        // A render target shares the texture id space; colliding with an
+        // uploaded texture would make that texture sample the target.
+        let texture_id = id.texture();
+        if self.textures.contains_key(&texture_id) && !self.render_targets.contains_key(&id) {
+            return Err(WgpuError::InvalidTexture(
+                "render target id collides with a registered texture".into(),
+            ));
+        }
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("draw_backend_wgpu.render_target"),
             size: wgpu::Extent3d {
@@ -813,7 +821,6 @@ impl RenderBackend for WgpuBackend {
             "render_target",
         );
 
-        let texture_id = id.texture();
         self.textures.insert(texture_id, group);
         self.texture_sizes.insert(texture_id, (width, height));
         self.render_targets.insert(

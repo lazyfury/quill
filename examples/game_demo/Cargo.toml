@@ -1,0 +1,21 @@
+[package]
+name = "game_demo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+draw_core.workspace = true
+draw_render.workspace = true
+draw_scene.workspace = true
+draw_ui.workspace = true
+draw_theme.workspace = true
+draw_components.workspace = true
+draw_anim.workspace = true
+draw_assets.workspace = true
+draw_game = { workspace = true, features = ["ui"] }
+draw_backend_wgpu.workspace = true
+draw_backend_recording.workspace = true
+winit = "0.30"
