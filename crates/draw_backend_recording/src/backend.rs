@@ -1,7 +1,7 @@
 use std::fmt;
 
 use draw_core::ViewportSize;
-use draw_render::{DrawCommand, DrawList, RenderBackend};
+use draw_render::{DrawCommand, DrawList, RenderBackend, TextureId};
 
 /// Errors from the frame lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,6 +10,8 @@ pub enum RecordingError {
     AlreadyRecording,
     /// `submit`/`end_frame` was called with no open frame.
     NotRecording,
+    /// `register_texture` got a zero size or too few bytes.
+    InvalidTexture,
 }
 
 impl fmt::Display for RecordingError {
@@ -17,11 +19,20 @@ impl fmt::Display for RecordingError {
         match self {
             Self::AlreadyRecording => f.write_str("already recording a frame"),
             Self::NotRecording => f.write_str("no frame is currently recording"),
+            Self::InvalidTexture => f.write_str("invalid texture dimensions or byte length"),
         }
     }
 }
 
 impl std::error::Error for RecordingError {}
+
+/// Metadata for a texture registered through the neutral contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegisteredTexture {
+    pub id: TextureId,
+    pub width: u32,
+    pub height: u32,
+}
 
 /// One recorded frame: its viewport plus the concatenated commands of every
 /// submitted [`DrawList`].
@@ -49,6 +60,7 @@ impl RecordedFrame {
 pub struct RecordingBackend {
     frames: Vec<RecordedFrame>,
     current: Option<RecordedFrame>,
+    textures: Vec<RegisteredTexture>,
 }
 
 impl RecordingBackend {
@@ -75,6 +87,20 @@ impl RecordingBackend {
 
     pub fn is_recording(&self) -> bool {
         self.current.is_some()
+    }
+
+    /// Textures registered through [`RenderBackend::register_texture`], in
+    /// registration order.
+    pub fn textures(&self) -> &[RegisteredTexture] {
+        &self.textures
+    }
+
+    /// Metadata for one registered texture.
+    pub fn texture(&self, id: TextureId) -> Option<RegisteredTexture> {
+        self.textures
+            .iter()
+            .copied()
+            .find(|texture| texture.id == id)
     }
 
     /// Discards all completed frames (does not touch an open frame).
@@ -112,6 +138,25 @@ impl RenderBackend for RecordingBackend {
             return Err(RecordingError::NotRecording);
         };
         self.frames.push(frame);
+        Ok(())
+    }
+
+    fn register_texture(
+        &mut self,
+        id: TextureId,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<(), Self::Error> {
+        let expected = width as usize * height as usize * 4;
+        if width == 0 || height == 0 || rgba.len() < expected {
+            return Err(RecordingError::InvalidTexture);
+        }
+        let registered = RegisteredTexture { id, width, height };
+        match self.textures.iter_mut().find(|texture| texture.id == id) {
+            Some(slot) => *slot = registered,
+            None => self.textures.push(registered),
+        }
         Ok(())
     }
 }
@@ -181,5 +226,41 @@ mod tests {
         backend.end_frame().unwrap();
 
         assert_eq!(backend.last_frame().unwrap().command_count(), 2);
+    }
+
+    #[test]
+    fn register_texture_records_metadata_and_replaces_the_same_id() {
+        let mut backend = RecordingBackend::new();
+        assert!(backend.textures().is_empty());
+
+        let id = TextureId::new(5);
+        backend.register_texture(id, 2, 2, &[0u8; 16]).unwrap();
+        assert_eq!(
+            backend.texture(id),
+            Some(RegisteredTexture {
+                id,
+                width: 2,
+                height: 2
+            })
+        );
+
+        // Re-registering the same id replaces its metadata in place.
+        backend.register_texture(id, 4, 2, &[0u8; 32]).unwrap();
+        assert_eq!(backend.textures().len(), 1);
+        assert_eq!(backend.texture(id).unwrap().width, 4);
+    }
+
+    #[test]
+    fn register_texture_rejects_bad_dimensions_or_bytes() {
+        let mut backend = RecordingBackend::new();
+        assert_eq!(
+            backend.register_texture(TextureId::new(1), 0, 2, &[]),
+            Err(RecordingError::InvalidTexture)
+        );
+        assert_eq!(
+            backend.register_texture(TextureId::new(1), 2, 2, &[0u8; 3]),
+            Err(RecordingError::InvalidTexture)
+        );
+        assert!(backend.textures().is_empty());
     }
 }

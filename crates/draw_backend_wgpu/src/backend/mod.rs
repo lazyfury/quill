@@ -753,4 +753,16 @@ impl RenderBackend for WgpuBackend {
         self.render_frame();
         Ok(())
     }
+
+    /// Delegates to the inherent [`WgpuBackend::register_texture`] so the
+    /// neutral registration contract uploads a real GPU texture.
+    fn register_texture(
+        &mut self,
+        id: TextureId,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Result<(), Self::Error> {
+        WgpuBackend::register_texture(self, id, width, height, rgba)
+    }
 }

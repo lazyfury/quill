@@ -1,6 +1,7 @@
 use draw_core::ViewportSize;
 
 use crate::list::DrawList;
+use crate::texture::TextureId;
 
 /// A backend that turns a [`DrawList`] into output for a frame.
 ///
@@ -21,4 +22,27 @@ pub trait RenderBackend {
 
     /// Ends the current frame and presents/records it.
     fn end_frame(&mut self) -> Result<(), Self::Error>;
+
+    /// Registers a decoded RGBA8 image so `DrawImage` can reference it by
+    /// [`TextureId`].
+    ///
+    /// The neutral contract is bytes only: each backend maps the handle to its
+    /// own resource (a GPU texture, an `ImageBitmap`, a recording). `rgba` must
+    /// hold at least `width * height * 4` bytes, row-major, straight alpha.
+    ///
+    /// The default implementation ignores the texture and returns `Ok(())`, so a
+    /// backend with no image support (or a headless one) needs no code; a caller
+    /// must treat `Ok` from such a backend as "decoded but not displayed".
+    ///
+    /// **Non-breaking addition to `draw_render`** (Stage 28.2); recorded in
+    /// `docs/design-system.md`.
+    fn register_texture(
+        &mut self,
+        _id: TextureId,
+        _width: u32,
+        _height: u32,
+        _rgba: &[u8],
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }

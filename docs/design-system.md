@@ -440,6 +440,18 @@ backward-compatible addition and record it here.
   sprites like `Image`. Both additive: `Widget`/`ControlData` are unchanged and
   `SceneTree`/`Node` keep their existing methods.
 
+- **Neutral texture registration: `RenderBackend::register_texture`** (Stage
+  28.2): resource lifecycle was not in the IR contract — `TextureId` existed and
+  each backend registered privately (wgpu `register_texture`, canvas
+  `register_image`), so a game/asset layer had no backend-neutral upload path.
+  The trait gained a **defaulted** `register_texture(TextureId, width, height,
+  &[u8]) -> Result<(), Self::Error>` returning `Ok(())` by default, so it is
+  non-breaking for any existing or external backend. wgpu overrides it to upload
+  a real GPU texture (delegating to its inherent method); `RecordingBackend`
+  records `(id, width, height)` metadata (`textures()` / `texture(id)`) and
+  rejects zero sizes or short buffers. Raw-RGBA upload for the Canvas backend is
+  deferred (it takes an `HtmlImageElement` today).
+
 ## Deferred
 
 Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /

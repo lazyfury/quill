@@ -321,6 +321,28 @@ fn draw_image_samples_a_registered_texture() {
 }
 
 #[test]
+fn draw_image_samples_a_texture_registered_through_the_trait() {
+    let Some(mut backend) = backend() else {
+        return;
+    };
+    // A 1x1 white texture, registered through the neutral `RenderBackend`
+    // contract rather than the inherent wgpu method.
+    let id = TextureId::new(11);
+    RenderBackend::register_texture(&mut backend, id, 1, 1, &[255, 255, 255, 255]).unwrap();
+
+    let mut ctx = PaintContext::new();
+    ctx.draw_image(
+        id,
+        Rect::from_min_size(Vec2::ZERO, Size::splat(16.0)),
+        None,
+        Paint::new(Color::WHITE),
+    );
+
+    let pixels = render(&mut backend, ctx, viewport(16.0, 16.0));
+    assert_pixel(&pixels, 8, 8, [255, 255, 255, 255]);
+}
+
+#[test]
 fn nearest_texture_filter_keeps_hard_texel_edges() {
     let Some(mut backend) = backend() else {
         return;
