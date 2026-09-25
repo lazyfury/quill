@@ -274,7 +274,7 @@ Additive, outside the frozen core where possible. (Only the `Visual::Image` and
 - Assets: image decode / texture loading pipeline.
 - Audio: separate crate + backend.
 
-### Phase 7 — native continuous loop + fixed timestep — PLANNED (Stage 29)
+### Phase 7 — native continuous loop + fixed timestep — DONE (Stage 29)
 
 - `examples/wgpu_demo`: `ControlFlow::Wait` -> `Poll` or `WaitUntil` fixed step.
 - Separate logic step from render interpolation (`_physics_process` vs
@@ -379,6 +379,18 @@ Decisions (approved): `GameView` lives behind a new **optional `ui` feature on
   `wgpu_demo` stays `Wait` / on-demand.
 
 Each sub-stage ends with its report and waits for approval (rule 6).
+
+**Stage 29 done (accepted).** 29.1 `SceneTree::physics_process` fixed step; 29.2
+`RenderTargetId` + `create_render_target` / `destroy_render_target` /
+`render_to_target` (wgpu offscreen texture sampled as a texture; recording stores
+metadata + lists; canvas deferred); 29.3 `draw_game::GameView` (optional `ui`
+feature) — sub-`SceneTree` + `Animator`/`SpriteAnimations`/`Timers`/`Areas`,
+offscreen target at `logical * scale`, composited by a `draw_ui` Control; 29.4
+`draw_game::FixedTimestep` clock + `GameView::set_fixed_step`. `quill` surfaces
+`GameView` when `ui` + `game` are both enabled (`draw_game?/ui`). The actual
+`WaitUntil` game host lands with `examples/game_demo` (Stage 30); `wgpu_demo`
+stays `Wait` / on-demand. Single-threaded; L4 (separate game thread) is out of
+scope.
 
 ## Dependency order
 

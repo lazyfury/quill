@@ -27,6 +27,7 @@ use draw_render::{Paint, PaintContext, RenderBackend, RenderTargetId};
 use draw_scene::SceneTree;
 use draw_ui::{add_decor, foreground_decor, Control, ControlData, Widget};
 
+use crate::clock::FixedTimestep;
 use crate::{Areas, SpriteAnimations, Timers};
 
 /// An embedded game viewport: sub-tree + runners + offscreen target + UI control.
@@ -42,6 +43,9 @@ pub struct GameView {
     scale: f32,
     /// Device size the target was last created at.
     created: Option<(u32, u32)>,
+    /// Optional fixed-step clock; when set, `update` runs `physics_process`.
+    clock: Option<FixedTimestep>,
+    alpha: f32,
 }
 
 impl GameView {
@@ -60,6 +64,8 @@ impl GameView {
             viewport: ViewportSize::new(Size::ZERO),
             scale: 1.0,
             created: None,
+            clock: None,
+            alpha: 0.0,
         }
     }
 
@@ -146,6 +152,23 @@ impl GameView {
         self.scale = scale.max(0.0);
     }
 
+    /// Runs the world at a fixed `hz` (via `physics_process`) inside
+    /// [`GameView::update`]; `process(dt)` still runs once per real frame.
+    pub fn set_fixed_step(&mut self, hz: f32) {
+        self.clock = Some(FixedTimestep::from_hz(hz));
+    }
+
+    /// Disables the fixed step (only the variable `process(dt)` runs).
+    pub fn clear_fixed_step(&mut self) {
+        self.clock = None;
+    }
+
+    /// The interpolation alpha from the last [`GameView::update`] (the fraction
+    /// of the next fixed step already elapsed; `0.0` without a fixed step).
+    pub fn interpolation_alpha(&self) -> f32 {
+        self.alpha
+    }
+
     /// Whether another frame is needed (a running runner or a stale world).
     pub fn needs_frame(&self) -> bool {
         self.anim.is_animating()
@@ -160,6 +183,18 @@ impl GameView {
     /// and before `draw_ui::paint` (which composites the target).
     pub fn update<B: RenderBackend>(&mut self, dt: f32, backend: &mut B) -> Result<(), B::Error> {
         self.world.set_viewport_size(self.viewport.logical_size());
+
+        if let Some(clock) = self.clock.as_mut() {
+            let tick = clock.advance(dt);
+            let step = clock.step();
+            for _ in 0..tick.steps {
+                self.world.physics_process(step);
+            }
+            self.alpha = tick.alpha;
+        } else {
+            self.alpha = 0.0;
+        }
+
         self.anim.update(dt, &mut self.world);
         self.sprites.update(dt, &mut self.world);
         self.timers.update(dt);
@@ -190,6 +225,9 @@ impl GameView {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
     use draw_backend_recording::RecordingBackend;
     use draw_core::Vec2;
     use draw_render::DrawCommand;
@@ -280,5 +318,29 @@ mod tests {
         view.set_viewport(viewport(16.0, 16.0));
         view.update(0.016, &mut backend).unwrap();
         assert!(!view.needs_frame(), "clean after update");
+    }
+
+    #[test]
+    fn a_fixed_step_runs_physics_at_the_configured_rate() {
+        let mut view = GameView::new(RenderTargetId::from_raw(123));
+        view.set_scale_factor(1.0);
+        view.set_viewport(viewport(16.0, 16.0));
+        view.set_fixed_step(50.0); // 20 ms per step
+
+        let steps = Rc::new(Cell::new(0));
+        let counter = steps.clone();
+        let root = view.world().root();
+        let node = view.world_mut().add_node2d(root, "physics");
+        view.world_mut()
+            .set_physics_process(node, move |_| counter.set(counter.get() + 1));
+
+        let mut backend = RecordingBackend::new();
+        view.update(0.05, &mut backend).unwrap();
+        assert_eq!(steps.get(), 2, "50 ms is two 20 ms steps");
+        assert!((view.interpolation_alpha() - 0.5).abs() < 1e-4);
+
+        view.update(0.01, &mut backend).unwrap();
+        assert_eq!(steps.get(), 3, "the leftover 10 ms plus 10 ms");
+        assert!((view.interpolation_alpha() - 0.0).abs() < 1e-4);
     }
 }

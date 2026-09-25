@@ -249,26 +249,21 @@ crate/module instead of being embedded where it happens to be used.
 
 ## Stages
 
-All stages through **Stage 28 are complete and accepted.** The full ledger (one
+All stages through **Stage 29 are complete and accepted.** The full ledger (one
 line per stage, with what each landed) is `docs/architecture.md` →
 "Implementation stages"; the Godot-style migration's phase plan and per-substage
 notes are `docs/godot-migration.md`.
 
-- **Current status:** Stage 28 (`draw_game` 2D game layer) accepted — sub-stages
-  28.1 `draw_scene` enablers (type-keyed node extension store + `Visual::Sprite`),
-  28.2 `RenderBackend::register_texture`, 28.3 `draw_assets` (PNG -> RGBA8),
-  28.4 `draw_game` (`Sprite2D` + texture upload), 28.5 sprite-frame animation +
-  timers + signals, 28.6 AABB/circle collision + `Area`, 28.7 `quill` `game`
-  feature. Previously: Stage 27 (refresh decoupling), Stage 26 (`draw_anim` +
-  `quill` facade skeleton), Stage 25 (Godot-style unified scene), `draw_font`,
-  `Theme` trait.
-- **Next (future stages):** Stages 29-31 — `GameView`/sub-viewport + fixed
-  timestep, `examples/game_demo`, remaining `quill` facade backend features.
-  Phase 8 observability remains.
-- **Current stage:** Stage 29 (`GameView`/sub-viewport + fixed timestep) —
-  sub-stages 29.1 (`draw_scene` fixed step), 29.2 (`draw_render` render-target
-  contract) and 29.3 (`draw_game::GameView` embedded sub-viewport, behind the
-  `ui` feature) accepted; next 29.4 (fixed-step host loop).
+- **Current status:** Stage 29 (`GameView`/sub-viewport + fixed timestep)
+  accepted — 29.1 `SceneTree::physics_process`, 29.2 `RenderTargetId` +
+  render-target contract (wgpu/recording), 29.3 `draw_game::GameView` (behind the
+  optional `ui` feature), 29.4 `FixedTimestep` clock. Previously: Stage 28
+  (`draw_game` 2D game layer), Stage 27 (refresh decoupling), Stage 26
+  (`draw_anim` + `quill` facade skeleton), Stage 25 (Godot-style unified scene),
+  `draw_font`, `Theme` trait.
+- **Next (future stages):** Stages 30-31 — `examples/game_demo`, remaining
+  `quill` facade backend features. Phase 8 observability remains.
+- **Current stage:** none — next up Stage 30 (`examples/game_demo`).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

@@ -160,6 +160,15 @@ logical size plus the world -> screen `canvas_transform`.)
   feature. Backend-neutral, no UI dependency (`game` does not imply `ui`), no
   rigid bodies or audio. Core additions recorded in `docs/design-system.md`;
   plan/status in `docs/godot-migration.md`.
+- Stage 29 — GameView / sub-viewport + fixed timestep [done]: `draw_scene` gained
+  a fixed-step `physics_process` lifecycle; `draw_render` gained a render-target
+  contract (`RenderTargetId` + `create_render_target` / `destroy_render_target` /
+  `render_to_target`; wgpu renders to an offscreen texture that is sampled as a
+  texture, recording stores metadata + lists); `draw_game` gained `GameView`
+  (behind its optional `ui` feature) — an embedded sub-viewport Control that
+  renders its own `SceneTree` to an offscreen target at `logical * scale` and
+  composites it — and a `FixedTimestep` clock. `quill` surfaces `GameView` when
+  `ui` + `game` are enabled. Single-threaded; no separate game thread.
 
 ## Debugging & performance inspection
 
