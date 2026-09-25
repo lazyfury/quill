@@ -22,8 +22,8 @@ use draw_core::NodeId;
 use draw_scene::SceneTree;
 
 use crate::control::{
-    control_mut, control_of, control_visible, gui_state, root_state, root_state_mut, CachedText,
-    ControlData, LayoutCache,
+    bump_paint_generation, control_mut, control_of, control_visible, gui_state, root_state,
+    root_state_mut, CachedText, ControlData, LayoutCache,
 };
 use crate::decor::{DecorRef, InteractState};
 use crate::layout::{layout_text, TextMeasurer, TextOptions};
@@ -129,6 +129,7 @@ impl Ui {
             }
             current = tree.parent(node);
         }
+        bump_paint_generation(tree);
     }
 
     /// Marks the whole tree dirty (structure changed, measurer swapped, ...).
@@ -143,6 +144,17 @@ impl Ui {
                 control.layout_dirty = true;
             }
         }
+        bump_paint_generation(tree);
+    }
+
+    /// Whether the next [`layout`](Ui::layout) call has work to do.
+    pub fn needs_layout(&self, tree: &SceneTree) -> bool {
+        root_state(tree).is_some_and(|state| !state.layout.borrow().valid)
+    }
+
+    /// Monotonic counter of painted-UI changes (see [`UiRootState`]).
+    pub fn paint_generation(&self, tree: &SceneTree) -> u64 {
+        root_state(tree).map_or(0, |state| state.paint_generation)
     }
 
     /// Number of controls in this UI (root included when mounted by a host).
@@ -167,6 +179,7 @@ impl Ui {
     pub fn add_decor(&mut self, tree: &mut SceneTree, id: NodeId, decor: DecorRef) {
         if let Some(control) = control_mut(tree, id) {
             control.decorations.push(decor);
+            bump_paint_generation(tree);
         }
     }
 

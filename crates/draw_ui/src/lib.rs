@@ -27,6 +27,7 @@
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_ui";
 
+mod cache;
 mod control;
 mod debug;
 mod decor;
@@ -36,6 +37,7 @@ mod paint;
 mod ui;
 mod widget;
 
+pub use cache::{paint_cached, PaintStatus, UiPaintCache};
 pub use control::{
     ClickCallback, Control, ControlData, CursorProvider, DragCallback, DragPhase, GuiState,
     MouseFilter, PointerCallback, ScrollCallback, SecondaryCallback,
@@ -85,6 +87,29 @@ pub fn layout_count(tree: &SceneTree) -> u64 {
 /// Number of controls arranged during the last [`layout()`] pass.
 pub fn last_arranged_nodes(tree: &SceneTree) -> usize {
     Ui.last_arranged_nodes(tree)
+}
+
+/// Whether the next [`layout()`] call has work to do.
+///
+/// A host that caches its frame can skip layout while this is `false`.
+///
+/// **Non-breaking addition to `draw_ui`** (Stage 27); recorded in
+/// `docs/design-system.md`.
+pub fn needs_layout(tree: &SceneTree) -> bool {
+    Ui.needs_layout(tree)
+}
+
+/// Monotonic counter of painted-UI changes.
+///
+/// Bumped by any change that can alter painted output (layout invalidation,
+/// GUI interaction state, decorators). Compare it against the generation a
+/// [`UiPaintCache`] was built from to decide whether the UI must be repainted
+/// this frame.
+///
+/// **Non-breaking addition to `draw_ui`** (Stage 27); recorded in
+/// `docs/design-system.md`.
+pub fn paint_generation(tree: &SceneTree) -> u64 {
+    Ui.paint_generation(tree)
 }
 
 // -- control data ------------------------------------------------------------

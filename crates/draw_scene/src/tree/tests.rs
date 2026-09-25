@@ -172,6 +172,26 @@ fn dirty_flags_skip_clean_nodes() {
 }
 
 #[test]
+fn needs_update_tracks_pending_dirty_flags() {
+    let mut tree = SceneTree::new();
+    let a = tree.add_node2d(tree.root(), "A");
+
+    assert!(tree.needs_update(), "fresh nodes are dirty");
+    tree.update();
+    assert!(!tree.needs_update(), "clean after update");
+
+    tree.set_position(a, Vec2::new(1.0, 0.0));
+    assert!(tree.needs_update());
+    tree.update();
+    assert!(!tree.needs_update());
+
+    tree.set_visible(a, false);
+    assert!(tree.needs_update(), "visibility is tracked too");
+    tree.update();
+    assert!(!tree.needs_update());
+}
+
+#[test]
 fn remove_frees_whole_subtree() {
     let mut tree = SceneTree::new();
     let root = tree.root();

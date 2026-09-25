@@ -142,6 +142,14 @@ logical size plus the world -> screen `canvas_transform`.)
   `is_animating` is the host's "needs another frame" signal. No clock, backend
   or UI dependency. The same task created the `quill` facade skeleton as
   re-exports only, with opt-in `ui` / `anim` features (`game` lands Stage 31).
+- Stage 27 — refresh decoupling [done]: additive core plumbing so a host can
+  render only on change and keep an unchanged UI out of the frame cost. The
+  `draw_ui` root state gained a `paint_generation` (bumped by layout
+  invalidation, GUI interaction state and decorators) plus `needs_layout` /
+  `paint_generation` queries and `UiPaintCache` / `paint_cached` (reuses the
+  last UI `DrawList`); `draw_scene::SceneTree::needs_update` reports stale
+  derived state; `draw_render::PaintContext::extend` splices a cached list.
+  Recorded in `docs/design-system.md`; `Widget` / `ControlData` unchanged.
 
 ## Debugging & performance inspection
 

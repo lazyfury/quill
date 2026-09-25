@@ -232,19 +232,21 @@ crate/module instead of being embedded where it happens to be used.
 
 ## Stages
 
-All stages through **Stage 26 are complete and accepted.** The full ledger (one
+All stages through **Stage 27 are complete and accepted.** The full ledger (one
 line per stage, with what each landed) is `docs/architecture.md` →
 "Implementation stages"; the Godot-style migration's phase plan and per-substage
 notes are `docs/godot-migration.md`.
 
-- **Current status:** Stage 26 (`draw_anim` + `quill` facade skeleton) accepted.
-  Also landed: Stage 25 (Godot-style unified scene), `draw_font`, `Theme` as a
-  trait + `DefaultTheme`.
-- **Next (future stages):** Stages 27-31 approved (see
-  `docs/godot-migration.md`): refresh decoupling, `draw_game`,
-  GameView/sub-viewport + fixed timestep, `examples/game_demo`, `quill` facade
-  `game` feature. Phase 8 observability remains.
-- **Current stage:** none — next up Stage 27 refresh decoupling (planned).
+- **Current status:** Stage 27 (refresh decoupling: `draw_ui` paint generation +
+  `UiPaintCache`/`paint_cached`, `SceneTree::needs_update`,
+  `PaintContext::extend`) accepted. Also landed: Stage 26 (`draw_anim` + `quill`
+  facade skeleton), Stage 25 (Godot-style unified scene), `draw_font`, `Theme`
+  as a trait + `DefaultTheme`.
+- **Next (future stages):** Stages 28-31 approved (see
+  `docs/godot-migration.md`): `draw_game`, GameView/sub-viewport + fixed
+  timestep, `examples/game_demo`, `quill` facade `game` feature. Phase 8
+  observability remains.
+- **Current stage:** none — next up Stage 28 `draw_game` (planned).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

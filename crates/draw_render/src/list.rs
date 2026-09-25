@@ -126,6 +126,20 @@ impl PaintContext {
         &self.commands
     }
 
+    /// Appends every command of a finished [`DrawList`] to this context.
+    ///
+    /// Commands are cloned. Used to splice a cached layer (for example the UI
+    /// `DrawList` kept across unchanged frames) into a fresh frame without
+    /// re-running its producer. The current transform/opacity/clip stack is
+    /// untouched; `list` must be balanced (`Save`/`Restore`) on its own, which
+    /// every painter here is.
+    ///
+    /// **Non-breaking addition to `draw_render`** (Stage 27); recorded in
+    /// `docs/design-system.md`.
+    pub fn extend(&mut self, list: &DrawList) {
+        self.commands.extend_from_slice(&list.commands);
+    }
+
     pub fn len(&self) -> usize {
         self.commands.len()
     }
@@ -449,5 +463,25 @@ mod tests {
             ctx.into_draw_list()
         }
         assert_eq!(build(), build());
+    }
+
+    #[test]
+    fn extend_appends_a_cached_list_after_the_existing_commands() {
+        let mut source = PaintContext::new();
+        source.fill_rect(rect(4.0, 4.0), Color::BLUE);
+        source.save();
+        source.fill_circle(Vec2::new(1.0, 1.0), 2.0, Color::GREEN);
+        source.restore();
+        let cached = source.into_draw_list();
+
+        let mut ctx = PaintContext::new();
+        ctx.fill_rect(rect(8.0, 8.0), Color::RED);
+        let prefix = ctx.len();
+        ctx.extend(&cached);
+
+        assert_eq!(ctx.len(), prefix + cached.len());
+        assert_eq!(&ctx.draw_list()[prefix..], cached.commands());
+        // The prefix is untouched.
+        assert!(matches!(ctx.draw_list()[0], DrawCommand::FillRect { .. }));
     }
 }

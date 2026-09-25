@@ -297,6 +297,10 @@ pub(crate) struct UiRootState {
     pub(crate) text_measurer: Rc<dyn TextMeasurer>,
     pub(crate) gui: GuiState,
     pub(crate) layout: RefCell<LayoutCache>,
+    /// Bumped on every change that can alter the painted UI. Hosts compare it
+    /// (via [`paint_generation`](crate::paint_generation)) against the
+    /// generation their cached UI `DrawList` was built from.
+    pub(crate) paint_generation: u64,
 }
 
 impl Default for UiRootState {
@@ -305,6 +309,7 @@ impl Default for UiRootState {
             text_measurer: Rc::new(ApproxTextMeasurer),
             gui: GuiState::default(),
             layout: RefCell::new(LayoutCache::default()),
+            paint_generation: 0,
         }
     }
 }
@@ -336,7 +341,15 @@ pub fn gui_state(tree: &SceneTree) -> Option<&GuiState> {
 
 /// Mutably borrows the viewport GUI state, creating it on first use.
 pub fn gui_state_mut(tree: &mut SceneTree) -> &mut GuiState {
-    &mut root_state_mut(tree).gui
+    let state = root_state_mut(tree);
+    state.paint_generation = state.paint_generation.wrapping_add(1);
+    &mut state.gui
+}
+
+/// Bumps the paint generation, marking the painted UI as changed.
+pub(crate) fn bump_paint_generation(tree: &mut SceneTree) {
+    let state = root_state_mut(tree);
+    state.paint_generation = state.paint_generation.wrapping_add(1);
 }
 
 #[cfg(test)]

@@ -578,6 +578,21 @@ impl SceneTree {
         recomputed
     }
 
+    /// Whether [`update`](Self::update) has work to do.
+    ///
+    /// True while any node's derived state (`world_transform` /
+    /// `world_visible`) is stale. A host can combine this with the UI repaint
+    /// generation and the animation signal to decide whether a frame is needed.
+    ///
+    /// **Non-breaking addition to `draw_scene`** (Stage 27); recorded in
+    /// `docs/design-system.md`.
+    pub fn needs_update(&self) -> bool {
+        self.slots.iter().flatten().any(|node| {
+            node.canvas()
+                .is_some_and(|canvas| !canvas.dirty_flags().is_clean())
+        })
+    }
+
     /// Recomputes the root viewport's `canvas_transform` from the current
     /// `Camera2D` (Godot `Camera2D::get_camera_transform`). With no current,
     /// enabled camera the transform is the identity.

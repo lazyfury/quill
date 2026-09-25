@@ -409,6 +409,23 @@ backward-compatible addition and record it here.
   pressed control after drag capture. Additive: `Widget`/`ControlData` shapes
   are unchanged and existing `on_click`/`on_drag` callbacks are untouched.
 
+- **Refresh decoupling: `draw_ui::needs_layout` / `paint_generation` /
+  `UiPaintCache` / `paint_cached`, `draw_scene::SceneTree::needs_update`,
+  `draw_render::PaintContext::extend`** (Stage 27): a host that renders only on
+  change had no cheap way to tell whether the UI changed, so an unchanged UI was
+  re-walked and re-emitted every frame, which is what makes UI work throttle a
+  game's frame rate. The root UI state gained a monotonic `paint_generation`,
+  bumped by every change that can alter painted output (`mark_dirty` /
+  `mark_all_dirty`, mutable GUI interaction state via `gui_state_mut`, and
+  `add_decor`); `needs_layout(tree)` reports whether the layout cache is
+  invalid. A host keeps a `UiPaintCache` and calls
+  `paint_cached(tree, &mut cache, &mut ctx)`, which rebuilds the UI `DrawList`
+  only when the generation moved and otherwise appends the cached commands via
+  the new `PaintContext::extend`. `SceneTree::needs_update()` reports whether
+  `update()` has stale derived state. All additive: `Widget`/`ControlData`
+  shapes are unchanged, `paint`/`layout`/`update` keep their exact behavior, and
+  a host that ignores the new API pays only one `u64` bump per mutation.
+
 ## Deferred
 
 Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /
