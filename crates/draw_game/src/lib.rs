@@ -23,17 +23,34 @@
 //! ```
 //!
 //! Scope: sprites (region/atlas, flip, nine-slice) and their texture upload
-//! helper. Sprite-frame animation, timers/signals and collision land in the
-//! following sub-stages; rigid bodies and audio are out of scope.
+//! helper, sprite-sheet frame animation ([`SpriteFrames`] +
+//! [`SpriteAnimations`]), lightweight [`Timers`] and typed [`Signal`]s.
+//! Collision lands in the following sub-stage; rigid bodies and audio are out of
+//! scope.
+//!
+//! # `needs_frame`
+//!
+//! A host that renders on demand folds this crate's activity into its frame
+//! request: `draw_anim::Animator::is_animating()` (transform/colour tweens),
+//! [`SpriteAnimations::is_animating`] (frame stepping) and
+//! [`Timers::is_animating`] (pending timers), plus the UI/scene signals.
 
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "draw_game";
 
+mod animation;
+mod frames;
+mod signal;
 mod sprite;
 mod texture;
+mod timer;
 
+pub use animation::SpriteAnimations;
+pub use frames::SpriteFrames;
+pub use signal::Signal;
 pub use sprite::Sprite;
 pub use texture::upload_texture;
+pub use timer::{TimerId, Timers};
 
 // Convenient handles a game needs from the core layers.
 pub use draw_core::{NodeId, Rect, Size, Vec2};
