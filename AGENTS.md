@@ -233,21 +233,23 @@ crate/module instead of being embedded where it happens to be used.
 
 ## Stages
 
-All stages through **Stage 27 are complete and accepted.** The full ledger (one
-line per stage, with what each landed) is `docs/architecture.md` →
-"Implementation stages"; the Godot-style migration's phase plan and per-substage
-notes are `docs/godot-migration.md`.
+All stages through **Stage 27 are complete and accepted.** Stage 28
+(`draw_game`) is in progress. The full ledger (one line per stage, with what each
+landed) is `docs/architecture.md` → "Implementation stages"; the Godot-style
+migration's phase plan and per-substage notes are `docs/godot-migration.md`.
 
-- **Current status:** Stage 27 (refresh decoupling: `draw_ui` paint generation +
-  `UiPaintCache`/`paint_cached`, `SceneTree::needs_update`,
-  `PaintContext::extend`) accepted. Also landed: Stage 26 (`draw_anim` + `quill`
-  facade skeleton), Stage 25 (Godot-style unified scene), `draw_font`, `Theme`
-  as a trait + `DefaultTheme`.
-- **Next (future stages):** Stages 28-31 approved (see
-  `docs/godot-migration.md`): `draw_game`, GameView/sub-viewport + fixed
-  timestep, `examples/game_demo`, `quill` facade `game` feature. Phase 8
-  observability remains.
-- **Current stage:** none — next up Stage 28 `draw_game` (planned).
+- **Current status:** Stage 28 `draw_game` in progress — sub-stage 28.1
+  (`draw_scene` enablers: type-keyed node extension store + `Visual::Sprite`)
+  accepted. Previously: Stage 27 (refresh decoupling: `draw_ui` paint generation
+  + `UiPaintCache`/`paint_cached`, `SceneTree::needs_update`,
+  `PaintContext::extend`), Stage 26 (`draw_anim` + `quill` facade skeleton),
+  Stage 25 (Godot-style unified scene), `draw_font`, `Theme` trait.
+- **Next (future stages):** Stage 28.2-28.7 (texture registration contract,
+  `draw_assets`, `draw_game` sprites/animation/timers/collision, `quill` `game`
+  feature), then Stages 29-31 (`GameView`/sub-viewport + fixed timestep,
+  `examples/game_demo`). Phase 8 observability remains.
+- **Current stage:** Stage 28 `draw_game` — next sub-stage 28.2
+  (`RenderBackend::register_texture` + wgpu/recording).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

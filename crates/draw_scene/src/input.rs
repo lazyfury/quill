@@ -246,6 +246,10 @@ fn hit_visual(visual: Visual, point: Vec2) -> bool {
         Visual::Image { size, .. } => {
             point.x >= 0.0 && point.y >= 0.0 && point.x <= size.width && point.y <= size.height
         }
+        // A sprite (including flipped / nine-sliced) has the same bounds.
+        Visual::Sprite { size, .. } => {
+            point.x >= 0.0 && point.y >= 0.0 && point.x <= size.width && point.y <= size.height
+        }
     }
 }
 

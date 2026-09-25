@@ -291,13 +291,15 @@ fn node_data_is_independent_per_node() {
     assert_eq!(tree.node(b).data::<Label>().unwrap().0, "b");
     assert!(!tree.node(b).has_data::<Counter>());
 
-    // Setting overwrites the previous value regardless of its type.
+    // Different types coexist on one node; only the same type is replaced.
     tree.node_mut(a).set_data(Label("a".into()));
-    assert!(!tree.node(a).has_data::<Counter>());
+    assert!(tree.node(a).has_data::<Counter>());
     assert!(tree.node(a).has_data::<Label>());
+    assert_eq!(tree.node(a).data::<Counter>(), Some(&Counter(1)));
 
     tree.node_mut(a).clear_data();
     assert!(!tree.node(a).has_data::<Label>());
+    assert!(!tree.node(a).has_data::<Counter>());
     assert!(tree.node(b).has_data::<Label>());
 }
 

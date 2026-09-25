@@ -1,5 +1,5 @@
-use draw_core::{NodeId, Rect, Transform2D, Vec2};
-use draw_render::{Paint, PaintContext};
+use draw_core::{NodeId, Rect, Size, Transform2D, Vec2};
+use draw_render::{Paint, PaintContext, TextureId};
 
 use crate::node::Visual;
 use crate::tree::SceneTree;
@@ -64,6 +64,16 @@ impl SceneTree {
                             Paint::default(),
                         );
                     }
+                    Visual::Sprite {
+                        texture,
+                        size,
+                        source,
+                        flip_x,
+                        flip_y,
+                        nine,
+                    } => {
+                        paint_sprite(ctx, texture, size, source, flip_x, flip_y, nine);
+                    }
                 }
                 ctx.restore();
             }
@@ -101,6 +111,103 @@ impl SceneTree {
         // Stable: equal layers keep first-encounter (tree) order.
         groups.sort_by_key(|group| group.layer);
         groups
+    }
+}
+
+/// Emits a [`Visual::Sprite`] as one or nine [`DrawImage`](draw_render::DrawCommand::DrawImage)
+/// commands, applying flip as a local transform around the sprite's origin.
+fn paint_sprite(
+    ctx: &mut PaintContext,
+    texture: TextureId,
+    size: Size,
+    source: Option<Rect>,
+    flip_x: bool,
+    flip_y: bool,
+    nine: Option<[f32; 4]>,
+) {
+    if flip_x || flip_y {
+        let scale = Vec2::new(
+            if flip_x { -1.0 } else { 1.0 },
+            if flip_y { -1.0 } else { 1.0 },
+        );
+        let offset = Vec2::new(
+            if flip_x { size.width } else { 0.0 },
+            if flip_y { size.height } else { 0.0 },
+        );
+        ctx.transform(Transform2D::from_translation(offset) * Transform2D::from_scale(scale));
+    }
+
+    let destination = Rect::from_min_size(Vec2::ZERO, size);
+    match (nine, source) {
+        (Some(insets), Some(src)) => paint_nine_slice(ctx, texture, destination, src, insets),
+        _ => ctx.draw_image(texture, destination, source, Paint::default()),
+    }
+}
+
+/// Splits `source`/`destination` into nine regions and draws them, so corners
+/// keep their size while edges and the centre stretch. Insets are clamped so
+/// every slice stays non-negative.
+fn paint_nine_slice(
+    ctx: &mut PaintContext,
+    texture: TextureId,
+    destination: Rect,
+    source: Rect,
+    insets: [f32; 4],
+) {
+    let [left, top, right, bottom] = insets;
+    let l = left.max(0.0).min(source.size.width);
+    let t = top.max(0.0).min(source.size.height);
+    let r = right.max(0.0).min(source.size.width - l);
+    let b = bottom.max(0.0).min(source.size.height - t);
+    let dl = l.min(destination.size.width);
+    let dt = t.min(destination.size.height);
+    let dr = r.min(destination.size.width - dl);
+    let db = b.min(destination.size.height - dt);
+
+    let sx = [
+        source.left(),
+        source.left() + l,
+        source.right() - r,
+        source.right(),
+    ];
+    let sy = [
+        source.top(),
+        source.top() + t,
+        source.bottom() - b,
+        source.bottom(),
+    ];
+    let dx = [
+        destination.left(),
+        destination.left() + dl,
+        destination.right() - dr,
+        destination.right(),
+    ];
+    let dy = [
+        destination.top(),
+        destination.top() + dt,
+        destination.bottom() - db,
+        destination.bottom(),
+    ];
+
+    for row in 0..3 {
+        for col in 0..3 {
+            let src = Rect::from_min_max(
+                Vec2::new(sx[col], sy[row]),
+                Vec2::new(sx[col + 1], sy[row + 1]),
+            );
+            let dst = Rect::from_min_max(
+                Vec2::new(dx[col], dy[row]),
+                Vec2::new(dx[col + 1], dy[row + 1]),
+            );
+            if src.size.width <= 0.0
+                || src.size.height <= 0.0
+                || dst.size.width <= 0.0
+                || dst.size.height <= 0.0
+            {
+                continue;
+            }
+            ctx.draw_image(texture, dst, Some(src), Paint::default());
+        }
     }
 }
 
@@ -195,6 +302,91 @@ mod tests {
                 DrawCommand::Restore,
             ]
         );
+    }
+
+    #[test]
+    fn a_sprite_visual_draws_its_source_region() {
+        let mut tree = SceneTree::new();
+        let id = tree.add_node2d(tree.root(), "sprite");
+        let texture = draw_render::TextureId::new(3);
+        let source = Rect::from_min_size(Vec2::new(8.0, 4.0), Size::new(16.0, 16.0));
+        tree.set_visual(
+            id,
+            Visual::Sprite {
+                texture,
+                size: Size::new(32.0, 32.0),
+                source: Some(source),
+                flip_x: false,
+                flip_y: false,
+                nine: None,
+            },
+        );
+        tree.update();
+
+        let commands = paint(&tree);
+        let (destination, drawn_source) = commands
+            .iter()
+            .find_map(|command| match command {
+                DrawCommand::DrawImage {
+                    destination,
+                    source,
+                    ..
+                } => Some((*destination, *source)),
+                _ => None,
+            })
+            .expect("a DrawImage");
+        assert_eq!(
+            destination,
+            Rect::from_min_size(Vec2::ZERO, Size::new(32.0, 32.0))
+        );
+        assert_eq!(drawn_source, Some(source));
+    }
+
+    #[test]
+    fn a_flipped_sprite_emits_a_mirroring_transform() {
+        let mut tree = SceneTree::new();
+        let id = tree.add_node2d(tree.root(), "sprite");
+        tree.set_visual(
+            id,
+            Visual::Sprite {
+                texture: draw_render::TextureId::new(1),
+                size: Size::new(10.0, 4.0),
+                source: None,
+                flip_x: true,
+                flip_y: false,
+                nine: None,
+            },
+        );
+        tree.update();
+
+        let commands = paint(&tree);
+        let transform = *set_transforms(&commands).last().expect("a transform");
+        assert_eq!(transform.x_axis.x, -1.0);
+        assert_eq!(transform.origin.x, 10.0);
+    }
+
+    #[test]
+    fn a_nine_slice_sprite_draws_nine_regions() {
+        let mut tree = SceneTree::new();
+        let id = tree.add_node2d(tree.root(), "sprite");
+        tree.set_visual(
+            id,
+            Visual::Sprite {
+                texture: draw_render::TextureId::new(2),
+                size: Size::new(60.0, 60.0),
+                source: Some(Rect::from_min_size(Vec2::ZERO, Size::new(30.0, 30.0))),
+                flip_x: false,
+                flip_y: false,
+                nine: Some([10.0, 10.0, 10.0, 10.0]),
+            },
+        );
+        tree.update();
+
+        let count = paint(&tree)
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::DrawImage { .. }))
+            .count();
+        assert_eq!(count, 9);
     }
 
     #[test]

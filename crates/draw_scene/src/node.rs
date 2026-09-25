@@ -1,9 +1,65 @@
-use std::any::Any;
+use std::any::{Any, TypeId};
 
-use draw_core::{Color, EventResult, InputEvent, NodeId, Size, Transform2D, Vec2};
+use draw_core::{Color, EventResult, InputEvent, NodeId, Rect, Size, Transform2D, Vec2};
 use draw_render::TextureId;
 
 use crate::viewport::Viewport;
+
+/// A node's type-keyed extension store.
+///
+/// Each `'static` type holds one value, and different types coexist: a `Control`
+/// runtime bundle and a game component can live on the same node. Backed by a
+/// small `Vec` (normally 0-3 entries) with a linear type search, which avoids a
+/// `HashMap` allocation per node.
+#[derive(Default)]
+pub(crate) struct Extensions {
+    entries: Vec<(TypeId, Box<dyn Any>)>,
+}
+
+impl Extensions {
+    pub(crate) fn set<T: 'static>(&mut self, value: T) {
+        let id = TypeId::of::<T>();
+        match self.entries.iter_mut().find(|(key, _)| *key == id) {
+            Some((_, slot)) => *slot = Box::new(value),
+            None => self.entries.push((id, Box::new(value))),
+        }
+    }
+
+    pub(crate) fn get<T: 'static>(&self) -> Option<&T> {
+        let id = TypeId::of::<T>();
+        self.entries
+            .iter()
+            .find(|(key, _)| *key == id)
+            .and_then(|(_, value)| value.downcast_ref::<T>())
+    }
+
+    pub(crate) fn get_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        let id = TypeId::of::<T>();
+        self.entries
+            .iter_mut()
+            .find(|(key, _)| *key == id)
+            .and_then(|(_, value)| value.downcast_mut::<T>())
+    }
+
+    pub(crate) fn has<T: 'static>(&self) -> bool {
+        self.get::<T>().is_some()
+    }
+
+    pub(crate) fn take<T: 'static>(&mut self) -> Option<T> {
+        let id = TypeId::of::<T>();
+        let index = self.entries.iter().position(|(key, _)| *key == id)?;
+        let (_, value) = self.entries.remove(index);
+        value.downcast::<T>().ok().map(|boxed| *boxed)
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
 
 /// A minimal built-in visual for canvas items.
 ///
@@ -32,6 +88,21 @@ pub enum Visual {
     Image {
         texture: TextureId,
         size: Size,
+    },
+    /// A textured sprite drawn from the local origin with `size` (like
+    /// [`Visual::Image`]), plus atlas / flip / nine-slice controls.
+    ///
+    /// `source` is the sub-rectangle of the texture to sample (an atlas frame;
+    /// `None` = the whole texture). `flip_x` / `flip_y` mirror the sprite.
+    /// `nine` is a `[left, top, right, bottom]` nine-slice inset in source
+    /// pixels and requires `source`; it stretches the edges/center to `size`.
+    Sprite {
+        texture: TextureId,
+        size: Size,
+        source: Option<Rect>,
+        flip_x: bool,
+        flip_y: bool,
+        nine: Option<[f32; 4]>,
     },
 }
 
@@ -220,9 +291,9 @@ impl CanvasItem {
 
 /// A single node in the [`crate::SceneTree`].
 ///
-/// `Node` is not `Clone`: it can hold arbitrary user data (`Box<dyn Any>`) via
-/// [`Node::set_data`]. Clone the tree only if you never need the slot, which is
-/// not the case today.
+/// `Node` is not `Clone`: it holds a type-keyed extension store of arbitrary
+/// `'static` data via [`Node::set_data`]. Clone the tree only if you never need
+/// the store, which is not the case today.
 pub struct Node {
     pub(crate) id: NodeId,
     pub(crate) name: String,
@@ -235,9 +306,9 @@ pub struct Node {
     pub(crate) canvas_layer: Option<CanvasLayerData>,
     pub(crate) camera_2d: Option<Camera2DData>,
     pub(crate) viewport: Option<Viewport>,
-    /// Backend-neutral extension slot for engine/UI data (`ControlData`, …).
-    /// `draw_scene` never names the concrete type.
-    pub(crate) data: Option<Box<dyn Any>>,
+    /// Backend-neutral, type-keyed extension store for engine/UI data
+    /// (`Control`, game components, …). `draw_scene` never names the types.
+    pub(crate) data: Extensions,
     /// Per-frame lifecycle callback, dispatched by [`crate::SceneTree::process`].
     pub(crate) process: Option<Box<dyn FnMut(f32)>>,
     /// Capture-phase input callback (Godot `Node::_input`).
@@ -261,7 +332,7 @@ impl std::fmt::Debug for Node {
             .field("canvas_layer", &self.canvas_layer)
             .field("camera_2d", &self.camera_2d)
             .field("viewport", &self.viewport)
-            .field("has_data", &self.data.is_some())
+            .field("data_count", &self.data.len())
             .field("has_process", &self.process.is_some())
             .field("has_input", &self.input.is_some())
             .field("has_input_event", &self.input_event.is_some())
@@ -291,7 +362,7 @@ impl Node {
             canvas_layer,
             camera_2d,
             viewport,
-            data: None,
+            data: Extensions::default(),
             process: None,
             input: None,
             input_event: None,
@@ -377,34 +448,35 @@ impl Node {
     // -- generic extension slot --------------------------------------------
 
     /// Stores a value in the node's type-keyed extension slot, replacing any
-    /// previous value (of any type). Downcast with [`Node::data`].
+    /// previous value *of the same type* (other types are untouched).
+    /// Downcast with [`Node::data`].
     pub fn set_data<T: 'static>(&mut self, value: T) {
-        self.data = Some(Box::new(value));
+        self.data.set(value);
     }
 
     /// Borrows the stored value if it has type `T`.
     pub fn data<T: 'static>(&self) -> Option<&T> {
-        self.data.as_ref()?.downcast_ref::<T>()
+        self.data.get::<T>()
     }
 
     /// Mutably borrows the stored value if it has type `T`.
     pub fn data_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        self.data.as_mut()?.downcast_mut::<T>()
+        self.data.get_mut::<T>()
     }
 
     /// Returns `true` if a value of type `T` is stored.
     pub fn has_data<T: 'static>(&self) -> bool {
-        self.data::<T>().is_some()
+        self.data.has::<T>()
     }
 
     /// Removes and returns the stored value if it has type `T`.
     pub fn take_data<T: 'static>(&mut self) -> Option<T> {
-        self.data.take()?.downcast::<T>().ok().map(|boxed| *boxed)
+        self.data.take::<T>()
     }
 
-    /// Removes any stored value regardless of type.
+    /// Removes every stored value, of every type.
     pub fn clear_data(&mut self) {
-        self.data = None;
+        self.data.clear();
     }
 
     /// Whether the node has a lifecycle callback.

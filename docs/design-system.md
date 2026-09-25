@@ -426,6 +426,20 @@ backward-compatible addition and record it here.
   shapes are unchanged, `paint`/`layout`/`update` keep their exact behavior, and
   a host that ignores the new API pays only one `u64` bump per mutation.
 
+- **Type-keyed node extension store + `Visual::Sprite`** (Stage 28.1, game
+  enablers): the node extension slot was a single `Box<dyn Any>` (core-hardening
+  #1), so storing one type silently destroyed any other on the same node and a
+  `Control` could not coexist with a game component. `Node.data` is now an
+  `Extensions` store keyed by `TypeId` (`Vec<(TypeId, Box<dyn Any>)>`, linear
+  search — counts are 0-3), backing the same `set_data`/`data`/`data_mut`/
+  `has_data`/`take_data`/`clear_data` API, so call sites are unchanged. Types now
+  coexist, `set_data` replaces only its own type, and `clear_data` still clears
+  all. `Visual` gained `Sprite { texture, size, source, flip_x, flip_y, nine }`:
+  `SceneTree::paint` emits one `DrawImage` (or nine for a nine-slice) and applies
+  flip as a local transform, so no new IR command was needed; `hit_visual` tests
+  sprites like `Image`. Both additive: `Widget`/`ControlData` are unchanged and
+  `SceneTree`/`Node` keep their existing methods.
+
 ## Deferred
 
 Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /
