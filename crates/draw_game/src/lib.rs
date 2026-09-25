@@ -41,6 +41,8 @@ pub const CRATE: &str = "draw_game";
 mod animation;
 mod area;
 mod frames;
+#[cfg(feature = "ui")]
+mod game_view;
 mod shape;
 mod signal;
 mod sprite;
@@ -50,6 +52,8 @@ mod timer;
 pub use animation::SpriteAnimations;
 pub use area::{Area, Areas};
 pub use frames::SpriteFrames;
+#[cfg(feature = "ui")]
+pub use game_view::GameView;
 pub use shape::{aabb_circle_overlap, aabb_overlap, circle_overlap, CollisionShape, WorldShape};
 pub use signal::Signal;
 pub use sprite::Sprite;

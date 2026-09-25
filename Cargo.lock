@@ -518,11 +518,13 @@ dependencies = [
 name = "draw_game"
 version = "0.1.0"
 dependencies = [
+ "draw_anim",
  "draw_assets",
  "draw_backend_recording",
  "draw_core",
  "draw_render",
  "draw_scene",
+ "draw_ui",
 ]
 
 [[package]]

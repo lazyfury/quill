@@ -116,13 +116,16 @@ draw_anim     -> draw_core, draw_scene
                  (backend-neutral, time-driven tweens/easing; drives node
                   properties or external values. `is_animating` is the host's
                   "needs another frame" signal. No clock, no backend, no UI.)
-draw_game     -> draw_core, draw_render, draw_scene, draw_assets
+draw_game     -> draw_core, draw_render, draw_scene, draw_assets, draw_anim
+                 (+ optional draw_ui behind the `ui` feature)
                  (2D game layer: sprites as `Node2D` + `Visual::Sprite`, texture
                   upload through `RenderBackend::register_texture`, sprite-sheet
                   frame animation, lightweight timers and typed signals, AABB/
-                  circle collision queries and `Area` enter/exit triggers. No
-                  backend, no UI; `quill`'s `game` feature forwards it. No rigid
-                  bodies, no audio.)
+                  circle collision queries and `Area` enter/exit triggers. The
+                  optional `ui` feature adds `GameView`, an embedded sub-viewport
+                  Control that renders the world to an offscreen target and
+                  composites it. No backend; no rigid bodies, no audio. `quill`'s
+                  `game` feature forwards it; `ui`+`game` surfaces `GameView`.)
 quill         -> feature-gated re-exports only:
                  `ui`   -> draw_core, draw_render, draw_scene, draw_theme,
                            draw_ui, draw_components
@@ -263,8 +266,9 @@ notes are `docs/godot-migration.md`.
   timestep, `examples/game_demo`, remaining `quill` facade backend features.
   Phase 8 observability remains.
 - **Current stage:** Stage 29 (`GameView`/sub-viewport + fixed timestep) —
-  sub-stages 29.1 (`draw_scene` fixed step) and 29.2 (`draw_render` render-target
-  contract: `RenderTargetId` + wgpu/recording) accepted; next 29.3 (`GameView`).
+  sub-stages 29.1 (`draw_scene` fixed step), 29.2 (`draw_render` render-target
+  contract) and 29.3 (`draw_game::GameView` embedded sub-viewport, behind the
+  `ui` feature) accepted; next 29.4 (fixed-step host loop).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

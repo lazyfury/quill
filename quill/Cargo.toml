@@ -15,6 +15,9 @@ ui = [
     "dep:draw_theme",
     "dep:draw_ui",
     "dep:draw_components",
+    # When `game` is also enabled, surface `draw_game::GameView` (weak dep: does
+    # not pull draw_game on by itself).
+    "draw_game?/ui",
 ]
 # Animation, independent of `ui` and `game`.
 anim = ["dep:draw_anim", "dep:draw_core", "dep:draw_scene"]

@@ -5,11 +5,18 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Embedded game viewport (`GameView`) hosted in a `draw_ui` tree.
+ui = ["dep:draw_ui"]
+
 [dependencies]
 draw_core.workspace = true
 draw_render.workspace = true
 draw_scene.workspace = true
 draw_assets.workspace = true
+draw_anim.workspace = true
+draw_ui = { workspace = true, optional = true }
 
 [dev-dependencies]
 draw_backend_recording.workspace = true
