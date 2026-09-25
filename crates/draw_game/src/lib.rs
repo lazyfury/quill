@@ -24,9 +24,9 @@
 //!
 //! Scope: sprites (region/atlas, flip, nine-slice) and their texture upload
 //! helper, sprite-sheet frame animation ([`SpriteFrames`] +
-//! [`SpriteAnimations`]), lightweight [`Timers`] and typed [`Signal`]s.
-//! Collision lands in the following sub-stage; rigid bodies and audio are out of
-//! scope.
+//! [`SpriteAnimations`]), lightweight [`Timers`], typed [`Signal`]s and
+//! collision queries with [`Area`] enter/exit triggers. Rigid bodies and audio
+//! are out of scope.
 //!
 //! # `needs_frame`
 //!
@@ -39,14 +39,18 @@
 pub const CRATE: &str = "draw_game";
 
 mod animation;
+mod area;
 mod frames;
+mod shape;
 mod signal;
 mod sprite;
 mod texture;
 mod timer;
 
 pub use animation::SpriteAnimations;
+pub use area::{Area, Areas};
 pub use frames::SpriteFrames;
+pub use shape::{aabb_circle_overlap, aabb_overlap, circle_overlap, CollisionShape, WorldShape};
 pub use signal::Signal;
 pub use sprite::Sprite;
 pub use texture::upload_texture;
