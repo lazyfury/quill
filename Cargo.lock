@@ -515,6 +515,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "draw_game"
+version = "0.1.0"
+dependencies = [
+ "draw_assets",
+ "draw_backend_recording",
+ "draw_core",
+ "draw_render",
+ "draw_scene",
+]
+
+[[package]]
 name = "draw_profile"
 version = "0.1.0"
 dependencies = [

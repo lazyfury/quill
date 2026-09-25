@@ -1,0 +1,15 @@
+[package]
+name = "draw_game"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+draw_core.workspace = true
+draw_render.workspace = true
+draw_scene.workspace = true
+draw_assets.workspace = true
+
+[dev-dependencies]
+draw_backend_recording.workspace = true

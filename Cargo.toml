@@ -20,6 +20,7 @@ members = [
     "crates/draw_wasm",
     "crates/draw_anim",
     "crates/draw_assets",
+    "crates/draw_game",
     "quill",
     "examples/web_demo",
     "examples/demo_app",
@@ -56,6 +57,7 @@ draw_backend_wgpu = { path = "crates/draw_backend_wgpu" }
 draw_wasm = { path = "crates/draw_wasm" }
 draw_anim = { path = "crates/draw_anim" }
 draw_assets = { path = "crates/draw_assets" }
+draw_game = { path = "crates/draw_game" }
 demo_app = { path = "examples/demo_app" }
 
 [profile.release]
