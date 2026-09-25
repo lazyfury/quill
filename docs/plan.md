@@ -11,6 +11,11 @@ primitives, and the demo. Keep this short and move finished items to the
 > day-to-day item lists below. Where they conflict for Stages 25+,
 > `godot-migration.md` wins.
 
+> **Stages 26-31 approved** (animation + game + GameView + `quill` facade):
+> `draw_anim` (26), refresh decoupling (27), `draw_game` (28), GameView /
+> sub-viewport + fixed timestep (29), `examples/game_demo` (30), `quill` facade
+> (31). See `docs/godot-migration.md` → "Approved plan — Stages 26-31".
+
 ## Drawing primitives
 
 The render IR (`draw_render::DrawCommand`) is the backend-neutral surface. Keep

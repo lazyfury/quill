@@ -141,16 +141,19 @@ it graduated to its own repo (a sibling checkout, `../image_editor`) and consume
 these crates through relative path deps, so it is no longer part of this
 checkout.
 
-Planned (Stage 25, see `docs/godot-migration.md`):
+Planned (Stages 26-31, see `docs/godot-migration.md`):
 
 ```
-draw_game -> draw_scene (+ optional draw_ui)      # Phase 6
-quill     -> feature-gated re-exports of the above # Phase 9 facade
+draw_anim -> draw_core (+ draw_scene for node targets)   # Stage 26
+draw_game -> draw_scene (+ optional draw_ui)             # Stage 28
+quill     -> feature-gated re-exports of the above       # Stage 31 facade
+examples/game_demo -> draw_game, draw_scene, draw_anim, one backend  # Stage 30
 ```
 
 The core crates stay fine-grained on purpose; applications use the `quill`
-facade with opt-in features (`ui`, `game`, `wgpu`, `canvas`, `wasm`, `profile`,
-`debug`, `recording`, `bench`). A UI-only app must not compile `draw_game`.
+facade with opt-in features (`ui`, `anim`, `game`, `wgpu`, `canvas`, `wasm`,
+`profile`, `debug`, `recording`, `bench`). A UI-only app must not compile
+`draw_game`; `anim` is independent of `game`.
 
 `draw_scene -> draw_render` is intentional: `draw_render` is the backend-neutral
 IR (no backend/browser deps), and the Paint step (Scene -> DrawList) lives in the
@@ -229,10 +232,11 @@ notes are `docs/godot-migration.md`.
 - **Current status:** Stage 25 (Godot-style unified scene) accepted — Phases 1-5
   and sub-stages 25.1-25.16 landed. Post-25.16: `draw_font` (system font service
   + numeric `FontWeight`) and `Theme` as a trait + `DefaultTheme`.
-- **Next (future stages):** Phase 6 `draw_game` capabilities, Phase 7 native
-  continuous loop, Phase 8 observability/tests/docs, Phase 9 `quill` facade. See
-  `docs/godot-migration.md`.
-- **Current stage:** none — next up Phase 6 `draw_game` (#6, planned).
+- **Next (future stages):** Stages 26-31 approved (see
+  `docs/godot-migration.md`): `draw_anim`, refresh decoupling, `draw_game`,
+  GameView/sub-viewport + fixed timestep, `examples/game_demo`, `quill` facade.
+  Phase 8 observability remains.
+- **Current stage:** none — next up Stage 26 `draw_anim` (planned).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

@@ -4,7 +4,8 @@ Status: **Stage 25 accepted.** Phases 1-5 and sub-stages 25.1-25.16 landed;
 Phases 6-9 (`draw_game`, native continuous loop, observability, `quill` facade)
 are future stages, not part of Stage 25's acceptance. Post-25.16 work:
 `draw_font` (system font service + numeric `FontWeight`) and `Theme` as a trait
-+ `DefaultTheme`.
++ `DefaultTheme`. **Stages 26-31 (animation + game + GameView + facade) are
+approved**; see "Approved plan — Stages 26-31" below.
 
 Goal: turn quill from "a UI toolkit that also has a scene tree" into a
 **2D-first scene engine** modeled on Godot, where a single `SceneTree` owns both
@@ -252,7 +253,7 @@ uses it for split-view resizing.
 pointer position). Multi-touch / gamepad remain future work; GUI focus/hover
 were already in `Ui` and a cross-layer focus test was added.
 
-### Phase 6 — game capabilities (new crate `draw_game`) — NOT STARTED
+### Phase 6 — game capabilities (new crate `draw_game`) — PLANNED (Stage 28)
 
 Additive, outside the frozen core where possible. (Only the `Visual::Image` and
 `Line` items below have landed early, in Stage 25.12 and for `image_editor`.)
@@ -273,7 +274,7 @@ Additive, outside the frozen core where possible. (Only the `Visual::Image` and
 - Assets: image decode / texture loading pipeline.
 - Audio: separate crate + backend.
 
-### Phase 7 — native continuous loop + fixed timestep
+### Phase 7 — native continuous loop + fixed timestep — PLANNED (Stage 29)
 
 - `examples/wgpu_demo`: `ControlFlow::Wait` -> `Poll` or `WaitUntil` fixed step.
 - Separate logic step from render interpolation (`_physics_process` vs
@@ -287,7 +288,7 @@ Additive, outside the frozen core where possible. (Only the `Visual::Image` and
 - Update `architecture.md`, `backend.md`, `components.md`, `plan.md`,
   `AGENTS.md`.
 
-### Phase 9 — packaging facade (`quill`)
+### Phase 9 — packaging facade (`quill`) — PLANNED (skeleton Stage 26, finalized Stage 31)
 
 Status: **planned, execute later** (can start once Phase 1 lands; finalized once
 `draw_game` exists in Phase 6).
@@ -301,6 +302,52 @@ compiles game logic and a game never compiles UI unless it asks.
 - UI-only apps depend on `quill` with `ui` + one backend; they never enable
   `game` and therefore never build `draw_game`.
 - Fine-grained crates stay separate; the facade does not merge them.
+
+## Approved plan — Stages 26-31 (animation + game + GameView + facade)
+
+Approved by the user (2026-09-25). Scope: give quill animation and 2D game
+capabilities, and let a **GameView** run at its own frame cadence so UI work does
+not throttle it. All new capability lives in optional crates; the core stays
+backend-neutral.
+
+### Why GameView (the decoupling problem)
+
+The native host renders only on change (`ControlFlow::Wait`), and one synchronous
+frame runs `update -> layout -> paint` for both world and UI. Two independent
+causes make UI work throttle the frame rate:
+
+1. **Same-frame coupling** — expensive UI `layout`/`paint` blocks the game step
+   in the same frame, regardless of where the game root sits.
+2. **Full UI repaint every frame** — `draw_ui::paint` re-walks the control tree
+   and rebuilds its `DrawList` even when nothing changed
+   (`crates/draw_ui/src/lib.rs`).
+
+This plan adopts the single-threaded decoupling levels L1-L3; **L4 (a separate
+game thread) is explicitly out of scope**:
+
+- **L1 scheduling** — the core exposes a `needs_frame` signal (active animation /
+  game); hosts wake with `ControlFlow::WaitUntil` on a fixed step.
+- **L2 UI cache** — when the UI layout is clean, skip `layout` + `paint` and
+  reuse the previous UI `DrawList`; a game-only frame costs only the game.
+- **L3 GameView sub-viewport** — the game renders to its own offscreen target
+  (Godot `SubViewport`) and is composited; UI changes only trigger recomposite.
+  Single-threaded, so a large UI relayout can still drop one frame.
+
+### Stages
+
+| Stage | Crate / area | Summary |
+|---|---|---|
+| 26 | new crate `draw_anim` | Time-based tweens/easing, driving node properties and external values; `is_animating()` feeds `needs_frame`. Optional feature `anim`. |
+| 27 | core plumbing | `draw_ui` clean-layout query + UI `DrawList` cache; `draw_scene`/runtime `needs_frame`. Additive, backend-neutral, recorded per AGENTS rule 8. |
+| 28 | new crate `draw_game` | `Sprite2D` (region/atlas/flip/9-slice) + sprite-frame animation; `Timer` + light signals; AABB/circle queries + `Area` triggers; neutral `register_texture` contract + PNG decode. No rigid-body solver and no audio. `game` does not imply `ui`. |
+| 29 | GameView + loop | Offscreen render target / sub-viewport; fixed-step `_physics_process` vs render `_process`; `WaitUntil` host. `wgpu_demo` stays `Wait`, requesting a frame only while animating. |
+| 30 | `examples/game_demo` | New workspace member: sprites, animation, collision, camera, input; `--selfcheck` via `draw_backend_recording` (no screenshots). |
+| 31 | `quill` facade | Feature-gated re-exports: `ui` (base), `anim`, `game`, `wgpu`, `canvas`, `wasm`, `profile`, `debug`, `recording`, `bench`. Skeleton starts in Stage 26; `game` feature finalizes after Stage 28. |
+
+Each stage still ends with its report and waits for approval (rule 6). Roadmap
+changes recorded here: new `draw_anim`, new `examples/game_demo`, Phase 9 facade
+started in Stage 26, and the `SubViewport` item moved out of Phase 7's tail into
+Stage 29.
 
 ## Dependency order
 
