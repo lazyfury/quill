@@ -150,6 +150,16 @@ logical size plus the world -> screen `canvas_transform`.)
   last UI `DrawList`); `draw_scene::SceneTree::needs_update` reports stale
   derived state; `draw_render::PaintContext::extend` splices a cached list.
   Recorded in `docs/design-system.md`; `Widget` / `ControlData` unchanged.
+- Stage 28 — 2D game layer (`draw_game`) [done]: `draw_scene` gained a
+  type-keyed node extension store (core-hardening #1) and `Visual::Sprite`
+  (region/atlas, flip, nine-slice); `draw_render` gained a defaulted
+  `RenderBackend::register_texture`; new `draw_assets` decodes PNG to RGBA8; new
+  `draw_game` provides `Sprite2D` + a texture-upload helper, sprite-sheet frame
+  animation, lightweight timers and typed signals, and AABB/circle collision
+  queries with `Area` enter/exit triggers; the `quill` facade gained the `game`
+  feature. Backend-neutral, no UI dependency (`game` does not imply `ui`), no
+  rigid bodies or audio. Core additions recorded in `docs/design-system.md`;
+  plan/status in `docs/godot-migration.md`.
 
 ## Debugging & performance inspection
 

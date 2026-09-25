@@ -253,7 +253,7 @@ uses it for split-view resizing.
 pointer position). Multi-touch / gamepad remain future work; GUI focus/hover
 were already in `Ui` and a cross-layer focus test was added.
 
-### Phase 6 — game capabilities (new crate `draw_game`) — PLANNED (Stage 28)
+### Phase 6 — game capabilities (new crate `draw_game`) — DONE (Stage 28)
 
 Additive, outside the frozen core where possible. (Only the `Visual::Image` and
 `Line` items below have landed early, in Stage 25.12 and for `image_editor`.)
@@ -348,6 +348,14 @@ Each stage still ends with its report and waits for approval (rule 6). Roadmap
 changes recorded here: new `draw_anim`, new `examples/game_demo`, Phase 9 facade
 started in Stage 26, and the `SubViewport` item moved out of Phase 7's tail into
 Stage 29.
+
+**Stage 28 done (accepted).** 28.1 `draw_scene` enablers (type-keyed node
+extension store, `Visual::Sprite`), 28.2 `RenderBackend::register_texture`
+defaulted contract (wgpu + recording), 28.3 `draw_assets` (PNG -> RGBA8), 28.4
+`draw_game` (`Sprite2D` + texture upload), 28.5 sprite-frame animation + timers +
+typed signals, 28.6 AABB/circle collision + `Area` triggers, 28.7 `quill` `game`
+feature. No rigid bodies, no audio; `game` does not imply `ui`. Core additions
+recorded in `docs/design-system.md`.
 
 ## Dependency order
 

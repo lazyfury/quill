@@ -18,6 +18,14 @@ ui = [
 ]
 # Animation, independent of `ui` and `game`.
 anim = ["dep:draw_anim", "dep:draw_core", "dep:draw_scene"]
+# 2D game layer. Does not imply `ui`; `anim` stays independent.
+game = [
+    "dep:draw_game",
+    "dep:draw_assets",
+    "dep:draw_core",
+    "dep:draw_render",
+    "dep:draw_scene",
+]
 
 [dependencies]
 draw_core = { workspace = true, optional = true }
@@ -27,3 +35,5 @@ draw_theme = { workspace = true, optional = true }
 draw_ui = { workspace = true, optional = true }
 draw_components = { workspace = true, optional = true }
 draw_anim = { workspace = true, optional = true }
+draw_game = { workspace = true, optional = true }
+draw_assets = { workspace = true, optional = true }

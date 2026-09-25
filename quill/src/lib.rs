@@ -8,25 +8,30 @@
 //! |---|---|
 //! | `ui` | `draw_core`, `draw_render`, `draw_scene`, `draw_theme`, `draw_ui`, `draw_components` |
 //! | `anim` | `draw_anim` (+ the `draw_core` / `draw_scene` it targets) |
+//! | `game` | `draw_game` + `draw_assets` (+ `draw_core` / `draw_render` / `draw_scene`) |
 //!
 //! Disabled crates are not compiled at all. A UI-only app enables `ui` and a
-//! backend; it never enables `anim` (and, from Stage 31, never `game`). This
-//! crate contains no logic — only re-exports.
+//! backend; it never enables `game` or `anim`. `game` does **not** imply `ui`,
+//! and `anim` is independent of both. This crate contains no logic — only
+//! re-exports.
 //!
 //! ```toml
-//! quill = { path = ".../quill", default-features = false, features = ["ui", "anim"] }
+//! # UI app
+//! quill = { path = ".../quill", default-features = false, features = ["ui"] }
+//! # 2D game
+//! quill = { path = ".../quill", default-features = false, features = ["game"] }
 //! ```
 
 /// Crate name, kept for lightweight smoke checks.
 pub const CRATE: &str = "quill";
 
-#[cfg(any(feature = "ui", feature = "anim"))]
+#[cfg(any(feature = "ui", feature = "anim", feature = "game"))]
 pub use draw_core;
 
-#[cfg(any(feature = "ui", feature = "anim"))]
+#[cfg(any(feature = "ui", feature = "anim", feature = "game"))]
 pub use draw_scene;
 
-#[cfg(feature = "ui")]
+#[cfg(any(feature = "ui", feature = "game"))]
 pub use draw_render;
 
 #[cfg(feature = "ui")]
@@ -40,6 +45,12 @@ pub use draw_components;
 
 #[cfg(feature = "anim")]
 pub use draw_anim;
+
+#[cfg(feature = "game")]
+pub use draw_game;
+
+#[cfg(feature = "game")]
+pub use draw_assets;
 
 #[cfg(test)]
 mod tests {

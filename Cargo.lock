@@ -1572,8 +1572,10 @@ name = "quill"
 version = "0.1.0"
 dependencies = [
  "draw_anim",
+ "draw_assets",
  "draw_components",
  "draw_core",
+ "draw_game",
  "draw_render",
  "draw_scene",
  "draw_theme",

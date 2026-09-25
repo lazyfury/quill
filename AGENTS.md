@@ -127,8 +127,10 @@ quill         -> feature-gated re-exports only:
                  `ui`   -> draw_core, draw_render, draw_scene, draw_theme,
                            draw_ui, draw_components
                  `anim` -> draw_anim (+ draw_core, draw_scene)
-                 (application facade; disabled crates are not compiled. `game`
-                  lands in Stage 31. No logic here.)
+                 `game` -> draw_game, draw_assets (+ draw_core, draw_render,
+                           draw_scene)
+                 (application facade; disabled crates are not compiled; `game`
+                  does not imply `ui`, `anim` is independent of both. No logic.)
 demo_app      -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
                  draw_theme, draw_anim   (no backend; the Animation gallery page
                  drives a draw_anim tween and reports `needs_frame`)
@@ -244,26 +246,24 @@ crate/module instead of being embedded where it happens to be used.
 
 ## Stages
 
-All stages through **Stage 27 are complete and accepted.** Stage 28
-(`draw_game`) is in progress. The full ledger (one line per stage, with what each
-landed) is `docs/architecture.md` → "Implementation stages"; the Godot-style
-migration's phase plan and per-substage notes are `docs/godot-migration.md`.
+All stages through **Stage 28 are complete and accepted.** The full ledger (one
+line per stage, with what each landed) is `docs/architecture.md` →
+"Implementation stages"; the Godot-style migration's phase plan and per-substage
+notes are `docs/godot-migration.md`.
 
-- **Current status:** Stage 28 `draw_game` in progress — sub-stages 28.1
-  (`draw_scene` enablers: type-keyed node extension store + `Visual::Sprite`),
-  28.2 (`RenderBackend::register_texture` defaulted contract; wgpu delegates,
-  recording records metadata), 28.3 (new crate `draw_assets`: PNG -> RGBA8),
-  28.4 (new crate `draw_game`: `Sprite2D` + texture upload helper), 28.5
-  (sprite-frame animation + timers + typed signals) and 28.6 (AABB/circle
-  collision + `Area` enter/exit) accepted. Previously: Stage 27 (refresh
-  decoupling), Stage 26 (`draw_anim` + `quill` facade skeleton), Stage 25
-  (Godot-style unified scene), `draw_font`, `Theme` trait.
-- **Next (future stages):** Stage 28.7 (`quill` `game` feature) to finish Stage
-  28, then Stages 29-31 (`GameView`/sub-viewport + fixed timestep,
-  `examples/game_demo`, remaining facade backend features). Phase 8
-  observability remains.
-- **Current stage:** Stage 28 `draw_game` — final sub-stage 28.7 (`quill`
-  `game` feature).
+- **Current status:** Stage 28 (`draw_game` 2D game layer) accepted — sub-stages
+  28.1 `draw_scene` enablers (type-keyed node extension store + `Visual::Sprite`),
+  28.2 `RenderBackend::register_texture`, 28.3 `draw_assets` (PNG -> RGBA8),
+  28.4 `draw_game` (`Sprite2D` + texture upload), 28.5 sprite-frame animation +
+  timers + signals, 28.6 AABB/circle collision + `Area`, 28.7 `quill` `game`
+  feature. Previously: Stage 27 (refresh decoupling), Stage 26 (`draw_anim` +
+  `quill` facade skeleton), Stage 25 (Godot-style unified scene), `draw_font`,
+  `Theme` trait.
+- **Next (future stages):** Stages 29-31 — `GameView`/sub-viewport + fixed
+  timestep, `examples/game_demo`, remaining `quill` facade backend features.
+  Phase 8 observability remains.
+- **Current stage:** none — next up Stage 29 (`GameView`/sub-viewport + fixed
+  timestep).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).
