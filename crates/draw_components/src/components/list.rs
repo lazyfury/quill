@@ -1155,7 +1155,6 @@ mod tests {
         toggled: Rc<RefCell<Vec<usize>>>,
         activated: Rc<RefCell<Vec<usize>>>,
         contexted: Rc<RefCell<Vec<(usize, Vec2)>>>,
-        widths: Rc<RefCell<Vec<f32>>>,
     }
 
     impl LeadFixture {
@@ -1173,10 +1172,9 @@ mod tests {
             let toggled: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
             let activated: Rc<RefCell<Vec<usize>>> = Rc::new(RefCell::new(Vec::new()));
             let contexted: Rc<RefCell<Vec<(usize, Vec2)>>> = Rc::new(RefCell::new(Vec::new()));
-            let widths: Rc<RefCell<Vec<f32>>> =
+            let width_for: Rc<RefCell<Vec<f32>>> =
                 Rc::new(RefCell::new((0..count).map(|i| i as f32 * 8.0).collect()));
 
-            let width_for = widths.clone();
             let toggle_for = toggled.clone();
             let activate_for = activated.clone();
             let context_for = contexted.clone();
@@ -1202,7 +1200,6 @@ mod tests {
                 toggled,
                 activated,
                 contexted,
-                widths,
             };
             fixture.frame();
             fixture
