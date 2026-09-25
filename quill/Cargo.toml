@@ -1,0 +1,29 @@
+[package]
+name = "quill"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# UI: scene + layout/paint/input + design system.
+ui = [
+    "dep:draw_core",
+    "dep:draw_render",
+    "dep:draw_scene",
+    "dep:draw_theme",
+    "dep:draw_ui",
+    "dep:draw_components",
+]
+# Animation, independent of `ui` and `game`.
+anim = ["dep:draw_anim", "dep:draw_core", "dep:draw_scene"]
+
+[dependencies]
+draw_core = { workspace = true, optional = true }
+draw_render = { workspace = true, optional = true }
+draw_scene = { workspace = true, optional = true }
+draw_theme = { workspace = true, optional = true }
+draw_ui = { workspace = true, optional = true }
+draw_components = { workspace = true, optional = true }
+draw_anim = { workspace = true, optional = true }

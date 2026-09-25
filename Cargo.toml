@@ -18,6 +18,8 @@ members = [
     "crates/draw_backend_recording",
     "crates/draw_backend_wgpu",
     "crates/draw_wasm",
+    "crates/draw_anim",
+    "quill",
     "examples/web_demo",
     "examples/demo_app",
     "examples/demoapp_ffi",
@@ -51,6 +53,7 @@ draw_backend_canvas = { path = "crates/draw_backend_canvas" }
 draw_backend_recording = { path = "crates/draw_backend_recording" }
 draw_backend_wgpu = { path = "crates/draw_backend_wgpu" }
 draw_wasm = { path = "crates/draw_wasm" }
+draw_anim = { path = "crates/draw_anim" }
 demo_app = { path = "examples/demo_app" }
 
 [profile.release]

@@ -1,0 +1,10 @@
+[package]
+name = "draw_anim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+draw_core.workspace = true
+draw_scene.workspace = true

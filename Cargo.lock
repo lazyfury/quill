@@ -382,6 +382,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
+name = "draw_anim"
+version = "0.1.0"
+dependencies = [
+ "draw_core",
+ "draw_scene",
+]
+
+[[package]]
 name = "draw_backend_canvas"
 version = "0.1.0"
 dependencies = [
@@ -1469,6 +1477,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "quill"
+version = "0.1.0"
+dependencies = [
+ "draw_anim",
+ "draw_components",
+ "draw_core",
+ "draw_render",
+ "draw_scene",
+ "draw_theme",
+ "draw_ui",
 ]
 
 [[package]]

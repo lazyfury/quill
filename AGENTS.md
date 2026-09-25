@@ -107,6 +107,16 @@ draw_backend_* -> draw_render, draw_core
 draw_wasm     -> draw_render, draw_backend_canvas, draw_core, draw_ui
 draw_bench    (std only, no draw_* deps)
 draw_bench_suite -> draw_bench, draw_core, draw_render, draw_scene, draw_ui, draw_components
+draw_anim     -> draw_core, draw_scene
+                 (backend-neutral, time-driven tweens/easing; drives node
+                  properties or external values. `is_animating` is the host's
+                  "needs another frame" signal. No clock, no backend, no UI.)
+quill         -> feature-gated re-exports only:
+                 `ui`   -> draw_core, draw_render, draw_scene, draw_theme,
+                           draw_ui, draw_components
+                 `anim` -> draw_anim (+ draw_core, draw_scene)
+                 (application facade; disabled crates are not compiled. `game`
+                  lands in Stage 31. No logic here.)
 demo_app      -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
                  draw_theme   (no backend)
 web_demo      -> draw_core, draw_scene, demo_app, draw_wasm
@@ -141,12 +151,10 @@ it graduated to its own repo (a sibling checkout, `../image_editor`) and consume
 these crates through relative path deps, so it is no longer part of this
 checkout.
 
-Planned (Stages 26-31, see `docs/godot-migration.md`):
+Planned (Stages 28-31, see `docs/godot-migration.md`):
 
 ```
-draw_anim -> draw_core (+ draw_scene for node targets)   # Stage 26
 draw_game -> draw_scene (+ optional draw_ui)             # Stage 28
-quill     -> feature-gated re-exports of the above       # Stage 31 facade
 examples/game_demo -> draw_game, draw_scene, draw_anim, one backend  # Stage 30
 ```
 
@@ -224,19 +232,19 @@ crate/module instead of being embedded where it happens to be used.
 
 ## Stages
 
-All stages through **Stage 25 are complete and accepted.** The full ledger (one
+All stages through **Stage 26 are complete and accepted.** The full ledger (one
 line per stage, with what each landed) is `docs/architecture.md` →
 "Implementation stages"; the Godot-style migration's phase plan and per-substage
 notes are `docs/godot-migration.md`.
 
-- **Current status:** Stage 25 (Godot-style unified scene) accepted — Phases 1-5
-  and sub-stages 25.1-25.16 landed. Post-25.16: `draw_font` (system font service
-  + numeric `FontWeight`) and `Theme` as a trait + `DefaultTheme`.
-- **Next (future stages):** Stages 26-31 approved (see
-  `docs/godot-migration.md`): `draw_anim`, refresh decoupling, `draw_game`,
-  GameView/sub-viewport + fixed timestep, `examples/game_demo`, `quill` facade.
-  Phase 8 observability remains.
-- **Current stage:** none — next up Stage 26 `draw_anim` (planned).
+- **Current status:** Stage 26 (`draw_anim` + `quill` facade skeleton) accepted.
+  Also landed: Stage 25 (Godot-style unified scene), `draw_font`, `Theme` as a
+  trait + `DefaultTheme`.
+- **Next (future stages):** Stages 27-31 approved (see
+  `docs/godot-migration.md`): refresh decoupling, `draw_game`,
+  GameView/sub-viewport + fixed timestep, `examples/game_demo`, `quill` facade
+  `game` feature. Phase 8 observability remains.
+- **Current stage:** none — next up Stage 27 refresh decoupling (planned).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

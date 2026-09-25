@@ -136,6 +136,12 @@ logical size plus the world -> screen `canvas_transform`.)
   over the core so a non-Rust host can build a `DrawList` and bring its own
   backend — `examples/cpp_ffi` is a C++ UI + OpenGL 3.3 renderer on top of it,
   see `docs/cpp-ffi.md`).
+- Stage 26 — animation core + facade skeleton [done]: `draw_anim` is a
+  backend-neutral, time-driven tween manager (`Easing` curves, `Animator`,
+  `TweenSpec` / `Repeat`, node-property and external-value targets); its
+  `is_animating` is the host's "needs another frame" signal. No clock, backend
+  or UI dependency. The same task created the `quill` facade skeleton as
+  re-exports only, with opt-in `ui` / `anim` features (`game` lands Stage 31).
 
 ## Debugging & performance inspection
 
