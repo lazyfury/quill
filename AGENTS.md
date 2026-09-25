@@ -101,6 +101,11 @@ draw_svg      -> draw_core, draw_render
                   into flattened polylines and strokes them with the IR `Line` /
                   `FillCircle` commands — no external dependency, so an icon pack
                   like Lucide can be loaded and drawn by any backend)
+draw_assets   -> draw_core
+                 (backend-neutral image decode: PNG bytes -> tightly packed RGBA8
+                  + dimensions via the pure-Rust `png` crate; a host uploads it
+                  through `RenderBackend::register_texture`. No backend/UI/GPU
+                  dependency.)
 draw_profile  -> draw_core, draw_render
 draw_debug_ui -> draw_core, draw_scene, draw_render, draw_ui, draw_components, draw_profile
 draw_backend_* -> draw_render, draw_core
@@ -239,19 +244,19 @@ landed) is `docs/architecture.md` → "Implementation stages"; the Godot-style
 migration's phase plan and per-substage notes are `docs/godot-migration.md`.
 
 - **Current status:** Stage 28 `draw_game` in progress — sub-stages 28.1
-  (`draw_scene` enablers: type-keyed node extension store + `Visual::Sprite`) and
+  (`draw_scene` enablers: type-keyed node extension store + `Visual::Sprite`),
   28.2 (`RenderBackend::register_texture` defaulted contract; wgpu delegates,
-  recording records metadata) accepted. Previously: Stage 27 (refresh
-  decoupling: `draw_ui` paint generation + `UiPaintCache`/`paint_cached`,
-  `SceneTree::needs_update`, `PaintContext::extend`), Stage 26 (`draw_anim` +
-  `quill` facade skeleton), Stage 25 (Godot-style unified scene), `draw_font`,
-  `Theme` trait.
-- **Next (future stages):** Stage 28.3-28.7 (`draw_assets`, `draw_game`
-  sprites/animation/timers/collision, `quill` `game` feature), then Stages 29-31
-  (`GameView`/sub-viewport + fixed timestep, `examples/game_demo`). Phase 8
-  observability remains.
-- **Current stage:** Stage 28 `draw_game` — next sub-stage 28.3 (new crate
-  `draw_assets`: PNG decode).
+  recording records metadata) and 28.3 (new crate `draw_assets`: PNG -> RGBA8)
+  accepted. Previously: Stage 27 (refresh decoupling: `draw_ui` paint generation
+  + `UiPaintCache`/`paint_cached`, `SceneTree::needs_update`,
+  `PaintContext::extend`), Stage 26 (`draw_anim` + `quill` facade skeleton),
+  Stage 25 (Godot-style unified scene), `draw_font`, `Theme` trait.
+- **Next (future stages):** Stage 28.4-28.7 (`draw_game` sprites/animation/
+  timers/collision, `quill` `game` feature), then Stages 29-31 (`GameView`/
+  sub-viewport + fixed timestep, `examples/game_demo`). Phase 8 observability
+  remains.
+- **Current stage:** Stage 28 `draw_game` — next sub-stage 28.4 (new crate
+  `draw_game`: `Sprite2D` + texture upload helper).
 
 On acceptance of a whole user task, the agent writes the durable summary into
 this file (the "Current stage" bullet under "Stages" plus any doc updates).

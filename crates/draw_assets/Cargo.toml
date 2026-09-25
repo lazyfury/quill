@@ -1,0 +1,10 @@
+[package]
+name = "draw_assets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+draw_core.workspace = true
+png = "0.17"
