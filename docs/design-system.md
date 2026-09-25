@@ -452,6 +452,14 @@ backward-compatible addition and record it here.
   rejects zero sizes or short buffers. Raw-RGBA upload for the Canvas backend is
   deferred (it takes an `HtmlImageElement` today).
 
+- **`draw_scene` fixed step: `set_physics_process` / `physics_process`** (Stage
+  29.1): nodes had only one variable-step `process(dt)` lifecycle. A node may now
+  also install a fixed-step `physics_process(dt)` callback
+  (`set_physics_process` / `clear_physics_process` / `has_physics_process`),
+  dispatched in tree order by `SceneTree::physics_process(fixed_dt)`. The host
+  owns the accumulator, runs `physics_process` once per fixed step and `process`
+  once per rendered frame. Additive: `process` and the node shapes are unchanged.
+
 ## Deferred
 
 Rounded rectangles are now first-class `DrawCommand`s (`FillRoundedRect` /

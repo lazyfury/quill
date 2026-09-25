@@ -66,6 +66,50 @@ impl SceneTree {
         }
     }
 
+    /// Installs (or replaces) a fixed-step `physics_process(dt)` callback.
+    ///
+    /// A node may have both a `process` and a `physics_process` callback; a host
+    /// accumulates real time and calls [`SceneTree::physics_process`] once per
+    /// fixed step, then [`SceneTree::process`] once per rendered frame.
+    pub fn set_physics_process(&mut self, id: NodeId, callback: impl FnMut(f32) + 'static) -> bool {
+        match self.get_mut(id) {
+            Some(node) => {
+                node.physics_process = Some(Box::new(callback));
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Removes the `physics_process(dt)` callback.
+    pub fn clear_physics_process(&mut self, id: NodeId) -> bool {
+        match self.get_mut(id) {
+            Some(node) => {
+                let had = node.physics_process.take().is_some();
+                had
+            }
+            None => false,
+        }
+    }
+
+    /// Dispatches `physics_process(dt)` to every node that has a callback, in
+    /// tree order. Call once per fixed step (the host owns the accumulator).
+    pub fn physics_process(&mut self, dt: f32) {
+        for id in self.iter().collect::<Vec<_>>() {
+            let mut callback = self
+                .get_mut(id)
+                .and_then(|node| node.physics_process.take());
+            if let Some(callback) = callback.as_mut() {
+                callback(dt);
+            }
+            if let Some(callback) = callback {
+                if let Some(node) = self.get_mut(id) {
+                    node.physics_process = Some(callback);
+                }
+            }
+        }
+    }
+
     // -- input callbacks ---------------------------------------------------
 
     /// Installs a capture-phase callback (Godot `Node::_input`).
@@ -284,6 +328,35 @@ mod tests {
         }
         tree.process(0.25);
         assert_eq!(&*log.borrow(), &[("A", 0.25), ("B", 0.25), ("B2", 0.25)]);
+    }
+
+    #[test]
+    fn physics_process_runs_separately_from_process() {
+        let mut tree = SceneTree::new();
+        let root = tree.root();
+        let a = tree.add_node(root, "A");
+        let b = tree.add_node2d(a, "B");
+
+        let physics = Rc::new(RefCell::new(Vec::new()));
+        let render = Rc::new(RefCell::new(Vec::new()));
+        for (id, name) in [(a, "A"), (b, "B")] {
+            let physics = physics.clone();
+            let render = render.clone();
+            tree.set_physics_process(id, move |dt| physics.borrow_mut().push((name, dt)));
+            tree.set_process(id, move |dt| render.borrow_mut().push((name, dt)));
+        }
+
+        let step = 1.0 / 60.0;
+        tree.physics_process(step);
+        tree.process(0.016);
+        assert_eq!(&*physics.borrow(), &[("A", step), ("B", step)]);
+        assert_eq!(render.borrow().len(), 2);
+
+        assert!(tree.clear_physics_process(a));
+        assert!(!tree.node(a).has_physics_process());
+        physics.borrow_mut().clear();
+        tree.physics_process(step);
+        assert_eq!(&*physics.borrow(), &[("B", step)], "only B still steps");
     }
 
     #[test]

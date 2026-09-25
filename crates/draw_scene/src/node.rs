@@ -311,6 +311,10 @@ pub struct Node {
     pub(crate) data: Extensions,
     /// Per-frame lifecycle callback, dispatched by [`crate::SceneTree::process`].
     pub(crate) process: Option<Box<dyn FnMut(f32)>>,
+    /// Fixed-step lifecycle callback, dispatched by
+    /// [`crate::SceneTree::physics_process`]. Runs at a host-chosen fixed `dt`,
+    /// independent of the variable render step.
+    pub(crate) physics_process: Option<Box<dyn FnMut(f32)>>,
     /// Capture-phase input callback (Godot `Node::_input`).
     pub(crate) input: Option<Box<dyn FnMut(&InputEvent) -> EventResult>>,
     /// World-pick input callback (Godot `Node2D`/`CanvasItem::_input_event`).
@@ -334,6 +338,7 @@ impl std::fmt::Debug for Node {
             .field("viewport", &self.viewport)
             .field("data_count", &self.data.len())
             .field("has_process", &self.process.is_some())
+            .field("has_physics_process", &self.physics_process.is_some())
             .field("has_input", &self.input.is_some())
             .field("has_input_event", &self.input_event.is_some())
             .field("has_unhandled_input", &self.unhandled_input.is_some())
@@ -364,6 +369,7 @@ impl Node {
             viewport,
             data: Extensions::default(),
             process: None,
+            physics_process: None,
             input: None,
             input_event: None,
             unhandled_input: None,
@@ -482,6 +488,11 @@ impl Node {
     /// Whether the node has a lifecycle callback.
     pub fn has_process(&self) -> bool {
         self.process.is_some()
+    }
+
+    /// Whether the node has a fixed-step lifecycle callback.
+    pub fn has_physics_process(&self) -> bool {
+        self.physics_process.is_some()
     }
 
     /// Whether the node has a capture-phase input callback.

@@ -357,6 +357,29 @@ typed signals, 28.6 AABB/circle collision + `Area` triggers, 28.7 `quill` `game`
 feature. No rigid bodies, no audio; `game` does not imply `ui`. Core additions
 recorded in `docs/design-system.md`.
 
+## Stage 29 plan — GameView / sub-viewport + fixed timestep (approved)
+
+Decisions (approved): `GameView` lives behind a new **optional `ui` feature on
+`draw_game`** (so `game` still does not imply `ui`); the sub-viewport uses a
+**true offscreen render target**; `set_physics_process` is the fixed-step API.
+
+- **29.1 `draw_scene` fixed step.** `Node` gains a `physics_process` callback
+  (`set_physics_process` / `clear_physics_process` / `has_physics_process`);
+  `SceneTree::physics_process(fixed_dt)` dispatches it in tree order alongside
+  `process(dt)`. A host owns the accumulator and the render interpolation.
+- **29.2 render-target contract.** `draw_render` gains `RenderTargetId` and
+  `RenderBackend` support for rendering a `DrawList` into a target and sampling
+  that target as a texture; wgpu implements it, recording stores targets; canvas
+  deferred.
+- **29.3 `GameView`.** A `draw_ui` Control (behind `draw_game`'s optional `ui`
+  feature) that hosts a sub-`SceneTree` + camera, lays out in the UI, advances
+  its own logic, renders into its offscreen target and composites it; folds into
+  `needs_frame`.
+- **29.4 host loop.** `WaitUntil` fixed-step host with interpolation;
+  `wgpu_demo` stays `Wait` / on-demand.
+
+Each sub-stage ends with its report and waits for approval (rule 6).
+
 ## Dependency order
 
 ```
