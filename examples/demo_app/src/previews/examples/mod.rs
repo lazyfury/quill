@@ -13,6 +13,7 @@ use draw_theme::Theme;
 
 use crate::GalleryState;
 
+mod animated;
 mod display;
 mod interactive;
 
@@ -96,6 +97,8 @@ pub(super) const EXAMPLES: &[&[ExampleFn]] = &[
         display::theme::radius_spacing,
         display::theme::cursor,
     ],
+    // Animation
+    &[animated::tween, animated::easing],
 ];
 
 #[cfg(test)]

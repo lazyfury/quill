@@ -118,7 +118,8 @@ quill         -> feature-gated re-exports only:
                  (application facade; disabled crates are not compiled. `game`
                   lands in Stage 31. No logic here.)
 demo_app      -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
-                 draw_theme   (no backend)
+                 draw_theme, draw_anim   (no backend; the Animation gallery page
+                 drives a draw_anim tween and reports `needs_frame`)
 web_demo      -> draw_core, draw_scene, demo_app, draw_wasm
 multi_tree    -> draw_core, draw_render, draw_scene, draw_ui, draw_components,
                  draw_theme, draw_backend_recording  (headless, no window host)

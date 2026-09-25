@@ -138,7 +138,13 @@ priority order and add native tests.
 
 The shared `demo_app` is a component gallery (groups → preview `Router` → live
 cards), each preview page wrapped in a `ScrollView` so a short window still
-reaches every card. Next:
+reaches every card. It now has an **Animation** group: `DemoApp` owns a
+`draw_anim::Animator` that (only while that page is visible) tweens an external
+`Rc<Cell<f32>>` which two cards read in their `foreground` at paint time, and
+`DemoApp::needs_frame()` reports a running tween / transient overlay / pending
+layout / scene / UI change. `examples/wgpu_demo` uses it to request a redraw
+after each frame while it is `true` (Fifo-paced) and otherwise sleeps; the WASM
+host is already continuous. Next:
 
 - Keyboard navigation (arrow keys move between groups and cards).
 - Command palette overlay using the `List`/`Input` components.

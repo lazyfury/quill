@@ -383,6 +383,14 @@ impl ApplicationHandler for App {
         // A redraw is already the render itself; do not request another.
         if matches!(event, WindowEvent::RedrawRequested) {
             self.render();
+            // Animation / transient overlays need more frames. `PresentMode::Fifo`
+            // paces this at the display refresh, so it is not a busy loop, and
+            // the loop sleeps again as soon as `needs_frame` turns false.
+            if self.demo.needs_frame() {
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             return;
         }
 

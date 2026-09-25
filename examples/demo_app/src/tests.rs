@@ -134,6 +134,41 @@ fn the_icons_page_paints_glyph_strokes() {
 }
 
 #[test]
+fn the_animation_page_drives_an_external_value() {
+    let viewport = ViewportSize::new(Size::new(1200.0, 760.0));
+    let mut app = DemoApp::new();
+    app.show_group(catalog::animation_group());
+    app.update(viewport, 0.1);
+    app.layout(viewport);
+
+    assert!(app.needs_frame(), "a running tween needs frames");
+    let before = app.state.animation.get();
+    app.update(viewport, 0.3);
+    let after = app.state.animation.get();
+    assert!(
+        after > before,
+        "the tween advances the shared value: {before} -> {after}"
+    );
+
+    app.paint(&mut PaintContext::new());
+    assert!(app.needs_frame(), "still animating after a paint");
+}
+
+#[test]
+fn leaving_the_animation_page_stops_the_tween() {
+    let viewport = ViewportSize::new(Size::new(1200.0, 760.0));
+    let mut app = DemoApp::new();
+    app.show_group(catalog::animation_group());
+    app.update(viewport, 0.2);
+    assert!(app.anim.is_animating());
+
+    app.show_group(0);
+    app.update(viewport, 0.1);
+    assert!(!app.anim.is_animating());
+    assert_eq!(app.state.animation.get(), 0.0);
+}
+
+#[test]
 fn full_pipeline_records_a_draw_list_headlessly() {
     let app = laid_out();
     let viewport = app.viewport();

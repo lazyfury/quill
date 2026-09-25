@@ -115,4 +115,11 @@ impl Demo {
     pub fn cursor(&self) -> draw_core::Cursor {
         self.app.cursor()
     }
+
+    /// Whether the app still has work for another frame (animation, transient
+    /// overlays, pending layout/paint). The host schedules a redraw while this
+    /// is `true` and sleeps otherwise.
+    pub fn needs_frame(&self) -> bool {
+        self.app.needs_frame()
+    }
 }

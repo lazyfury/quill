@@ -57,7 +57,17 @@ pub const GROUPS: &[Group] = &[
         name: "Theme & Platform",
         blurb: "Tokens, density, input and cursor feedback.",
     },
+    Group {
+        name: "Animation",
+        blurb: "Time-driven tweens from draw_anim.",
+    },
 ];
+
+/// Index of the animation group, whose live cards are driven by `draw_anim`.
+/// `DemoApp` runs the tween only while this page is visible.
+pub fn animation_group() -> usize {
+    GROUPS.len() - 1
+}
 
 /// The preview cards of each group (`ITEMS[g]` belongs to `GROUPS[g]`).
 pub const ITEMS: &[&[Item]] = &[
@@ -271,6 +281,19 @@ pub const ITEMS: &[&[Item]] = &[
             name: "Input & cursor",
             blurb: "Hit-testing and hover cursor feedback.",
             snippet: "draw_ui::hovered_cursor(&tree)",
+        },
+    ],
+    // Animation
+    &[
+        Item {
+            name: "Tween",
+            blurb: "An Animator drives an external value each frame.",
+            snippet: "anim.tween(0.0, 1.0, TweenSpec::new(1.4).repeat(Repeat::PingPong))",
+        },
+        Item {
+            name: "Easing",
+            blurb: "Curves evaluated against the same progress.",
+            snippet: "Easing::SineInOut.ease(t)",
         },
     ],
 ];

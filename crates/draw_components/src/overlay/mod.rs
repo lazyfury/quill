@@ -522,6 +522,15 @@ impl Overlays {
         }
     }
 
+    /// Whether any overlay is still counting down to auto-dismiss.
+    ///
+    /// A host that renders on demand uses this (with `draw_anim` and the UI
+    /// repaint signal) to keep scheduling frames while a transient overlay is
+    /// up, so a toast can dismiss itself without waiting for input.
+    pub fn is_animating(&self) -> bool {
+        self.entries.iter().any(|entry| entry.duration.is_some())
+    }
+
     /// Resolves positions against the host UI and lays out the overlay tree.
     ///
     /// Call after the host's own `Ui::layout`.
@@ -1004,6 +1013,19 @@ mod tests {
         overlays.layout(&host, viewport());
         let rect = overlays.rect(id).expect("modal laid out");
         assert!(rect.size.width >= MODAL_WIDTH - 1e-3);
+    }
+
+    #[test]
+    fn a_toast_is_animating_until_it_auto_dismisses() {
+        let theme = default_theme(Mode::Dark);
+        let mut overlays = Overlays::new(theme);
+        assert!(!overlays.is_animating(), "nothing is open");
+
+        overlays.message("Saved");
+        assert!(overlays.is_animating(), "a toast is counting down");
+
+        overlays.update(MESSAGE_DURATION + 0.1);
+        assert!(!overlays.is_animating(), "the toast expired");
     }
 
     #[test]

@@ -31,6 +31,7 @@ mod sidebar;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use draw_anim::{Animator, Easing, Repeat, TweenSpec};
 use draw_components::{
     Component, Flex, ListState, NodeRef, Overlays, Panel, Router, ScrollViewState,
 };
@@ -59,6 +60,10 @@ pub(crate) struct GalleryState {
     pub(crate) menu_request: Rc<Cell<bool>>,
     pub(crate) confirm_request: Rc<Cell<bool>>,
     pub(crate) message_request: Rc<Cell<bool>>,
+    /// Playback value (`0.0..=1.0`) for the Animation previews. The app's
+    /// [`Animator`] writes it; the cards read it in their foreground at paint
+    /// time, so the tween never touches the tree.
+    pub(crate) animation: Rc<Cell<f32>>,
 }
 
 impl GalleryState {
@@ -71,6 +76,7 @@ impl GalleryState {
             menu_request: Rc::new(Cell::new(false)),
             confirm_request: Rc::new(Cell::new(false)),
             message_request: Rc::new(Cell::new(false)),
+            animation: Rc::new(Cell::new(0.0)),
         }
     }
 }
@@ -150,6 +156,11 @@ pub struct DemoApp {
     lists: Vec<ListState>,
     routers: Vec<Router>,
     scrolls: Vec<ScrollViewState>,
+    /// Time-driven tweens for the Animation previews (`draw_anim`).
+    anim: Animator,
+    /// Last UI paint generation, so [`DemoApp::needs_frame`] can tell whether
+    /// the UI changed since it was painted.
+    painted_generation: Cell<u64>,
 }
 
 impl Default for DemoApp {
@@ -187,6 +198,8 @@ impl DemoApp {
             lists: parts.lists,
             routers: parts.routers,
             scrolls: parts.scrolls,
+            anim: Animator::new(),
+            painted_generation: Cell::new(u64::MAX),
         }
     }
 
@@ -210,6 +223,8 @@ impl DemoApp {
         let inset = self.titlebar_inset;
         self.titlebar_inset = 0.0;
         self.set_titlebar_inset(inset);
+        // The tree was rebuilt: force the next frame to repaint the new UI.
+        self.painted_generation.set(u64::MAX);
     }
 
     // -- accessors ---------------------------------------------------------
@@ -317,12 +332,14 @@ impl DemoApp {
     pub fn update(&mut self, viewport: ViewportSize, dt: f32) {
         self.viewport = viewport;
         self.overlays.update(dt);
+        self.anim.update(dt, &mut self.tree);
 
         if let Some(mode) = self.state.theme_request.replace(None) {
             self.set_mode(mode);
             return;
         }
 
+        self.sync_animation();
         self.router.sync(&mut self.tree);
         for router in &mut self.routers {
             router.sync(&mut self.tree);
@@ -345,6 +362,44 @@ impl DemoApp {
         if self.state.message_request.replace(false) {
             self.overlays.message_tone("Saved", Tone::Success);
         }
+    }
+
+    /// Runs the Animation page's tween only while that page is visible, so an
+    /// idle page lets the host sleep.
+    fn sync_animation(&mut self) {
+        if self.state.group.get() != catalog::animation_group() {
+            if self.anim.is_animating() {
+                self.anim.clear();
+            }
+            self.state.animation.set(0.0);
+            return;
+        }
+        if !self.anim.is_animating() {
+            let value = self.state.animation.clone();
+            self.anim.tween(
+                0.0,
+                1.0,
+                TweenSpec::new(1.4)
+                    .easing(Easing::SineInOut)
+                    .repeat(Repeat::PingPong),
+                move |t| value.set(t),
+            );
+        }
+    }
+
+    /// Whether the app still has work for another frame.
+    ///
+    /// A host that renders on demand (not a continuous loop) calls this after
+    /// painting and schedules another frame while it is `true`: a running tween,
+    /// a transient overlay counting down, pending layout, stale scene
+    /// transforms, or an unpainted UI change. When it is `false` the host can
+    /// sleep.
+    pub fn needs_frame(&self) -> bool {
+        self.anim.is_animating()
+            || self.overlays.is_animating()
+            || draw_ui::needs_layout(&self.tree)
+            || self.tree.needs_update()
+            || self.painted_generation.get() != draw_ui::paint_generation(&self.tree)
     }
 
     /// Resolves UI layout for `viewport`, syncs the virtualized lists, then
@@ -378,6 +433,8 @@ impl DemoApp {
         );
         draw_ui::paint(&self.tree, ctx);
         self.overlays.paint(ctx);
+        self.painted_generation
+            .set(draw_ui::paint_generation(&self.tree));
     }
 
     /// Routes an event to the overlays first, then UI interactions.
