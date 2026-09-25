@@ -32,6 +32,13 @@ use crate::node_ref::{NodeRef, Ref};
 /// A child builder stored on a [`Spec`].
 pub type ChildFn = Box<dyn FnOnce(&mut SceneTree, NodeId)>;
 
+/// A foreground painter: the paint context, the node rect and its interaction
+/// state.
+pub type ForegroundFn = Box<dyn Fn(&mut PaintContext, Rect, InteractState)>;
+
+/// A drag callback: the tree, the drag phase and the pointer delta.
+pub type DragFn = Box<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>;
+
 /// The common node state every component carries.
 ///
 /// Layout fields mirror [`ControlData`]; the rest are the decorators, click
@@ -39,11 +46,11 @@ pub type ChildFn = Box<dyn FnOnce(&mut SceneTree, NodeId)>;
 pub struct Spec {
     pub data: ControlData,
     pub background: Option<Box<dyn Fn(InteractState) -> SurfaceStyle>>,
-    pub foreground: Option<Box<dyn Fn(&mut PaintContext, Rect, InteractState)>>,
+    pub foreground: Option<ForegroundFn>,
     pub on_click: Option<Box<dyn FnMut()>>,
     /// Secondary (right) click callback: the pointer position (context menus).
     pub on_secondary: Option<Box<dyn FnMut(Vec2)>>,
-    pub on_drag: Option<Box<dyn FnMut(&mut SceneTree, DragPhase, Vec2)>>,
+    pub on_drag: Option<DragFn>,
     /// Absolute-position pointer callback: press + move while held, with the
     /// control's rect and the pointer position (sliders / pickers).
     pub on_pointer: Option<Box<dyn FnMut(Rect, Vec2)>>,
@@ -790,18 +797,10 @@ impl Component for HBox {
 }
 
 /// A configurable flex container.
+#[derive(Default)]
 pub struct Flex {
     spec: Spec,
     style: FlexStyle,
-}
-
-impl Default for Flex {
-    fn default() -> Self {
-        Self {
-            spec: Spec::default(),
-            style: FlexStyle::default(),
-        }
-    }
 }
 
 impl Flex {

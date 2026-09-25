@@ -425,7 +425,7 @@ mod tests {
         let theme: &'static dyn Theme = Box::leak(Box::new(BiggerType(DefaultTheme::dark())));
         let mut tree = SceneTree::new();
         let id = column(&mut tree, Button::new("A", theme));
-        let label = tree.children(id).unwrap().into_iter().find_map(|child| {
+        let label = tree.children(id).unwrap().iter().find_map(|child| {
             match tree.data::<Control>(*child).map(|data| &data.widget) {
                 Some(Widget::Label { font_size, .. }) => Some(*font_size),
                 _ => None,
@@ -505,7 +505,7 @@ mod tests {
 
         assert!(set_button_text(&mut tree, id, "Stop"));
 
-        let label = tree.children(id).unwrap().into_iter().find_map(|child| {
+        let label = tree.children(id).unwrap().iter().find_map(|child| {
             match tree.data::<Control>(*child).map(|data| &data.widget) {
                 Some(Widget::Label { text, .. }) => Some(text.clone()),
                 _ => None,

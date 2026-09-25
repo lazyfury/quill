@@ -67,6 +67,12 @@ struct ScrollInner {
     max_height: Option<f32>,
 }
 
+impl Default for ScrollViewState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScrollViewState {
     pub fn new() -> Self {
         Self {

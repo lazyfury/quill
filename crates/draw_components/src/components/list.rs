@@ -63,6 +63,10 @@ impl ListColumn {
     }
 }
 
+/// Draws a [`ListLead::Icon`] into its cell for a data row (the index is the
+/// absolute row index).
+pub type LeadDraw = Rc<dyn Fn(&mut PaintContext, Rect, usize)>;
+
 /// A per-row leading cell, mounted before the text columns.
 ///
 /// Leads are laid out left to right in the order they are added, so a tree puts
@@ -81,10 +85,7 @@ pub enum ListLead {
     /// A spacer whose width depends on the row (tree indentation).
     Spacer { width: Rc<dyn Fn(usize) -> f32> },
     /// A caller-drawn icon of `width` (e.g. an SVG document).
-    Icon {
-        width: f32,
-        draw: Rc<dyn Fn(&mut PaintContext, Rect, usize)>,
-    },
+    Icon { width: f32, draw: LeadDraw },
 }
 
 /// The mounted node(s) backing one [`ListLead`] in a row slot.
@@ -101,16 +102,11 @@ struct LeadIcon {
     width: f32,
     first: Rc<std::cell::Cell<usize>>,
     slot: usize,
-    draw: Rc<dyn Fn(&mut PaintContext, Rect, usize)>,
+    draw: LeadDraw,
 }
 
 impl LeadIcon {
-    fn new(
-        width: f32,
-        first: Rc<std::cell::Cell<usize>>,
-        slot: usize,
-        draw: Rc<dyn Fn(&mut PaintContext, Rect, usize)>,
-    ) -> Self {
+    fn new(width: f32, first: Rc<std::cell::Cell<usize>>, slot: usize, draw: LeadDraw) -> Self {
         Self {
             spec: Spec::leaf(),
             width,

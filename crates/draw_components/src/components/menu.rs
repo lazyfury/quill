@@ -160,8 +160,10 @@ impl Component for MenuItem {
 }
 
 /// A row in a [`Menu`]: an item or a hairline separator.
+///
+/// `MenuItem` is boxed so the enum (and each row vector entry) stays small.
 enum Row {
-    Item(MenuItem),
+    Item(Box<MenuItem>),
     Separator,
 }
 
@@ -188,14 +190,14 @@ impl Menu {
 
     /// Appends one clickable row.
     pub fn item(mut self, item: MenuItem) -> Self {
-        self.rows.push(Row::Item(item));
+        self.rows.push(Row::Item(Box::new(item)));
         self
     }
 
     /// Appends several rows.
     pub fn items<I: IntoIterator<Item = MenuItem>>(mut self, items: I) -> Self {
         for item in items {
-            self.rows.push(Row::Item(item));
+            self.rows.push(Row::Item(Box::new(item)));
         }
         self
     }
@@ -240,7 +242,7 @@ impl Component for Menu {
 
         for row in std::mem::take(&mut self.rows) {
             match row {
-                Row::Item(item) => self.spec.child(item),
+                Row::Item(item) => self.spec.child(*item),
                 Row::Separator => self.spec.child(crate::Divider::horizontal(theme)),
             }
         }

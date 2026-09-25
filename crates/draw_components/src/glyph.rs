@@ -61,21 +61,28 @@ pub enum Glyph {
     Toggle,
 }
 
+/// A stroked segment `((x1, y1), (x2, y2))`.
+type Line = ((f32, f32), (f32, f32));
+/// A filled dot or stroked circle `(x, y, radius)`.
+type Dot = (f32, f32, f32);
+/// A stroked rounded rectangle `(x, y, width, height, radius)`.
+type Rect5 = (f32, f32, f32, f32, f32);
+
 /// The geometry of one glyph in the 24×24 viewbox.
 struct Shape {
-    /// Stroked segments: `((x1, y1), (x2, y2))`.
-    lines: &'static [((f32, f32), (f32, f32))],
-    /// Filled dots: `(x, y, radius)`.
-    dots: &'static [(f32, f32, f32)],
-    /// Stroked circles: `(x, y, radius)`.
-    circles: &'static [(f32, f32, f32)],
-    /// Stroked rounded rectangles: `(x, y, width, height, radius)`.
-    rects: &'static [(f32, f32, f32, f32, f32)],
+    /// Stroked segments.
+    lines: &'static [Line],
+    /// Filled dots.
+    dots: &'static [Dot],
+    /// Stroked circles.
+    circles: &'static [Dot],
+    /// Stroked rounded rectangles.
+    rects: &'static [Rect5],
 }
 
-const NO_LINES: &[((f32, f32), (f32, f32))] = &[];
-const NO_CIRCLES: &[(f32, f32, f32)] = &[];
-const NO_RECTS: &[(f32, f32, f32, f32, f32)] = &[];
+const NO_LINES: &[Line] = &[];
+const NO_CIRCLES: &[Dot] = &[];
+const NO_RECTS: &[Rect5] = &[];
 
 impl Glyph {
     fn shape(self) -> Shape {
